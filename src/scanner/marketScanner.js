@@ -74,12 +74,16 @@ async function runScanner() {
 
     for (const signal of signals) {
       console.log({
-        symbol: signal.symbol,
-        volumeIncrease: signal.volumeIncreasePercent + '%',
-        priceChange: signal.priceChangePercent + '%',
-        direction: signal.direction,
-        earlyWarning: signal.earlyWarning
-      });
+  symbol: signal.symbol,
+  volumeIncrease: signal.volumeIncreasePercent + '%',
+  volumeRatio: signal.volumeRatio,
+  priceChange: signal.priceChangePercent + '%',
+  direction: signal.direction,
+  signalStrength: signal.signalStrength,
+  earlyWarning: signal.earlyWarning,
+  absorptionCandidate: signal.absorptionCandidate,
+  closePosition: signal.closePosition
+});
     }
 
     console.log(`Total alerts: ${signals.length}`);
