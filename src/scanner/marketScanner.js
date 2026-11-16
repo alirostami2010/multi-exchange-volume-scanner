@@ -9,7 +9,9 @@ const TIMEFRAMES = {
   weekly: '7d',
   daily: '1d',
   fourHour: '4h',
-  oneHour: '1h'
+  oneHour: '1h',
+  fifteenMinute: '15m',
+  fiveMinute: '5m'
 };
 
 const sleep = ms =>
