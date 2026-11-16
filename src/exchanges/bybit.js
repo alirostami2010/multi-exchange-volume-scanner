@@ -72,3 +72,23 @@ export async function getKlines(
   // Bybit کندل‌ها را از جدید به قدیم می‌فرستد
   return result.list.reverse();
 }
+
+export async function getMarketTickers() {
+  const result = await request(
+    '/v5/market/tickers?category=linear'
+  );
+
+  return result.list
+    .filter(item =>
+      item.symbol.endsWith('USDT')
+    )
+    .map(item => ({
+      symbol: item.symbol,
+      price: Number(item.lastPrice),
+      turnover24h: Number(item.turnover24h),
+      change24h: Number(item.price24hPcnt) * 100
+    }))
+    .sort((a, b) =>
+      b.turnover24h - a.turnover24h
+    );
+}
