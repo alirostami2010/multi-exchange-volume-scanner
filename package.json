@@ -1,0 +1,19 @@
+
+{
+  "name": "multi-exchange-volume-scanner",
+  "version": "1.0.0",
+  "description": "Free multi-exchange futures volume scanner",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "ws": "^8.18.0",
+    "dotenv": "^16.4.7",
+    "node-telegram-bot-api": "^0.66.0"
+  }
+}
