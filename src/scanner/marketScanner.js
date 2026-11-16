@@ -1,196 +1,449 @@
 
-import { getMarketTickers, getKlines } from '../exchanges/gateio.js';
+/**
+ * Gate.io USDT Perpetual Market Scanner
+ * Node.js 20+
+ *
+ * دریافت ۳۶۰ کندل یک‌ساعته برای هر بازار
+ * تحلیل ۲۴ کندل آخر به‌صورت کندل‌به‌کندل
+ * مقایسه با سابقه ۱۵ روزه
+ */
 
-const CANDLE_SECONDS = 4 * 60 * 60;
+const BASE_URL = 'https://api.gateio.ws/api/v4';
+
+const SETTLE = 'usdt';
+const INTERVAL = '1h';
+
+const HISTORY_CANDLES = 360;
+const FILTER_CANDLES = 24;
+
 const CONCURRENCY = 6;
-const TOP_RESULTS = 20;
+const REQUEST_TIMEOUT_MS = 12000;
+const MAX_RETRIES = 3;
 
-const sleep = ms =>
-  new Promise(resolve => setTimeout(resolve, ms));
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-const number = value => {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
-};
+function median(values) {
+  const sorted = values
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b);
 
-const clamp = (value, min, max) =>
-  Math.min(max, Math.max(min, value));
+  if (!sorted.length) return 0;
 
-async function scanSymbol(ticker) {
-  try {
-    const candles = await getKlines(ticker.symbol, '4h', 6);
+  const middle = Math.floor(sorted.length / 2);
 
-    if (!Array.isArray(candles)) return null;
-
-    const now = Math.floor(Date.now() / 1000);
-
-    // فقط کندل‌های کاملاً بسته‌شده
-    const closed = candles
-      .filter(c => Number(c[0]) + CANDLE_SECONDS <= now)
-      .sort((a, b) => Number(a[0]) - Number(b[0]));
-
-    if (closed.length < 2) return null;
-
-    const current = closed[closed.length - 1];
-    const previous = closed[closed.length - 2];
-
-    // از مقایسه کندل‌هایی که بینشان فاصله افتاده خودداری کن
-    if (
-      Number(current[0]) - Number(previous[0]) !== CANDLE_SECONDS
-    ) return null;
-
-    const previousClose = number(previous[4]);
-    const currentClose = number(current[4]);
-
-    // حجم بر اساس ارزش معاملات به USDT
-    const previousVolume = number(previous[6]);
-    const currentVolume = number(current[6]);
-
-    if (
-      !previousClose ||
-      !currentClose ||
-      !previousVolume ||
-      previousVolume <= 0 ||
-      currentVolume === null ||
-      currentVolume <= 0
-    ) return null;
-
-    const priceChange =
-      ((currentClose - previousClose) / previousClose) * 100;
-
-    const volumeRatio = currentVolume / previousVolume;
-
-    const volumeChange =
-      (volumeRatio - 1) * 100;
-
-    // شرط اصلی: افزایش هم‌زمان قیمت و حجم
-    if (priceChange <= 0 || volumeChange <= 0) {
-      return null;
-    }
-
-    const turnover24h = number(ticker.turnover24h) || 0;
-
-    // امتیاز اولویت؛ ترکیبی از رشد قیمت، رشد حجم و نقدشوندگی
-    const liquidityFactor = clamp(
-      Math.log10(turnover24h + 1) / 5,
-      0.3,
-      1.5
-    );
-
-    const priorityScore =
-      Math.sqrt(priceChange * volumeChange) *
-      liquidityFactor;
-
-    return {
-      symbol: ticker.symbol,
-      price: currentClose,
-      priceChange,
-      volumeChange,
-      volumeRatio,
-      volume4h: currentVolume,
-      turnover24h,
-      priorityScore
-    };
-
-  } catch (error) {
-    return {
-      failed: true,
-      symbol: ticker.symbol
-    };
-  }
+  return sorted.length % 2
+    ? sorted[middle]
+    : (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
-async function runScanner() {
-  console.log('\n==========================================');
-  console.log('       GATE.IO 4H MARKET RADAR');
-  console.log('==========================================');
+function safePercentChange(current, previous) {
+  if (
+    !Number.isFinite(current) ||
+    !Number.isFinite(previous) ||
+    previous <= 0
+  ) {
+    return null;
+  }
 
-  const tickers = await getMarketTickers();
+  return ((current / previous) - 1) * 100;
+}
 
-  console.log(`Total markets to scan: ${tickers.length}`);
-  console.log('Scanning ALL available USDT markets...\n');
+async function gateGet(path, params = {}) {
+  const url = new URL(`${BASE_URL}${path}`);
 
-  const results = [];
-  let completed = 0;
-  let failed = 0;
+  for (const [key, value] of Object.entries(params)) {
+    url.searchParams.set(key, String(value));
+  }
 
-  let nextIndex = 0;
+  let lastError;
 
-  async function worker() {
-    while (nextIndex < tickers.length) {
-      const index = nextIndex++;
-      const ticker = tickers[index];
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    const controller = new AbortController();
 
-      const result = await scanSymbol(ticker);
+    const timeout = setTimeout(
+      () => controller.abort(),
+      REQUEST_TIMEOUT_MS
+    );
 
-      if (result?.failed) {
-        failed++;
-      } else if (result) {
-        results.push(result);
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json'
+        },
+        signal: controller.signal
+      });
+
+      if (response.status === 429 || response.status >= 500) {
+        throw new Error(`Gate API HTTP ${response.status}`);
       }
 
-      completed++;
+      if (!response.ok) {
+        const body = await response.text();
 
-      if (completed % 50 === 0 || completed === tickers.length) {
-        console.log(
-          `Progress: ${completed}/${tickers.length} | Found: ${results.length}`
+        throw new Error(
+          `Gate API HTTP ${response.status}: ${body.slice(0, 250)}`
         );
       }
 
-      await sleep(100);
+      return await response.json();
+
+    } catch (error) {
+      lastError = error;
+
+      if (attempt < MAX_RETRIES) {
+        await sleep(500 * (2 ** (attempt - 1)));
+      }
+
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  throw lastError;
+}
+
+function normalizeCandle(raw) {
+  const candle = {
+    time: Number(raw.t),
+    open: Number(raw.o),
+    high: Number(raw.h),
+    low: Number(raw.l),
+    close: Number(raw.c),
+    contractVolume: Number(raw.v ?? 0),
+    quoteVolume: Number(raw.sum ?? 0)
+  };
+
+  if (
+    !Number.isFinite(candle.time) ||
+    !Number.isFinite(candle.open) ||
+    !Number.isFinite(candle.close) ||
+    !Number.isFinite(candle.quoteVolume)
+  ) {
+    return null;
+  }
+
+  return candle;
+}
+
+function analyzeMarket(contract, rawCandles) {
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const oneHour = 3600;
+
+  const candles = rawCandles
+    .map(normalizeCandle)
+    .filter(Boolean)
+    .filter(candle => candle.time + oneHour <= nowSeconds)
+    .sort((a, b) => a.time - b.time)
+    .filter((candle, index, array) =>
+      index === 0 || candle.time !== array[index - 1].time
+    );
+
+  if (candles.length < HISTORY_CANDLES) {
+    return {
+      contract,
+      status: 'INSUFFICIENT_HISTORY',
+      candlesReceived: candles.length,
+      requiredCandles: HISTORY_CANDLES
+    };
+  }
+
+  const recent24 = candles.slice(-FILTER_CANDLES);
+
+  const historical = candles.slice(
+    0,
+    -FILTER_CANDLES
+  );
+
+  const historicalReturns = historical
+    .slice(1)
+    .map((candle, index) =>
+      Math.abs(
+        safePercentChange(
+          candle.close,
+          historical[index].close
+        ) ?? 0
+      )
+    );
+
+  const historicalMedianAbsReturnPct =
+    median(historicalReturns);
+
+  const historicalMedianQuoteVolume =
+    median(historical.map(candle => candle.quoteVolume));
+
+  const candleMetrics = recent24.map((candle, index) => {
+    const previous = index === 0
+      ? candles[candles.length - FILTER_CANDLES - 1]
+      : recent24[index - 1];
+
+    const priceChangePct = safePercentChange(
+      candle.close,
+      previous.close
+    );
+
+    const volumeChangePct = safePercentChange(
+      candle.quoteVolume,
+      previous.quoteVolume
+    );
+
+    return {
+      time: candle.time,
+
+      open: candle.open,
+      high: candle.high,
+      low: candle.low,
+      close: candle.close,
+
+      quoteVolumeUSDT: candle.quoteVolume,
+
+      priceChangePct:
+        priceChangePct === null
+          ? null
+          : Number(priceChangePct.toFixed(4)),
+
+      volumeChangePct:
+        volumeChangePct === null
+          ? null
+          : Number(volumeChangePct.toFixed(2)),
+
+      volumeVsHistoricalMedian:
+        historicalMedianQuoteVolume > 0
+          ? Number(
+              (
+                candle.quoteVolume /
+                historicalMedianQuoteVolume
+              ).toFixed(3)
+            )
+          : null,
+
+      priceMoveVsHistoricalMedian:
+        historicalMedianAbsReturnPct > 0 &&
+        priceChangePct !== null
+          ? Number(
+              (
+                Math.abs(priceChangePct) /
+                historicalMedianAbsReturnPct
+              ).toFixed(3)
+            )
+          : null
+    };
+  });
+
+  const first = recent24[0];
+  const last = recent24[recent24.length - 1];
+
+  const totalQuoteVolume24h = recent24.reduce(
+    (sum, candle) => sum + candle.quoteVolume,
+    0
+  );
+
+  const averageHourlyQuoteVolume24h =
+    totalQuoteVolume24h / FILTER_CANDLES;
+
+  return {
+    contract,
+    status: 'OK',
+
+    candlesUsed: FILTER_CANDLES,
+    historyDaysAvailable: 15,
+
+    priceChange24hPct: Number(
+      (
+        safePercentChange(last.close, first.open) ?? 0
+      ).toFixed(4)
+    ),
+
+    quoteVolume24hUSDT: Number(
+      totalQuoteVolume24h.toFixed(2)
+    ),
+
+    averageHourlyVolume24hUSDT: Number(
+      averageHourlyQuoteVolume24h.toFixed(2)
+    ),
+
+    averageVolumeVsHistoricalMedian:
+      historicalMedianQuoteVolume > 0
+        ? Number(
+            (
+              averageHourlyQuoteVolume24h /
+              historicalMedianQuoteVolume
+            ).toFixed(3)
+          )
+        : null,
+
+    historicalMedianHourlyVolumeUSDT: Number(
+      historicalMedianQuoteVolume.toFixed(2)
+    ),
+
+    historicalMedianHourlyAbsPriceChangePct: Number(
+      historicalMedianAbsReturnPct.toFixed(5)
+    ),
+
+    latestClosedCandle:
+      candleMetrics[candleMetrics.length - 1],
+
+    candleMetrics
+  };
+}
+
+async function mapWithConcurrency(
+  items,
+  concurrency,
+  worker
+) {
+  const results = new Array(items.length);
+
+  let nextIndex = 0;
+
+  async function runWorker() {
+    while (true) {
+      const index = nextIndex++;
+
+      if (index >= items.length) return;
+
+      try {
+        results[index] = await worker(
+          items[index],
+          index
+        );
+
+      } catch (error) {
+        results[index] = {
+          contract: items[index].name,
+          status: 'ERROR',
+          error: error.message
+        };
+      }
     }
   }
 
   await Promise.all(
     Array.from(
-      { length: Math.min(CONCURRENCY, tickers.length) },
-      () => worker()
+      {
+        length: Math.min(concurrency, items.length)
+      },
+      () => runWorker()
     )
   );
 
-  results.sort((a, b) => {
-    if (b.priorityScore !== a.priorityScore) {
-      return b.priorityScore - a.priorityScore;
-    }
-
-    return b.turnover24h - a.turnover24h;
-  });
-
-  const top20 = results.slice(0, TOP_RESULTS);
-
-  console.log('\n==========================================');
-  console.log('          TOP 20 PRIORITY MARKETS');
-  console.log('==========================================');
-
-  if (top20.length === 0) {
-    console.log('No markets matched the conditions.');
-  }
-
-  console.table(
-    top20.map((item, index) => ({
-      RANK: index + 1,
-      SYMBOL: item.symbol,
-      PRICE: item.price,
-      'PRICE +4H %': `+${item.priceChange.toFixed(2)}%`,
-      'VOLUME +4H %': `+${item.volumeChange.toFixed(2)}%`,
-      'VOLUME RATIO': `${item.volumeRatio.toFixed(2)}x`,
-      '4H VOLUME USDT': Math.round(item.volume4h),
-      '24H TURNOVER': Math.round(item.turnover24h),
-      PRIORITY: item.priorityScore.toFixed(2)
-    }))
-  );
-
-  console.log('\n==========================================');
-  console.log('SCAN SUMMARY');
-  console.log('==========================================');
-  console.log(`Markets scanned: ${completed}`);
-  console.log(`Scan errors: ${failed}`);
-  console.log(`Markets with rising price and volume: ${results.length}`);
-  console.log(`Displayed: ${top20.length}`);
-  console.log('==========================================\n');
+  return results;
 }
 
-runScanner().catch(error => {
-  console.error('FATAL SCANNER ERROR:', error);
-  process.exitCode = 1;
-});
+export async function scanGateMarkets() {
+  console.log(
+    'Loading Gate.io USDT perpetual contracts...'
+  );
+
+  const contracts = await gateGet(
+    `/futures/${SETTLE}/contracts`
+  );
+
+  const activeContracts = contracts.filter(item =>
+    item.status === 'trading' &&
+    item.in_delisting !== true &&
+    item.type === 'direct'
+  );
+
+  console.log(
+    `Found ${activeContracts.length} active USDT perpetual contracts.`
+  );
+
+  console.log(
+    `Fetching ${HISTORY_CANDLES} hourly candles per contract...`
+  );
+
+  let completed = 0;
+
+  const results = await mapWithConcurrency(
+    activeContracts,
+    CONCURRENCY,
+    async item => {
+      const rawCandles = await gateGet(
+        `/futures/${SETTLE}/candlesticks`,
+        {
+          contract: item.name,
+          interval: INTERVAL,
+          limit: HISTORY_CANDLES
+        }
+      );
+
+      completed++;
+
+      if (
+        completed % 50 === 0 ||
+        completed === activeContracts.length
+      ) {
+        console.log(
+          `Processed ${completed}/${activeContracts.length}`
+        );
+      }
+
+      return analyzeMarket(
+        item.name,
+        rawCandles
+      );
+    }
+  );
+
+  const successful = results.filter(
+    item => item.status === 'OK'
+  );
+
+  const failed = results.filter(
+    item => item.status !== 'OK'
+  );
+
+  return {
+    exchange: 'Gate.io',
+    marketType: 'USDT Perpetual Futures',
+    timeframe: '1h',
+
+    scannedAt: new Date().toISOString(),
+
+    scanIntervalMinutes: 15,
+
+    filterWindowCandles: FILTER_CANDLES,
+    historyCandles: HISTORY_CANDLES,
+
+    totalMarkets: activeContracts.length,
+    successfulMarkets: successful.length,
+    failedMarkets: failed.length,
+
+    markets: successful,
+    errors: failed
+  };
+}
+
+// Direct execution
+const isDirectRun =
+  process.argv[1] &&
+  import.meta.url ===
+  new URL(`file://${process.argv[1]}`).href;
+
+if (isDirectRun) {
+  try {
+    const output = await scanGateMarkets();
+
+    console.log('\n===== GATE SCAN SUMMARY =====');
+
+    console.log({
+      totalMarkets: output.totalMarkets,
+      successfulMarkets: output.successfulMarkets,
+      failedMarkets: output.failedMarkets,
+      scannedAt: output.scannedAt
+    });
+
+    console.log(
+      '\nRaw metrics are available for the next ranking stage.'
+    );
+
+  } catch (error) {
+    console.error(
+      'Gate scanner failed:',
+      error.message
+    );
+
+    process.exitCode = 1;
+  }
+}
