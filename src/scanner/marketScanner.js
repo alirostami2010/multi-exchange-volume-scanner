@@ -44,7 +44,7 @@ async function scanSymbol(symbol) {
     weekly.gradualVolumeGrowth &&
     daily.gradualVolumeGrowth
   ) &&
-  Math.abs(daily.priceChangePercent) < 5;
+  Math.abs(daily.priceChangePercent) < 3;
 
     if (!watch) return null;
 
