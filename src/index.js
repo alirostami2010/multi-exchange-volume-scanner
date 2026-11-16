@@ -6,7 +6,7 @@ console.log(' MULTI-EXCHANGE SMART VOLUME SCANNER');
 console.log('======================================');
 
 console.log('Starting market scanner...');
-console.log('Exchange: Binance');
+console.log('Exchange: Bybit');
 console.log('Market: USDT Perpetual Futures');
 console.log('Timeframes: 1m');
 console.log('Mode: Volume Spike Detection');
