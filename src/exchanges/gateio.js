@@ -58,14 +58,13 @@ export async function getKlines(
     `/futures/usdt/candlesticks?${params}`
   );
 
-  // تبدیل داده‌های Gate.io به ساختار استاندارد
   return candles.map(candle => [
-    candle.t,
-    candle.o,
-    candle.h,
-    candle.l,
-    candle.c,
-    candle.v,
-    candle.sum
-  ]);
+  candle.t,
+  candle.o,
+  candle.h,
+  candle.l,
+  candle.c,
+  candle.v,
+  candle.sum
+]).sort((a, b) => Number(a[0]) - Number(b[0]));
 }
