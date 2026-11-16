@@ -2,7 +2,7 @@
 import { getMarketTickers, getKlines } from '../exchanges/gateio.js';
 import { analyzeVolume } from './volumeScanner.js';
 
-const TOP_SYMBOLS = 60;
+const TOP_SYMBOLS = 150;
 const CONCURRENCY = 4;
 
 const TIMEFRAMES = {
