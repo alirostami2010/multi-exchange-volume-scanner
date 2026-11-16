@@ -1,9 +1,10 @@
-import { getUsdtPerpetualSymbols, getKlines } from '../exchanges/bybit.js';
+
+import { getMarketTickers, getKlines } from '../exchanges/bybit.js';
 import { analyzeVolume } from './volumeScanner.js';
 
 const INTERVAL = '1';
+const TOP_SYMBOLS = 60;
 const CONCURRENCY = 5;
-const SCAN_INTERVAL = 60_000;
 
 const sleep = ms =>
   new Promise(resolve => setTimeout(resolve, ms));
@@ -21,6 +22,7 @@ async function scanSymbol(symbol) {
       ...result
     };
   } catch (error) {
+    console.error(`${symbol}: ${error.message}`);
     return null;
   }
 }
@@ -36,7 +38,7 @@ async function scanAllSymbols(symbols) {
 
       if (result) results.push(result);
 
-      await sleep(100);
+      await sleep(150);
     }
   }
 
@@ -51,14 +53,18 @@ async function scanAllSymbols(symbols) {
 }
 
 async function runScanner() {
-  console.log('\nStarting Binance market scan...');
+  console.log('Starting Bybit market scan...');
 
   try {
-    const symbols = await getUsdtPerpetualSymbols();
+    const tickers = await getMarketTickers();
+    const selected = tickers.slice(0, TOP_SYMBOLS);
 
-    console.log(`Found ${symbols.length} USDT contracts`);
+    console.log(`Found ${tickers.length} markets`);
+    console.log(`Scanning top ${selected.length} by 24h turnover`);
 
-    const signals = await scanAllSymbols(symbols);
+    const signals = await scanAllSymbols(
+      selected.map(item => item.symbol)
+    );
 
     signals.sort(
       (a, b) => b.volumeRatio - a.volumeRatio
@@ -66,37 +72,23 @@ async function runScanner() {
 
     console.log('\n===== VOLUME ALERTS =====');
 
-    for (const signal of signals.slice(0, 20)) {
+    for (const signal of signals) {
       console.log({
         symbol: signal.symbol,
         volumeIncrease: signal.volumeIncreasePercent + '%',
         priceChange: signal.priceChangePercent + '%',
-        buyPressure: signal.buyPressurePercent + '%',
+        direction: signal.direction,
         earlyWarning: signal.earlyWarning
       });
     }
 
     console.log(`Total alerts: ${signals.length}`);
+    console.log('Scan completed successfully.');
 
   } catch (error) {
     console.error('Scanner error:', error.message);
+    process.exitCode = 1;
   }
 }
 
-let scanning = false;
-
-async function safeScan() {
-  if (scanning) return;
-
-  scanning = true;
-
-  try {
-    await runScanner();
-  } finally {
-    scanning = false;
-  }
-}
-
-await safeScan();
-
-setInterval(safeScan, SCAN_INTERVAL);
+await runScanner();
