@@ -142,10 +142,12 @@ async function scanSymbol(symbol) {
     }
 
     // خروجی نهایی هر ارز
-    return {
+    // خروجی نهایی هر ارز
+     return {
       symbol,
       status,
       direction,
+      accumulationScore,
 
       weeklyVolume: weekly.volumeRatio,
       dailyVolume: daily.volumeRatio,
@@ -221,21 +223,9 @@ async function runScanner() {
       selected.map(item => item.symbol)
     );
 
-    results.sort((a, b) => {
-      const priority = {
-        'PRE-PUMP LONG': 1,
-        'PRE-PUMP SHORT': 2,
-        'FAST LONG WATCH': 3,
-        'FAST SHORT WATCH': 4,
-        'WATCH': 5
-      };
-
-      return (
-        (priority[a.status] || 99) -
-        (priority[b.status] || 99)
-      ) || b.weeklyTrend - a.weeklyTrend;
-    });
-
+   results.sort(
+      (a, b) => b.accumulationScore - a.accumulationScore
+    );
     console.log('\n===== MARKET WATCHLIST =====');
 
     for (const item of results) {
