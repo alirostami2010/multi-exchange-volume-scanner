@@ -16,7 +16,7 @@ async function scanSymbol(symbol) {
     if (!result || !result.volumeSpike) return null;
 
     return {
-      exchange: 'Binance',
+      exchange: 'Bybit',
       symbol,
       ...result
     };
