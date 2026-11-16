@@ -73,40 +73,72 @@ async function scanSymbol(symbol) {
       weekly.trendRatio >= 1.25 &&
       daily.trendRatio >= 1.25;
 
-    if (!accumulationCandidate) return null;
-
-    // احتمال حرکت صعودی در تایم‌فریم‌های 4 و 1 ساعت
-    const longSetup =
-     fourHour.volumeRatio >= 2 &&
-     oneHour.volumeRatio >= 1.5 &&
-     fourHour.direction === 'BULLISH' &&
-     oneHour.direction === 'BULLISH' &&
-     fourHour.closePosition >= 60 &&
-     oneHour.closePosition >= 60 &&
-     fourHour.priceChangePercent <= 8 &&
-     oneHour.priceChangePercent <= 5;
-
-
-    // احتمال حرکت نزولی در تایم‌فریم‌های 4 و 1 ساعت
-    const shortSetup =
-     fourHour.volumeRatio >= 2 &&
-     oneHour.volumeRatio >= 1.5 &&
-     fourHour.direction === 'BEARISH' &&
-     oneHour.direction === 'BEARISH' &&
-     fourHour.closePosition <= 40 &&
-     oneHour.closePosition <= 40 &&
-     fourHour.priceChangePercent >= -8 &&
-     oneHour.priceChangePercent >= -5;
     
-    let status = 'WATCH';
-    let direction = 'UNCONFIRMED';
+const fastLongTrigger =
+  fifteenMinute.volumeRatio >= 2 &&
+  fiveMinute.volumeRatio >= 1.5 &&
+  fifteenMinute.direction === 'BULLISH' &&
+  fiveMinute.direction === 'BULLISH' &&
+  fifteenMinute.closePosition >= 60 &&
+  fiveMinute.closePosition >= 60 &&
+  fifteenMinute.priceChangePercent <= 3 &&
+  fiveMinute.priceChangePercent <= 2;
 
-    if (longSetup) {
-      status = 'PRE-PUMP LONG';
-      direction = 'BULLISH';
-    } else if (shortSetup) {
-      status = 'PRE-PUMP SHORT';
-      direction = 'BEARISH';
+const fastShortTrigger =
+  fifteenMinute.volumeRatio >= 2 &&
+  fiveMinute.volumeRatio >= 1.5 &&
+  fifteenMinute.direction === 'BEARISH' &&
+  fiveMinute.direction === 'BEARISH' &&
+  fifteenMinute.closePosition <= 40 &&
+  fiveMinute.closePosition <= 40 &&
+  fifteenMinute.priceChangePercent >= -3 &&
+  fiveMinute.priceChangePercent >= -2;
+
+if (
+  !accumulationCandidate &&
+  !fastLongTrigger &&
+  !fastShortTrigger
+) return null;
+
+const longSetup =
+  accumulationCandidate &&
+  fourHour.volumeRatio >= 2 &&
+  oneHour.volumeRatio >= 1.5 &&
+  fourHour.direction === 'BULLISH' &&
+  oneHour.direction === 'BULLISH' &&
+  fourHour.closePosition >= 60 &&
+  oneHour.closePosition >= 60 &&
+  fourHour.priceChangePercent <= 8 &&
+  oneHour.priceChangePercent <= 5;
+
+const shortSetup =
+  accumulationCandidate &&
+  fourHour.volumeRatio >= 2 &&
+  oneHour.volumeRatio >= 1.5 &&
+  fourHour.direction === 'BEARISH' &&
+  oneHour.direction === 'BEARISH' &&
+  fourHour.closePosition <= 40 &&
+  oneHour.closePosition <= 40 &&
+  fourHour.priceChangePercent >= -8 &&
+  oneHour.priceChangePercent >= -5;
+
+let status = 'WATCH';
+let direction = 'UNCONFIRMED';
+
+if (longSetup) {
+  status = 'PRE-PUMP LONG';
+  direction = 'BULLISH';
+} else if (shortSetup) {
+  status = 'PRE-PUMP SHORT';
+  direction = 'BEARISH';
+} else if (fastLongTrigger) {
+  status = 'FAST LONG WATCH';
+  direction = 'BULLISH';
+} else if (fastShortTrigger) {
+  status = 'FAST SHORT WATCH';
+  direction = 'BEARISH';
+}
+
     }
 
     // خروجی نهایی هر ارز
