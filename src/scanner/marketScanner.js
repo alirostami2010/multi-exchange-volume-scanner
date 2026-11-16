@@ -77,22 +77,27 @@ async function scanSymbol(symbol) {
 
     // احتمال حرکت صعودی در تایم‌فریم‌های 4 و 1 ساعت
     const longSetup =
-      fourHour.volumeRatio >= 2 &&
-      oneHour.volumeRatio >= 1.5 &&
-      fourHour.direction === 'BULLISH' &&
-      oneHour.direction === 'BULLISH' &&
-      fourHour.closePosition >= 60 &&
-      oneHour.closePosition >= 60;
+     fourHour.volumeRatio >= 2 &&
+     oneHour.volumeRatio >= 1.5 &&
+     fourHour.direction === 'BULLISH' &&
+     oneHour.direction === 'BULLISH' &&
+     fourHour.closePosition >= 60 &&
+     oneHour.closePosition >= 60 &&
+     fourHour.priceChangePercent <= 8 &&
+     oneHour.priceChangePercent <= 5;
+
 
     // احتمال حرکت نزولی در تایم‌فریم‌های 4 و 1 ساعت
     const shortSetup =
-      fourHour.volumeRatio >= 2 &&
-      oneHour.volumeRatio >= 1.5 &&
-      fourHour.direction === 'BEARISH' &&
-      oneHour.direction === 'BEARISH' &&
-      fourHour.closePosition <= 40 &&
-      oneHour.closePosition <= 40;
-
+     fourHour.volumeRatio >= 2 &&
+     oneHour.volumeRatio >= 1.5 &&
+     fourHour.direction === 'BEARISH' &&
+     oneHour.direction === 'BEARISH' &&
+     fourHour.closePosition <= 40 &&
+     oneHour.closePosition <= 40 &&
+     fourHour.priceChangePercent >= -8 &&
+     oneHour.priceChangePercent >= -5;
+    
     let status = 'WATCH';
     let direction = 'UNCONFIRMED';
 
