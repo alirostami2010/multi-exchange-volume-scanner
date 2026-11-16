@@ -39,7 +39,7 @@ export function analyzeVolume(candles) {
     ? ((closePrice - openPrice) / openPrice) * 100
     : 0;
 
-  const takerBuyVolume = Number(current[10]);
+  const takerBuyVolume = Number(current[9]);
 
   const buyPressure = currentVolume > 0
     ? (takerBuyVolume / currentVolume) * 100
