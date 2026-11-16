@@ -46,7 +46,14 @@ async function scanSymbol(symbol) {
   ) &&
   Math.abs(daily.priceChangePercent) < 3;
 
-    if (!watch) return null;
+const accumulationCandidate =
+  watch &&
+  weekly.volumeTrend === 'RISING' &&
+  daily.volumeTrend === 'RISING' &&
+  weekly.trendRatio >= 1.25 &&
+  daily.trendRatio >= 1.25;
+
+if (!accumulationCandidate) return null;
 
     // احتمال نزدیک شدن به حرکت صعودی
     const longSetup =
