@@ -98,26 +98,27 @@ if (!accumulationCandidate) return null;
     }
 
     return {
-      symbol,
-      status,
-      direction,
+    return {
+  symbol,
+  status,
+  direction,
 
-      weeklyVolume: weekly.volumeRatio,
-      dailyVolume: daily.volumeRatio,
-      fourHourVolume: fourHour.volumeRatio,
-      oneHourVolume: oneHour.volumeRatio,
+  weeklyVolume: weekly.volumeRatio,
+  dailyVolume: daily.volumeRatio,
+  fourHourVolume: fourHour.volumeRatio,
+  oneHourVolume: oneHour.volumeRatio,
+  fifteenMinuteVolume: fifteenMinute.volumeRatio,
+  fiveMinuteVolume: fiveMinute.volumeRatio,
 
-      dailyChange: daily.priceChangePercent,
-      fourHourChange: fourHour.priceChangePercent,
-      oneHourChange: oneHour.priceChangePercent,
+  dailyChange: daily.priceChangePercent,
+  fourHourChange: fourHour.priceChangePercent,
+  oneHourChange: oneHour.priceChangePercent,
+  fifteenMinuteChange: fifteenMinute.priceChangePercent,
+  fiveMinuteChange: fiveMinute.priceChangePercent,
 
-      fourHourClosePosition: fourHour.closePosition,
-      oneHourClosePosition: oneHour.closePosition,
-      weeklyTrend: weekly.trendRatio,
-      dailyTrend: daily.trendRatio,
-      weeklyVolumeTrend: weekly.volumeTrend,
-      dailyVolumeTrend: daily.volumeTrend,
-    };
+  fourHourClosePosition: fourHour.closePosition,
+  oneHourClosePosition: oneHour.closePosition
+};
 
   } catch (error) {
     console.error(`${symbol}: ${error.message}`);
