@@ -1,8 +1,8 @@
 
-import { getMarketTickers, getKlines } from '../exchanges/bybit.js';
+import { getMarketTickers, getKlines } from '../exchanges/gateio.js';
 import { analyzeVolume } from './volumeScanner.js';
 
-const INTERVAL = '1';
+const INTERVAL = '1m';
 const TOP_SYMBOLS = 60;
 const CONCURRENCY = 5;
 
