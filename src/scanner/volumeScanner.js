@@ -8,9 +8,8 @@ export function analyzeVolume(candles) {
     return null;
   }
 
-  // کندل‌های بسته‌شده؛ آخرین کندل زنده حذف می‌شود
+  // حذف کندل زنده
   const closed = candles.slice(0, -1);
-
   const current = closed[closed.length - 1];
 
   const previous = closed.slice(
@@ -18,6 +17,8 @@ export function analyzeVolume(candles) {
     -1
   );
 
+  // ساختار Bybit:
+  // [time, open, high, low, close, volume, turnover]
   const volumes = previous.map(candle =>
     Number(candle[5])
   );
@@ -39,12 +40,6 @@ export function analyzeVolume(candles) {
     ? ((closePrice - openPrice) / openPrice) * 100
     : 0;
 
-  const takerBuyVolume = Number(current[9]);
-
-  const buyPressure = currentVolume > 0
-    ? (takerBuyVolume / currentVolume) * 100
-    : 0;
-
   let direction = 'UNKNOWN';
 
   if (priceChange > 0) direction = 'BULLISH';
@@ -55,12 +50,8 @@ export function analyzeVolume(candles) {
     volumeIncreasePercent: Number(
       ((volumeRatio - 1) * 100).toFixed(2)
     ),
-    priceChangePercent: Number(
-      priceChange.toFixed(3)
-    ),
-    buyPressurePercent: Number(
-      buyPressure.toFixed(2)
-    ),
+    priceChangePercent: Number(priceChange.toFixed(3)),
+    buyPressurePercent: null,
     direction,
     volumeSpike: volumeRatio >= VOLUME_MULTIPLIER,
     earlyWarning:
