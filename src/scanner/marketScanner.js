@@ -41,7 +41,7 @@ async function scanSymbol(symbol) {
     // شناسایی افزایش تدریجی حجم در بازه‌های بزرگ
     const watch =
   (
-    weekly.gradualVolumeGrowth ||
+    weekly.gradualVolumeGrowth &&
     daily.gradualVolumeGrowth
   ) &&
   Math.abs(daily.priceChangePercent) < 5;
