@@ -24,7 +24,7 @@ async function getAnalysis(symbol, interval) {
 
 async function scanSymbol(symbol) {
   try {
-    // بررسی چهار تایم‌فریم
+    // دریافت اطلاعات شش تایم‌فریم
     const weekly = await getAnalysis(symbol, TIMEFRAMES.weekly);
     await sleep(120);
 
@@ -36,39 +36,46 @@ async function scanSymbol(symbol) {
 
     const oneHour = await getAnalysis(symbol, TIMEFRAMES.oneHour);
     await sleep(120);
-    const fifteenMinute = await getAnalysis(symbol, TIMEFRAMES.fifteenMinute);
+
+    const fifteenMinute = await getAnalysis(
+      symbol,
+      TIMEFRAMES.fifteenMinute
+    );
     await sleep(120);
-    const fiveMinute = await getAnalysis(symbol, TIMEFRAMES.fiveMinute);
-    
+
+    const fiveMinute = await getAnalysis(
+      symbol,
+      TIMEFRAMES.fiveMinute
+    );
+
+    // اطمینان از معتبر بودن اطلاعات
     if (
-        !weekly ||
-        !daily ||
-        !fourHour ||
-        !oneHour ||
-        !fifteenMinute ||
-        !fiveMinute
-) {
-  return null;
-}
+      !weekly ||
+      !daily ||
+      !fourHour ||
+      !oneHour ||
+      !fifteenMinute ||
+      !fiveMinute
+    ) {
+      return null;
+    }
 
-    // شناسایی افزایش تدریجی حجم در بازه‌های بزرگ
+    // شناسایی روند افزایشی حجم در تایم‌فریم‌های بزرگ
     const watch =
-  (
-    weekly.gradualVolumeGrowth &&
-    daily.gradualVolumeGrowth
-  ) &&
-  Math.abs(daily.priceChangePercent) < 3;
+      weekly.gradualVolumeGrowth &&
+      daily.gradualVolumeGrowth &&
+      Math.abs(daily.priceChangePercent) < 3;
 
-const accumulationCandidate =
-  watch &&
-  weekly.volumeTrend === 'RISING' &&
-  daily.volumeTrend === 'RISING' &&
-  weekly.trendRatio >= 1.25 &&
-  daily.trendRatio >= 1.25;
+    const accumulationCandidate =
+      watch &&
+      weekly.volumeTrend === 'RISING' &&
+      daily.volumeTrend === 'RISING' &&
+      weekly.trendRatio >= 1.25 &&
+      daily.trendRatio >= 1.25;
 
-if (!accumulationCandidate) return null;
+    if (!accumulationCandidate) return null;
 
-    // احتمال نزدیک شدن به حرکت صعودی
+    // احتمال حرکت صعودی در تایم‌فریم‌های 4 و 1 ساعت
     const longSetup =
       fourHour.volumeRatio >= 2 &&
       oneHour.volumeRatio >= 1.5 &&
@@ -77,7 +84,7 @@ if (!accumulationCandidate) return null;
       fourHour.closePosition >= 60 &&
       oneHour.closePosition >= 60;
 
-    // احتمال نزدیک شدن به حرکت نزولی
+    // احتمال حرکت نزولی در تایم‌فریم‌های 4 و 1 ساعت
     const shortSetup =
       fourHour.volumeRatio >= 2 &&
       oneHour.volumeRatio >= 1.5 &&
@@ -97,28 +104,34 @@ if (!accumulationCandidate) return null;
       direction = 'BEARISH';
     }
 
+    // خروجی نهایی هر ارز
     return {
-    return {
-  symbol,
-  status,
-  direction,
+      symbol,
+      status,
+      direction,
 
-  weeklyVolume: weekly.volumeRatio,
-  dailyVolume: daily.volumeRatio,
-  fourHourVolume: fourHour.volumeRatio,
-  oneHourVolume: oneHour.volumeRatio,
-  fifteenMinuteVolume: fifteenMinute.volumeRatio,
-  fiveMinuteVolume: fiveMinute.volumeRatio,
+      weeklyVolume: weekly.volumeRatio,
+      dailyVolume: daily.volumeRatio,
+      fourHourVolume: fourHour.volumeRatio,
+      oneHourVolume: oneHour.volumeRatio,
+      fifteenMinuteVolume: fifteenMinute.volumeRatio,
+      fiveMinuteVolume: fiveMinute.volumeRatio,
 
-  dailyChange: daily.priceChangePercent,
-  fourHourChange: fourHour.priceChangePercent,
-  oneHourChange: oneHour.priceChangePercent,
-  fifteenMinuteChange: fifteenMinute.priceChangePercent,
-  fiveMinuteChange: fiveMinute.priceChangePercent,
+      dailyChange: daily.priceChangePercent,
+      fourHourChange: fourHour.priceChangePercent,
+      oneHourChange: oneHour.priceChangePercent,
+      fifteenMinuteChange: fifteenMinute.priceChangePercent,
+      fiveMinuteChange: fiveMinute.priceChangePercent,
 
-  fourHourClosePosition: fourHour.closePosition,
-  oneHourClosePosition: oneHour.closePosition
-};
+      weeklyTrend: weekly.trendRatio,
+      dailyTrend: daily.trendRatio,
+
+      weeklyVolumeTrend: weekly.volumeTrend,
+      dailyVolumeTrend: daily.volumeTrend,
+
+      fourHourClosePosition: fourHour.closePosition,
+      oneHourClosePosition: oneHour.closePosition
+    };
 
   } catch (error) {
     console.error(`${symbol}: ${error.message}`);
@@ -135,7 +148,9 @@ async function scanAllSymbols(symbols) {
       const index = nextIndex++;
       const result = await scanSymbol(symbols[index]);
 
-      if (result) results.push(result);
+      if (result) {
+        results.push(result);
+      }
 
       await sleep(150);
     }
@@ -160,20 +175,27 @@ async function runScanner() {
 
     console.log(`Found ${tickers.length} markets`);
     console.log(`Scanning ${selected.length} markets`);
-    console.log('Timeframes: 1H / 4H / 1D / 7D');
+
+    console.log(
+      'Timeframes: 7D / 1D / 4H / 1H / 15M / 5M'
+    );
 
     const results = await scanAllSymbols(
       selected.map(item => item.symbol)
     );
 
     results.sort((a, b) => {
-      if (a.status === 'PRE-PUMP LONG' &&
-          b.status !== 'PRE-PUMP LONG') return -1;
+      if (
+        a.status === 'PRE-PUMP LONG' &&
+        b.status !== 'PRE-PUMP LONG'
+      ) return -1;
 
-      if (b.status === 'PRE-PUMP LONG' &&
-          a.status !== 'PRE-PUMP LONG') return 1;
+      if (
+        b.status === 'PRE-PUMP LONG' &&
+        a.status !== 'PRE-PUMP LONG'
+      ) return 1;
 
-      return b.weeklyVolume - a.weeklyVolume;
+      return b.weeklyTrend - a.weeklyTrend;
     });
 
     console.log('\n===== MARKET WATCHLIST =====');
@@ -183,34 +205,45 @@ async function runScanner() {
         symbol: item.symbol,
         status: item.status,
         direction: item.direction,
+
         weeklyVolume: item.weeklyVolume + 'x',
         dailyVolume: item.dailyVolume + 'x',
         fourHourVolume: item.fourHourVolume + 'x',
         oneHourVolume: item.oneHourVolume + 'x',
         fifteenMinuteVolume: item.fifteenMinuteVolume + 'x',
         fiveMinuteVolume: item.fiveMinuteVolume + 'x',
+
         dailyChange: item.dailyChange + '%',
         fourHourChange: item.fourHourChange + '%',
         oneHourChange: item.oneHourChange + '%',
         fifteenMinuteChange: item.fifteenMinuteChange + '%',
         fiveMinuteChange: item.fiveMinuteChange + '%',
+
         weeklyTrend: item.weeklyTrend + 'x',
         dailyTrend: item.dailyTrend + 'x',
+
         weeklyVolumeTrend: item.weeklyVolumeTrend,
-        dailyVolumeTrend: item.dailyVolumeTrend,
+        dailyVolumeTrend: item.dailyVolumeTrend
       });
     }
 
     console.log('\n===== SCAN SUMMARY =====');
+
     console.log(`Watchlist: ${results.length}`);
+
     console.log(
       `Pre-pump long: ${
-        results.filter(x => x.status === 'PRE-PUMP LONG').length
+        results.filter(
+          x => x.status === 'PRE-PUMP LONG'
+        ).length
       }`
     );
+
     console.log(
       `Pre-pump short: ${
-        results.filter(x => x.status === 'PRE-PUMP SHORT').length
+        results.filter(
+          x => x.status === 'PRE-PUMP SHORT'
+        ).length
       }`
     );
 
