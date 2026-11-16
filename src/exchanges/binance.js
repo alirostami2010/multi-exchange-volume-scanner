@@ -54,3 +54,23 @@ export async function getMarketSnapshot() {
     allowedSymbols.has(item.symbol)
   );
 }
+
+
+// دریافت کندل‌های بازار فیوچرز
+export async function getKlines(
+  symbol,
+  interval = '5m',
+  limit = 30
+) {
+  const params = new URLSearchParams({
+    symbol,
+    interval,
+    limit: String(limit)
+  });
+
+  const data = await request(
+    `/fapi/v1/klines?${params.toString()}`
+  );
+
+  return data;
+}
