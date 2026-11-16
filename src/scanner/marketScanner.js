@@ -40,9 +40,16 @@ async function scanSymbol(symbol) {
     await sleep(120);
     const fiveMinute = await getAnalysis(symbol, TIMEFRAMES.fiveMinute);
     
-    if (!weekly || !daily || !fourHour || !oneHour) {
-      return null;
-    }
+    if (
+        !weekly ||
+        !daily ||
+        !fourHour ||
+        !oneHour ||
+        !fifteenMinute ||
+        !fiveMinute
+) {
+  return null;
+}
 
     // شناسایی افزایش تدریجی حجم در بازه‌های بزرگ
     const watch =
