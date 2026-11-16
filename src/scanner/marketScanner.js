@@ -1,8 +1,7 @@
-
-import { getUsdtPerpetualSymbols, getKlines } from '../exchanges/binance.js';
+import { getUsdtPerpetualSymbols, getKlines } from '../exchanges/bybit.js';
 import { analyzeVolume } from './volumeScanner.js';
 
-const INTERVAL = '1m';
+const INTERVAL = '1';
 const CONCURRENCY = 5;
 const SCAN_INTERVAL = 60_000;
 
