@@ -35,7 +35,11 @@ async function scanSymbol(symbol) {
     await sleep(120);
 
     const oneHour = await getAnalysis(symbol, TIMEFRAMES.oneHour);
-
+    await sleep(120);
+    const fifteenMinute = await getAnalysis(symbol, TIMEFRAMES.fifteenMinute);
+    await sleep(120);
+    const fiveMinute = await getAnalysis(symbol, TIMEFRAMES.fiveMinute);
+    
     if (!weekly || !daily || !fourHour || !oneHour) {
       return null;
     }
