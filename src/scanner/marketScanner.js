@@ -4,13 +4,17 @@
  *
  * Timeframe: 1H
  * Scan window: 24 closed candles
- * Historical data: Up to 15 days (360 closed candles)
+ * Historical data: Up to 15 days
  *
- * Price and volume:
- * - Candle-to-candle percentage change
- * - Growth speed
- * - Acceleration / deceleration
- * - Comparison with historical median
+ * Ranking:
+ * 1. Volume strength          20%
+ * 2. Volume acceleration      20%
+ * 3. Price speed              15%
+ * 4. Price acceleration       20%
+ * 5. 24h price growth         15%
+ * 6. Factor coordination      10%
+ *
+ * Output: Top 20 ranked bullish opportunities.
  */
 
 const BASE_URL = 'https://api.gateio.ws/api/v4';
@@ -22,12 +26,53 @@ const HISTORY_CANDLES = 360;
 const FETCH_CANDLES = HISTORY_CANDLES + 1;
 const FILTER_CANDLES = 24;
 
-const CONCURRENCY = 6;
+const MIN_HISTORY_CANDLES = 48;
+
+const CONCURRENCY = 2;
+const MIN_REQUEST_INTERVAL_MS = 450;
+
 const REQUEST_TIMEOUT_MS = 12000;
-const MAX_RETRIES = 3;
+const MAX_RETRIES = 4;
+
+const TOP_LIMIT = 20;
+
+const WEIGHTS = {
+  volumeStrength: 20,
+  volumeAcceleration: 20,
+  priceSpeed: 15,
+  priceAcceleration: 20,
+  priceGrowth: 15,
+  coordination: 10
+};
 
 const sleep = ms =>
   new Promise(resolve => setTimeout(resolve, ms));
+
+let nextRequestAt = 0;
+let rateLimitUntil = 0;
+
+// ------------------------------------------
+// BASIC HELPERS
+// ------------------------------------------
+
+function clamp(value, min = 0, max = 100) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function round(value, decimals = 4) {
+  if (!Number.isFinite(value)) return null;
+
+  return Number(value.toFixed(decimals));
+}
+
+function mean(values) {
+  const valid = values.filter(Number.isFinite);
+
+  if (!valid.length) return null;
+
+  return valid.reduce((sum, value) => sum + value, 0)
+    / valid.length;
+}
 
 function median(values) {
   const sorted = values
@@ -55,10 +100,55 @@ function safePercentChange(current, previous) {
   return ((current / previous) - 1) * 100;
 }
 
-function round(value, decimals = 4) {
-  if (!Number.isFinite(value)) return null;
+function safeLogRatio(current, previous) {
+  if (
+    !Number.isFinite(current) ||
+    !Number.isFinite(previous) ||
+    current <= 0 ||
+    previous <= 0
+  ) {
+    return null;
+  }
 
-  return Number(value.toFixed(decimals));
+  return Math.log(current / previous);
+}
+
+// ------------------------------------------
+// RATE LIMITER
+// ------------------------------------------
+
+async function waitForRequestSlot() {
+  const now = Date.now();
+
+  const slot = Math.max(
+    now,
+    nextRequestAt,
+    rateLimitUntil
+  );
+
+  nextRequestAt = slot + MIN_REQUEST_INTERVAL_MS;
+
+  await sleep(slot - now);
+}
+
+function getRetryAfterMs(response) {
+  const value = response.headers.get('Retry-After');
+
+  if (!value) return 0;
+
+  const seconds = Number(value);
+
+  if (Number.isFinite(seconds) && seconds > 0) {
+    return seconds * 1000;
+  }
+
+  const date = Date.parse(value);
+
+  if (Number.isFinite(date)) {
+    return Math.max(0, date - Date.now());
+  }
+
+  return 0;
 }
 
 async function gateGet(path, params = {}) {
@@ -71,6 +161,8 @@ async function gateGet(path, params = {}) {
   let lastError;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    await waitForRequestSlot();
+
     const controller = new AbortController();
 
     const timeout = setTimeout(
@@ -87,10 +179,27 @@ async function gateGet(path, params = {}) {
         signal: controller.signal
       });
 
-      if (
-        response.status === 429 ||
-        response.status >= 500
-      ) {
+      if (response.status === 429) {
+        const retryAfterMs = Math.max(
+          getRetryAfterMs(response),
+          5000 * attempt
+        );
+
+        rateLimitUntil = Math.max(
+          rateLimitUntil,
+          Date.now() + retryAfterMs
+        );
+
+        const error = new Error(
+          'Gate API HTTP 429'
+        );
+
+        error.retryAfterMs = retryAfterMs;
+
+        throw error;
+      }
+
+      if (response.status >= 500) {
         throw new Error(
           `Gate API HTTP ${response.status}`
         );
@@ -110,11 +219,16 @@ async function gateGet(path, params = {}) {
       lastError = error;
 
       if (attempt < MAX_RETRIES) {
-        console.log(
-          `Request retry ${attempt}/${MAX_RETRIES}: ${error.message}`
+        const backoff = Math.max(
+          error.retryAfterMs || 0,
+          1500 * (2 ** (attempt - 1))
         );
 
-        await sleep(500 * (2 ** (attempt - 1)));
+        console.log(
+          `Request retry ${attempt}/${MAX_RETRIES}: ${error.message}. Waiting ${Math.ceil(backoff / 1000)}s`
+        );
+
+        await sleep(backoff);
       }
 
     } finally {
@@ -124,6 +238,10 @@ async function gateGet(path, params = {}) {
 
   throw lastError;
 }
+
+// ------------------------------------------
+// CANDLE NORMALIZATION
+// ------------------------------------------
 
 function normalizeCandle(raw) {
   const candle = {
@@ -135,7 +253,7 @@ function normalizeCandle(raw) {
 
     contractVolume: Number(raw.v ?? 0),
 
-    // Gate futures candle sum is quote-currency volume (USDT).
+    // Gate futures quote volume in USDT.
     quoteVolume: Number(raw.sum ?? 0)
   };
 
@@ -155,6 +273,55 @@ function normalizeCandle(raw) {
   return candle;
 }
 
+// ------------------------------------------
+// SCORING FUNCTIONS
+// ------------------------------------------
+
+/**
+ * Ratio scoring:
+ *
+ * 0.25x = 10
+ * 0.50x = 30
+ * 1.00x = 50
+ * 2.00x = 70
+ * 4.00x = 90
+ * 8.00x = 100 (capped)
+ */
+function scoreRatio(ratio) {
+  if (!Number.isFinite(ratio) || ratio <= 0) {
+    return 0;
+  }
+
+  return clamp(
+    50 + 20 * Math.log2(ratio)
+  );
+}
+
+/**
+ * Directional scoring:
+ *
+ * Zero movement = 50
+ * Positive movement = above 50
+ * Negative movement = below 50
+ */
+function scoreSigned(value, scale) {
+  if (
+    !Number.isFinite(value) ||
+    !Number.isFinite(scale) ||
+    scale <= 0
+  ) {
+    return 50;
+  }
+
+  return clamp(
+    50 + 50 * Math.tanh(value / scale)
+  );
+}
+
+// ------------------------------------------
+// MARKET ANALYSIS
+// ------------------------------------------
+
 function analyzeMarket(contract, rawCandles) {
   const nowSeconds = Math.floor(Date.now() / 1000);
   const oneHour = 3600;
@@ -162,39 +329,38 @@ function analyzeMarket(contract, rawCandles) {
   const candles = rawCandles
     .map(normalizeCandle)
     .filter(Boolean)
-
-    // Only fully closed candles.
     .filter(candle =>
       candle.time + oneHour <= nowSeconds
     )
-
     .sort((a, b) => a.time - b.time)
-
-    // Remove duplicate timestamps.
     .filter((candle, index, array) =>
       index === 0 ||
       candle.time !== array[index - 1].time
     );
 
-  if (candles.length < FILTER_CANDLES + 1) {
+  const requiredCandles =
+    FILTER_CANDLES + MIN_HISTORY_CANDLES;
+
+  if (candles.length < requiredCandles) {
     return {
       contract,
       status: 'INSUFFICIENT_HISTORY',
       candlesReceived: candles.length,
-      requiredCandles: FILTER_CANDLES + 1
+      requiredCandles
     };
   }
 
-  // Latest 24 fully closed candles.
   const recent24 = candles.slice(-FILTER_CANDLES);
 
-  // Available candles before the latest 24.
   const historical = candles.slice(
     0,
     -FILTER_CANDLES
   );
 
-  // Historical hourly absolute price changes.
+  // ----------------------------------------
+  // HISTORICAL BASELINES
+  // ----------------------------------------
+
   const historicalReturns = historical
     .slice(1)
     .map((candle, index) => {
@@ -208,7 +374,6 @@ function analyzeMarket(contract, rawCandles) {
       );
     });
 
-  // Historical hourly quote volumes.
   const historicalVolumes = historical.map(
     candle => candle.quoteVolume
   );
@@ -219,13 +384,28 @@ function analyzeMarket(contract, rawCandles) {
   const historicalMedianQuoteVolume =
     median(historicalVolumes);
 
-  // Calculate candle-by-candle metrics.
+  if (
+    historicalMedianQuoteVolume <= 0 ||
+    historicalMedianAbsReturnPct <= 0
+  ) {
+    return {
+      contract,
+      status: 'INSUFFICIENT_HISTORY',
+      reason: 'Invalid historical baseline'
+    };
+  }
+
+  // ----------------------------------------
+  // CANDLE-BY-CANDLE METRICS
+  // ----------------------------------------
+
   const candleMetrics = recent24.map(
     (candle, index) => {
       const absoluteIndex =
         candles.length - FILTER_CANDLES + index;
 
       const previous = candles[absoluteIndex - 1];
+
       const previousPrevious =
         candles[absoluteIndex - 2];
 
@@ -255,7 +435,6 @@ function analyzeMarket(contract, rawCandles) {
             )
           : null;
 
-      // Acceleration = current speed - previous speed.
       const priceAcceleration =
         priceChangePct !== null &&
         previousPriceChangePct !== null
@@ -269,17 +448,12 @@ function analyzeMarket(contract, rawCandles) {
           : null;
 
       const volumeVsHistoricalMedian =
-        historicalMedianQuoteVolume > 0
-          ? candle.quoteVolume /
-            historicalMedianQuoteVolume
-          : null;
+        candle.quoteVolume /
+        historicalMedianQuoteVolume;
 
       const priceMoveVsHistoricalMedian =
-        historicalMedianAbsReturnPct > 0 &&
-        priceChangePct !== null
-          ? Math.abs(priceChangePct) /
-            historicalMedianAbsReturnPct
-          : null;
+        Math.abs(priceChangePct ?? 0) /
+        historicalMedianAbsReturnPct;
 
       return {
         time: candle.time,
@@ -294,40 +468,31 @@ function analyzeMarket(contract, rawCandles) {
           2
         ),
 
-        // Price movement during this hour.
-        priceChangePct: round(
-          priceChangePct
-        ),
+        priceChangePct: round(priceChangePct),
 
-        // Price speed per hour.
         priceSpeedPctPerHour: round(
           priceChangePct
         ),
 
-        // Change in price speed, in percentage points.
         priceAccelerationPp: round(
           priceAcceleration
         ),
 
-        // Volume change versus previous hour.
         volumeChangePct: round(
           volumeChangePct,
           2
         ),
 
-        // Change in volume growth rate.
         volumeAccelerationPp: round(
           volumeAcceleration,
           2
         ),
 
-        // Current volume relative to historical median.
         volumeVsHistoricalMedian: round(
           volumeVsHistoricalMedian,
           3
         ),
 
-        // Absolute price movement relative to normal behavior.
         priceMoveVsHistoricalMedian: round(
           priceMoveVsHistoricalMedian,
           3
@@ -336,12 +501,116 @@ function analyzeMarket(contract, rawCandles) {
     }
   );
 
+  // ----------------------------------------
+  // RECENT PRICE AND VOLUME METRICS
+  // ----------------------------------------
+
+  const last3 = recent24.slice(-3);
+  const last4 = recent24.slice(-4);
+
+  const last3Volumes = last3.map(
+    candle => candle.quoteVolume
+  );
+
+  const last3Returns = last3.map(
+    (candle, index) => {
+      const absoluteIndex =
+        candles.length - 3 + index;
+
+      return safePercentChange(
+        candle.close,
+        candles[absoluteIndex - 1].close
+      );
+    }
+  );
+
+  const averageVolumeLast3 = mean(
+    last3Volumes
+  );
+
+  const volumeStrengthRatio =
+    averageVolumeLast3 /
+    historicalMedianQuoteVolume;
+
+  // Compare last 2 hours with the preceding 2 hours.
+  const averageLast2Volumes = mean(
+    last4.slice(-2).map(c => c.quoteVolume)
+  );
+
+  const averagePrevious2Volumes = mean(
+    last4.slice(0, 2).map(c => c.quoteVolume)
+  );
+
+  const volumeMomentumRatio =
+    averagePrevious2Volumes > 0
+      ? averageLast2Volumes / averagePrevious2Volumes
+      : null;
+
+  // Logarithmic volume acceleration.
+  // This avoids extreme percentage changes from tiny candles.
+  const volumeLogGrowthLatest = safeLogRatio(
+    last4[3].quoteVolume,
+    last4[2].quoteVolume
+  );
+
+  const volumeLogGrowthPrevious = safeLogRatio(
+    last4[2].quoteVolume,
+    last4[1].quoteVolume
+  );
+
+  const volumeAccelerationLog =
+    volumeLogGrowthLatest !== null &&
+    volumeLogGrowthPrevious !== null
+      ? volumeLogGrowthLatest - volumeLogGrowthPrevious
+      : null;
+
+  const priceSpeedAverage = mean(
+    last3Returns
+  );
+
+  const last2Returns = last4.slice(-2).map(
+    (candle, index) => {
+      const absoluteIndex =
+        candles.length - 2 + index;
+
+      return safePercentChange(
+        candle.close,
+        candles[absoluteIndex - 1].close
+      );
+    }
+  );
+
+  const previous2Returns = last4.slice(0, 2).map(
+    (candle, index) => {
+      const absoluteIndex =
+        candles.length - 4 + index;
+
+      return safePercentChange(
+        candle.close,
+        candles[absoluteIndex - 1].close
+      );
+    }
+  );
+
+  const averageLast2Returns = mean(last2Returns);
+  const averagePrevious2Returns = mean(previous2Returns);
+
+  const priceAcceleration =
+    averageLast2Returns !== null &&
+    averagePrevious2Returns !== null
+      ? averageLast2Returns - averagePrevious2Returns
+      : null;
+
   const first = recent24[0];
   const last = recent24[recent24.length - 1];
 
+  const priceChange24hPct = safePercentChange(
+    last.close,
+    first.open
+  );
+
   const totalQuoteVolume24h = recent24.reduce(
-    (sum, candle) =>
-      sum + candle.quoteVolume,
+    (sum, candle) => sum + candle.quoteVolume,
     0
   );
 
@@ -349,16 +618,236 @@ function analyzeMarket(contract, rawCandles) {
     totalQuoteVolume24h / FILTER_CANDLES;
 
   const averageVolumeVsHistoricalMedian =
-    historicalMedianQuoteVolume > 0
-      ? averageHourlyQuoteVolume24h /
-        historicalMedianQuoteVolume
-      : null;
+    averageHourlyQuoteVolume24h /
+    historicalMedianQuoteVolume;
+
+  // ----------------------------------------
+  // SIX COMPONENT SCORES
+  // ----------------------------------------
+
+  // 1. Volume strength.
+  const volumeStrengthScore = scoreRatio(
+    volumeStrengthRatio
+  );
+
+  // 2. Volume acceleration.
+  // Combines candle-to-candle acceleration
+  // and recent volume momentum.
+  const volumeAccelerationScore = (
+    scoreSigned(
+      volumeAccelerationLog ?? 0,
+      0.35
+    ) * 0.7
+  ) + (
+    scoreRatio(
+      volumeMomentumRatio ?? 1
+    ) * 0.3
+  );
+
+  // 3. Price speed.
+  const normalizedPriceSpeed =
+    priceSpeedAverage /
+    historicalMedianAbsReturnPct;
+
+  const priceSpeedScore = scoreSigned(
+    normalizedPriceSpeed,
+    1
+  );
+
+  // 4. Price acceleration.
+  const normalizedPriceAcceleration =
+    (priceAcceleration ?? 0) /
+    historicalMedianAbsReturnPct;
+
+  const priceAccelerationScore = scoreSigned(
+    normalizedPriceAcceleration,
+    1
+  );
+
+  // 5. 24-hour price growth.
+  // Scale baseline using square root of 24 hours.
+  const expected24hMove =
+    historicalMedianAbsReturnPct *
+    Math.sqrt(24);
+
+  const normalized24hGrowth =
+    priceChange24hPct / expected24hMove;
+
+  const priceGrowthScore = scoreSigned(
+    normalized24hGrowth,
+    1
+  );
+
+  // ----------------------------------------
+  // COORDINATION SCORE
+  // ----------------------------------------
+
+  // A factor is considered positive only when
+  // it shows meaningful bullish behavior.
+
+  const positiveFactors = [
+    volumeStrengthRatio > 1.15,
+
+    (volumeMomentumRatio ?? 1) > 1.05 ||
+      (volumeAccelerationLog ?? 0) > 0,
+
+    priceSpeedAverage > 0,
+
+    (priceAcceleration ?? 0) > 0,
+
+    priceChange24hPct > 0
+  ];
+
+  const positiveFactorCount =
+    positiveFactors.filter(Boolean).length;
+
+  const coordinationScore =
+    (positiveFactorCount / positiveFactors.length) * 100;
+
+  // ----------------------------------------
+  // FINAL WEIGHTED SCORE
+  // ----------------------------------------
+
+  const finalScore =
+    volumeStrengthScore * WEIGHTS.volumeStrength / 100 +
+
+    volumeAccelerationScore *
+      WEIGHTS.volumeAcceleration / 100 +
+
+    priceSpeedScore *
+      WEIGHTS.priceSpeed / 100 +
+
+    priceAccelerationScore *
+      WEIGHTS.priceAcceleration / 100 +
+
+    priceGrowthScore *
+      WEIGHTS.priceGrowth / 100 +
+
+    coordinationScore *
+      WEIGHTS.coordination / 100;
+
+  const latestClosedCandle =
+    candleMetrics[candleMetrics.length - 1];
+
+  const last3hPriceChangePct =
+    safePercentChange(
+      last.close,
+      recent24[recent24.length - 4].close
+    );
+
+  let signal = 'LOW';
+
+  if (finalScore >= 75) {
+    signal = 'STRONG';
+  } else if (finalScore >= 65) {
+    signal = 'HIGH';
+  } else if (finalScore >= 55) {
+    signal = 'WATCH';
+  }
 
   return {
     contract,
     status: 'OK',
 
     timeframe: '1h',
+
+    score: round(finalScore, 2),
+
+    signal,
+
+    rank: null,
+
+    scores: {
+      volumeStrength: round(volumeStrengthScore, 2),
+
+      volumeAcceleration: round(
+        volumeAccelerationScore,
+        2
+      ),
+
+      priceSpeed: round(priceSpeedScore, 2),
+
+      priceAcceleration: round(
+        priceAccelerationScore,
+        2
+      ),
+
+      priceGrowth: round(priceGrowthScore, 2),
+
+      coordination: round(coordinationScore, 2)
+    },
+
+    weights: WEIGHTS,
+
+    coordination: {
+      positiveFactors: positiveFactorCount,
+      totalFactors: positiveFactors.length,
+      positiveFactorFlags: {
+        volumeStrength: positiveFactors[0],
+        volumeMomentum: positiveFactors[1],
+        priceSpeed: positiveFactors[2],
+        priceAcceleration: positiveFactors[3],
+        priceGrowth24h: positiveFactors[4]
+      }
+    },
+
+    metrics: {
+      priceChange24hPct: round(
+        priceChange24hPct
+      ),
+
+      last3hPriceChangePct: round(
+        last3hPriceChangePct
+      ),
+
+      averagePriceSpeed3hPct: round(
+        priceSpeedAverage
+      ),
+
+      priceAccelerationPp: round(
+        priceAcceleration
+      ),
+
+      volumeStrengthRatio: round(
+        volumeStrengthRatio,
+        3
+      ),
+
+      volumeMomentumRatio: round(
+        volumeMomentumRatio,
+        3
+      ),
+
+      volumeAccelerationLog: round(
+        volumeAccelerationLog,
+        4
+      ),
+
+      averageVolumeVsHistoricalMedian: round(
+        averageVolumeVsHistoricalMedian,
+        3
+      ),
+
+      quoteVolume24hUSDT: round(
+        totalQuoteVolume24h,
+        2
+      ),
+
+      averageHourlyVolume24hUSDT: round(
+        averageHourlyQuoteVolume24h,
+        2
+      ),
+
+      historicalMedianHourlyVolumeUSDT: round(
+        historicalMedianQuoteVolume,
+        2
+      ),
+
+      historicalMedianHourlyAbsPriceChangePct: round(
+        historicalMedianAbsReturnPct,
+        5
+      )
+    },
 
     candlesUsed: recent24.length,
 
@@ -372,44 +861,15 @@ function analyzeMarket(contract, rawCandles) {
     full15DayHistoryAvailable:
       candles.length >= HISTORY_CANDLES,
 
-    priceChange24hPct: round(
-      safePercentChange(
-        last.close,
-        first.open
-      )
-    ),
-
-    quoteVolume24hUSDT: round(
-      totalQuoteVolume24h,
-      2
-    ),
-
-    averageHourlyVolume24hUSDT: round(
-      averageHourlyQuoteVolume24h,
-      2
-    ),
-
-    averageVolumeVsHistoricalMedian: round(
-      averageVolumeVsHistoricalMedian,
-      3
-    ),
-
-    historicalMedianHourlyVolumeUSDT: round(
-      historicalMedianQuoteVolume,
-      2
-    ),
-
-    historicalMedianHourlyAbsPriceChangePct: round(
-      historicalMedianAbsReturnPct,
-      5
-    ),
-
-    latestClosedCandle:
-      candleMetrics[candleMetrics.length - 1],
+    latestClosedCandle,
 
     candleMetrics
   };
 }
+
+// ------------------------------------------
+// CONCURRENCY WORKER
+// ------------------------------------------
 
 async function mapWithConcurrency(
   items,
@@ -457,6 +917,10 @@ async function mapWithConcurrency(
   return results;
 }
 
+// ------------------------------------------
+// MAIN SCANNER
+// ------------------------------------------
+
 export async function scanGateMarkets() {
   console.log('\n======================================');
   console.log(' GATE.IO MARKET SCANNER');
@@ -481,6 +945,10 @@ export async function scanGateMarkets() {
 
   console.log(
     `Fetching ${FETCH_CANDLES} hourly candles per contract...`
+  );
+
+  console.log(
+    `Concurrency: ${CONCURRENCY} | Request spacing: ${MIN_REQUEST_INTERVAL_MS}ms`
   );
 
   let completed = 0;
@@ -518,6 +986,10 @@ export async function scanGateMarkets() {
     }
   );
 
+  // ----------------------------------------
+  // RESULT GROUPS
+  // ----------------------------------------
+
   const successful = results.filter(
     item => item.status === 'OK'
   );
@@ -530,12 +1002,32 @@ export async function scanGateMarkets() {
     item => item.status === 'ERROR'
   );
 
+  // ----------------------------------------
+  // RANKING
+  // ----------------------------------------
+
+  const rankedMarkets = successful
+    .sort((a, b) => b.score - a.score)
+    .map((market, index) => ({
+      ...market,
+      rank: index + 1
+    }));
+
+  const top20 = rankedMarkets.slice(
+    0,
+    TOP_LIMIT
+  );
+
+  // ----------------------------------------
+  // FINAL OUTPUT
+  // ----------------------------------------
+
   const output = {
     exchange: 'Gate.io',
 
     marketType: 'USDT Perpetual Futures',
 
-    timeframe: '1h',
+    timeframe: INTERVAL,
 
     scannedAt: new Date().toISOString(),
 
@@ -545,6 +1037,8 @@ export async function scanGateMarkets() {
 
     historyCandles: HISTORY_CANDLES,
 
+    rankingWeights: WEIGHTS,
+
     totalMarkets: activeContracts.length,
 
     successfulMarkets: successful.length,
@@ -553,14 +1047,22 @@ export async function scanGateMarkets() {
 
     failedMarkets: failed.length,
 
-    markets: successful,
+    rankedMarkets,
+
+    top20,
 
     insufficientHistory: insufficient,
 
     errors: failed
   };
 
-  console.log('\n===== SCAN SUMMARY =====');
+  // ----------------------------------------
+  // SUMMARY
+  // ----------------------------------------
+
+  console.log('\n======================================');
+  console.log(' SCAN SUMMARY');
+  console.log('======================================');
 
   console.log({
     exchange: output.exchange,
@@ -572,22 +1074,53 @@ export async function scanGateMarkets() {
     scannedAt: output.scannedAt
   });
 
-  if (successful.length > 0) {
-    console.log('\n===== SAMPLE MARKET =====');
+  // ----------------------------------------
+  // TOP 20 DISPLAY
+  // ----------------------------------------
 
-    console.log(
-      JSON.stringify(successful[0], null, 2)
-    );
-  }
+  console.log('\n======================================');
+  console.log(' TOP 20 MARKET WATCHLIST');
+  console.log('======================================');
+
+  console.table(
+    top20.map(market => ({
+      rank: market.rank,
+      contract: market.contract,
+      score: market.score,
+      signal: market.signal,
+
+      volume: market.scores.volumeStrength,
+
+      volumeAccel: market.scores.volumeAcceleration,
+
+      priceSpeed: market.scores.priceSpeed,
+
+      priceAccel: market.scores.priceAcceleration,
+
+      growth24h: market.scores.priceGrowth,
+
+      coordination: market.scores.coordination,
+
+      price24h: market.metrics.priceChange24hPct,
+
+      volumeRatio: market.metrics.volumeStrengthRatio
+    }))
+  );
+
+  console.log('\n===== TOP 20 DETAILS =====');
+
+  console.log(
+    JSON.stringify(top20, null, 2)
+  );
 
   console.log('\n===== SCAN FINISHED =====');
 
   return output;
 }
 
-// IMPORTANT:
-// This file is imported by src/index.js.
-// Therefore, execute the scan when this module is loaded.
+// ------------------------------------------
+// AUTO EXECUTION
+// ------------------------------------------
 
 try {
   await scanGateMarkets();
