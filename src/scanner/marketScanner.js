@@ -17,6 +17,9 @@ const TIMEFRAMES = {
 const sleep = ms =>
   new Promise(resolve => setTimeout(resolve, ms));
 
+const clamp = (value, min, max) =>
+  Math.min(Math.max(value, min), max);
+
 async function getAnalysis(symbol, interval) {
   const candles = await getKlines(symbol, interval, 30);
   return analyzeVolume(candles);
@@ -36,143 +39,166 @@ async function scanSymbol(symbol) {
     const oneHour = await getAnalysis(symbol, TIMEFRAMES.oneHour);
     await sleep(120);
 
-    const fifteenMinute = await getAnalysis(
-      symbol,
-      TIMEFRAMES.fifteenMinute
-    );
+    const fifteenMinute = await getAnalysis(symbol, TIMEFRAMES.fifteenMinute);
     await sleep(120);
 
-    const fiveMinute = await getAnalysis(
-      symbol,
-      TIMEFRAMES.fiveMinute
-    );
+    const fiveMinute = await getAnalysis(symbol, TIMEFRAMES.fiveMinute);
 
-    if (
-      !weekly ||
-      !daily ||
-      !fourHour ||
-      !oneHour ||
-      !fifteenMinute ||
-      !fiveMinute
-    ) {
+    if (!weekly || !daily || !fourHour || !oneHour ||
+        !fifteenMinute || !fiveMinute) {
       return null;
     }
 
-    // شناسایی نامزدهای انباشت بلندمدت
-    const watch =
-      weekly.gradualVolumeGrowth &&
-      daily.gradualVolumeGrowth &&
-      Math.abs(daily.priceChangePercent) < 3;
+    // =====================================
+    // 1. EARLY ACCUMULATION
+    // =====================================
 
-    const accumulationCandidate =
-      watch &&
+    const earlyPriceStable =
+      Math.abs(daily.priceChangePercent) <= 3 &&
+      Math.abs(fourHour.priceChangePercent) <= 5;
+
+    const earlyVolumeGrowing =
+      weekly.trendRatio >= 1.15 &&
+      daily.trendRatio >= 1.15 &&
       weekly.volumeTrend === 'RISING' &&
-      daily.volumeTrend === 'RISING' &&
-      weekly.trendRatio >= 1.25 &&
-      daily.trendRatio >= 1.25;
+      daily.volumeTrend === 'RISING';
 
-    // هشدار سریع لانگ
-    const fastLongTrigger =
-      fifteenMinute.volumeRatio >= 2 &&
-      fiveMinute.volumeRatio >= 1.5 &&
-      fifteenMinute.direction === 'BULLISH' &&
-      fiveMinute.direction === 'BULLISH' &&
-      fifteenMinute.closePosition >= 60 &&
-      fiveMinute.closePosition >= 60 &&
-      fifteenMinute.priceChangePercent <= 3 &&
-      fiveMinute.priceChangePercent <= 2;
+    const earlyIntradayActivity =
+      fourHour.trendRatio >= 1.10 ||
+      oneHour.trendRatio >= 1.10;
 
-    // هشدار سریع شورت
-    const fastShortTrigger =
-      fifteenMinute.volumeRatio >= 2 &&
-      fiveMinute.volumeRatio >= 1.5 &&
-      fifteenMinute.direction === 'BEARISH' &&
-      fiveMinute.direction === 'BEARISH' &&
-      fifteenMinute.closePosition <= 40 &&
-      fiveMinute.closePosition <= 40 &&
-      fifteenMinute.priceChangePercent >= -3 &&
-      fiveMinute.priceChangePercent >= -2;
+    const earlyAccumulation =
+      earlyPriceStable &&
+      earlyVolumeGrowing &&
+      earlyIntradayActivity;
 
-    if (
-      !accumulationCandidate &&
-      !fastLongTrigger &&
-      !fastShortTrigger
-    ) {
-      return null;
-    }
-
-    // تأیید حرکت در تایم‌فریم‌های ۴ و ۱ ساعته
-    const longSetup =
-      accumulationCandidate &&
-      fourHour.volumeRatio >= 2 &&
-      oneHour.volumeRatio >= 1.5 &&
-      fourHour.direction === 'BULLISH' &&
-      oneHour.direction === 'BULLISH' &&
-      fourHour.closePosition >= 60 &&
-      oneHour.closePosition >= 60 &&
-      fourHour.priceChangePercent <= 8 &&
-      oneHour.priceChangePercent <= 5;
-
-    const shortSetup =
-      accumulationCandidate &&
-      fourHour.volumeRatio >= 2 &&
-      oneHour.volumeRatio >= 1.5 &&
-      fourHour.direction === 'BEARISH' &&
-      oneHour.direction === 'BEARISH' &&
-      fourHour.closePosition <= 40 &&
-      oneHour.closePosition <= 40 &&
-      fourHour.priceChangePercent >= -8 &&
-      oneHour.priceChangePercent >= -5;
-
-    let status = 'WATCH';
-    let direction = 'UNCONFIRMED';
-
-    if (longSetup) {
-      status = 'PRE-PUMP LONG';
-      direction = 'BULLISH';
-    } else if (shortSetup) {
-      status = 'PRE-PUMP SHORT';
-      direction = 'BEARISH';
-    } else if (fastLongTrigger) {
-      status = 'FAST LONG WATCH';
-      direction = 'BULLISH';
-    } else if (fastShortTrigger) {
-      status = 'FAST SHORT WATCH';
-      direction = 'BEARISH';
-    }
-
-    // محاسبه امتیاز رشد تدریجی حجم
     const weeklyScore =
-      Math.min(
-        Math.max((weekly.trendRatio - 1) / 1.5, 0),
-        1
-      ) * 30;
+      clamp((weekly.trendRatio - 1) / 1.5, 0, 1) * 30;
 
     const dailyScore =
-      Math.min(
-        Math.max((daily.trendRatio - 1) / 1.5, 0),
+      clamp((daily.trendRatio - 1) / 1.5, 0, 1) * 30;
+
+    const intradayScore =
+      clamp(
+        ((fourHour.trendRatio + oneHour.trendRatio) / 2 - 1) / 1.5,
+        0,
         1
-      ) * 30;
+      ) * 20;
 
-    // امتیاز آرامش قیمت
-    const stabilityScore = Math.max(
-      0,
-      40 -
+    const stabilityScore = clamp(
+      20 -
       Math.abs(daily.priceChangePercent) * 2 -
-      Math.abs(fourHour.priceChangePercent) * 0.5 -
-      Math.abs(oneHour.priceChangePercent)
+      Math.abs(fourHour.priceChangePercent),
+      0,
+      20
     );
 
-    const accumulationScore = Math.round(
-      weeklyScore + dailyScore + stabilityScore
+    const earlyScore = Math.round(
+      weeklyScore + dailyScore +
+      intradayScore + stabilityScore
     );
 
-    // خروجی نهایی هر ارز
+    // =====================================
+    // 2. MOMENTUM ALERT
+    // =====================================
+
+    const momentumLong =
+      fourHour.direction === 'BULLISH' &&
+      oneHour.direction === 'BULLISH' &&
+      fifteenMinute.direction === 'BULLISH' &&
+      fiveMinute.direction === 'BULLISH' &&
+      fourHour.volumeRatio >= 1.5 &&
+      oneHour.volumeRatio >= 1.5 &&
+      fifteenMinute.volumeRatio >= 2 &&
+      fiveMinute.volumeRatio >= 1.5 &&
+      fifteenMinute.closePosition >= 60 &&
+      fiveMinute.closePosition >= 60;
+
+    const momentumShort =
+      fourHour.direction === 'BEARISH' &&
+      oneHour.direction === 'BEARISH' &&
+      fifteenMinute.direction === 'BEARISH' &&
+      fiveMinute.direction === 'BEARISH' &&
+      fourHour.volumeRatio >= 1.5 &&
+      oneHour.volumeRatio >= 1.5 &&
+      fifteenMinute.volumeRatio >= 2 &&
+      fiveMinute.volumeRatio >= 1.5 &&
+      fifteenMinute.closePosition <= 40 &&
+      fiveMinute.closePosition <= 40;
+
+    const momentumVolumeScore =
+      clamp((fifteenMinute.volumeRatio - 1) / 3, 0, 1) * 35 +
+      clamp((fiveMinute.volumeRatio - 1) / 2, 0, 1) * 25;
+
+    const momentumTrendScore =
+      clamp((fourHour.volumeRatio - 1) / 2, 0, 1) * 20 +
+      clamp((oneHour.volumeRatio - 1) / 2, 0, 1) * 20;
+
+    const momentumScore = Math.round(
+      momentumVolumeScore + momentumTrendScore
+    );
+
+    // =====================================
+    // 3. FILTER AND STATUS
+    // =====================================
+
+    const hasEarlySignal = earlyAccumulation && earlyScore >= 35;
+    const hasMomentumSignal = momentumLong || momentumShort;
+
+    if (!hasEarlySignal && !hasMomentumSignal) {
+      return null;
+    }
+
+    let earlyDirection = 'UNCONFIRMED';
+
+    if (
+      fourHour.direction === 'BULLISH' &&
+      oneHour.direction === 'BULLISH'
+    ) {
+      earlyDirection = 'BULLISH';
+    } else if (
+      fourHour.direction === 'BEARISH' &&
+      oneHour.direction === 'BEARISH'
+    ) {
+      earlyDirection = 'BEARISH';
+    }
+
+    let momentumDirection = 'NONE';
+
+    if (momentumLong) {
+      momentumDirection = 'BULLISH';
+    } else if (momentumShort) {
+      momentumDirection = 'BEARISH';
+    }
+
+    let status = 'WATCH';
+
+    if (hasEarlySignal && hasMomentumSignal) {
+      status = 'EARLY + MOMENTUM';
+    } else if (hasEarlySignal) {
+      status = 'EARLY ACCUMULATION';
+    } else if (momentumLong) {
+      status = 'MOMENTUM LONG';
+    } else if (momentumShort) {
+      status = 'MOMENTUM SHORT';
+    }
+
+    // =====================================
+    // 4. FINAL RESULT
+    // =====================================
+
     return {
       symbol,
       status,
-      direction,
-      accumulationScore,
+
+      earlyAccumulation,
+      earlyScore,
+      earlyDirection,
+
+      momentumLong,
+      momentumShort,
+      momentumScore,
+      momentumDirection,
 
       weeklyVolume: weekly.volumeRatio,
       dailyVolume: daily.volumeRatio,
@@ -189,12 +215,11 @@ async function scanSymbol(symbol) {
 
       weeklyTrend: weekly.trendRatio,
       dailyTrend: daily.trendRatio,
+      fourHourTrend: fourHour.trendRatio,
+      oneHourTrend: oneHour.trendRatio,
 
       weeklyVolumeTrend: weekly.volumeTrend,
-      dailyVolumeTrend: daily.volumeTrend,
-
-      fourHourClosePosition: fourHour.closePosition,
-      oneHourClosePosition: oneHour.closePosition
+      dailyVolumeTrend: daily.volumeTrend
     };
 
   } catch (error) {
@@ -231,7 +256,7 @@ async function scanAllSymbols(symbols) {
 }
 
 async function runScanner() {
-  console.log('Starting Gate.io multi-timeframe scan...');
+  console.log('Starting Gate.io dual-signal scanner...');
 
   try {
     const tickers = await getMarketTickers();
@@ -239,28 +264,30 @@ async function runScanner() {
 
     console.log(`Found ${tickers.length} markets`);
     console.log(`Scanning ${selected.length} markets`);
-
-    console.log(
-      'Timeframes: 7D / 1D / 4H / 1H / 15M / 5M'
-    );
+    console.log('Timeframes: 7D / 1D / 4H / 1H / 15M / 5M');
+    console.log('Modes: EARLY ACCUMULATION + MOMENTUM');
 
     const results = await scanAllSymbols(
       selected.map(item => item.symbol)
     );
 
-    // مرتب‌سازی بر اساس امتیاز
-    results.sort(
-      (a, b) => b.accumulationScore - a.accumulationScore
+    results.sort((a, b) =>
+      Math.max(b.earlyScore, b.momentumScore) -
+      Math.max(a.earlyScore, a.momentumScore)
     );
 
-    console.log('\n===== MARKET WATCHLIST =====');
+    console.log('\n===== DUAL SIGNAL WATCHLIST =====');
 
     for (const item of results) {
       console.log({
         symbol: item.symbol,
         status: item.status,
-        direction: item.direction,
-        accumulationScore: item.accumulationScore,
+
+        earlyScore: item.earlyScore,
+        earlyDirection: item.earlyDirection,
+
+        momentumScore: item.momentumScore,
+        momentumDirection: item.momentumDirection,
 
         weeklyVolume: item.weeklyVolume + 'x',
         dailyVolume: item.dailyVolume + 'x',
@@ -277,45 +304,30 @@ async function runScanner() {
 
         weeklyTrend: item.weeklyTrend + 'x',
         dailyTrend: item.dailyTrend + 'x',
-
-        weeklyVolumeTrend: item.weeklyVolumeTrend,
-        dailyVolumeTrend: item.dailyVolumeTrend
+        fourHourTrend: item.fourHourTrend + 'x',
+        oneHourTrend: item.oneHourTrend + 'x'
       });
     }
 
     console.log('\n===== SCAN SUMMARY =====');
 
-    console.log(`Watchlist: ${results.length}`);
+    console.log(`Total signals: ${results.length}`);
 
     console.log(
-      `Pre-pump long: ${
-        results.filter(
-          x => x.status === 'PRE-PUMP LONG'
-        ).length
+      `Early accumulation: ${
+        results.filter(x => x.earlyAccumulation).length
       }`
     );
 
     console.log(
-      `Pre-pump short: ${
-        results.filter(
-          x => x.status === 'PRE-PUMP SHORT'
-        ).length
+      `Momentum long: ${
+        results.filter(x => x.momentumLong).length
       }`
     );
 
     console.log(
-      `Fast long watch: ${
-        results.filter(
-          x => x.status === 'FAST LONG WATCH'
-        ).length
-      }`
-    );
-
-    console.log(
-      `Fast short watch: ${
-        results.filter(
-          x => x.status === 'FAST SHORT WATCH'
-        ).length
+      `Momentum short: ${
+        results.filter(x => x.momentumShort).length
       }`
     );
 
