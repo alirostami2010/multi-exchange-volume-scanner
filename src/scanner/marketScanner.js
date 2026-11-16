@@ -71,7 +71,7 @@ async function scanSymbol(symbol) {
       weekly.trendRatio >= 1.25 &&
       daily.trendRatio >= 1.25;
 
-    // هشدار سریع لانگ در ۱۵ و ۵ دقیقه
+    // هشدار سریع لانگ
     const fastLongTrigger =
       fifteenMinute.volumeRatio >= 2 &&
       fiveMinute.volumeRatio >= 1.5 &&
@@ -82,7 +82,7 @@ async function scanSymbol(symbol) {
       fifteenMinute.priceChangePercent <= 3 &&
       fiveMinute.priceChangePercent <= 2;
 
-    // هشدار سریع شورت در ۱۵ و ۵ دقیقه
+    // هشدار سریع شورت
     const fastShortTrigger =
       fifteenMinute.volumeRatio >= 2 &&
       fiveMinute.volumeRatio >= 1.5 &&
@@ -141,9 +141,34 @@ async function scanSymbol(symbol) {
       direction = 'BEARISH';
     }
 
+    // محاسبه امتیاز رشد تدریجی حجم
+    const weeklyScore =
+      Math.min(
+        Math.max((weekly.trendRatio - 1) / 1.5, 0),
+        1
+      ) * 30;
+
+    const dailyScore =
+      Math.min(
+        Math.max((daily.trendRatio - 1) / 1.5, 0),
+        1
+      ) * 30;
+
+    // امتیاز آرامش قیمت
+    const stabilityScore = Math.max(
+      0,
+      40 -
+      Math.abs(daily.priceChangePercent) * 2 -
+      Math.abs(fourHour.priceChangePercent) * 0.5 -
+      Math.abs(oneHour.priceChangePercent)
+    );
+
+    const accumulationScore = Math.round(
+      weeklyScore + dailyScore + stabilityScore
+    );
+
     // خروجی نهایی هر ارز
-    // خروجی نهایی هر ارز
-     return {
+    return {
       symbol,
       status,
       direction,
@@ -223,9 +248,11 @@ async function runScanner() {
       selected.map(item => item.symbol)
     );
 
-   results.sort(
+    // مرتب‌سازی بر اساس امتیاز
+    results.sort(
       (a, b) => b.accumulationScore - a.accumulationScore
     );
+
     console.log('\n===== MARKET WATCHLIST =====');
 
     for (const item of results) {
@@ -233,6 +260,7 @@ async function runScanner() {
         symbol: item.symbol,
         status: item.status,
         direction: item.direction,
+        accumulationScore: item.accumulationScore,
 
         weeklyVolume: item.weeklyVolume + 'x',
         dailyVolume: item.dailyVolume + 'x',
