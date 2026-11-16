@@ -1,22 +1,14 @@
 
 import 'dotenv/config';
 
-console.log('================================');
-console.log(' MULTI-EXCHANGE VOLUME SCANNER');
-console.log('================================');
+console.log('======================================');
+console.log(' MULTI-EXCHANGE SMART VOLUME SCANNER');
+console.log('======================================');
 
-console.log('Starting scanner...');
+console.log('Starting market scanner...');
+console.log('Exchange: Binance');
+console.log('Market: USDT Perpetual Futures');
+console.log('Timeframes: 1m');
+console.log('Mode: Volume Spike Detection');
 
-const exchanges = [
-  'Binance',
-  'Bybit',
-  'OKX',
-  'LBank',
-  'Toobit'
-];
-
-for (const exchange of exchanges) {
-  console.log(`Exchange configured: ${exchange}`);
-}
-
-console.log('Scanner initialization completed.');
+import './scanner/marketScanner.js';
