@@ -40,9 +40,11 @@ async function scanSymbol(symbol) {
 
     // شناسایی افزایش تدریجی حجم در بازه‌های بزرگ
     const watch =
-      weekly.volumeRatio >= 1.5 &&
-      daily.volumeRatio >= 1.3 &&
-      Math.abs(daily.priceChangePercent) < 5;
+  (
+    weekly.gradualVolumeGrowth ||
+    daily.gradualVolumeGrowth
+  ) &&
+  Math.abs(daily.priceChangePercent) < 5;
 
     if (!watch) return null;
 
@@ -90,7 +92,11 @@ async function scanSymbol(symbol) {
       oneHourChange: oneHour.priceChangePercent,
 
       fourHourClosePosition: fourHour.closePosition,
-      oneHourClosePosition: oneHour.closePosition
+      oneHourClosePosition: oneHour.closePosition,
+      weeklyTrend: weekly.trendRatio,
+      dailyTrend: daily.trendRatio,
+      weeklyVolumeTrend: weekly.volumeTrend,
+      dailyVolumeTrend: daily.volumeTrend,
     };
 
   } catch (error) {
@@ -162,7 +168,11 @@ async function runScanner() {
         oneHourVolume: item.oneHourVolume + 'x',
         dailyChange: item.dailyChange + '%',
         fourHourChange: item.fourHourChange + '%',
-        oneHourChange: item.oneHourChange + '%'
+        oneHourChange: item.oneHourChange + '%',
+        weeklyTrend: item.weeklyTrend + 'x',
+        dailyTrend: item.dailyTrend + 'x',
+        weeklyVolumeTrend: item.weeklyVolumeTrend,
+        dailyVolumeTrend: item.dailyVolumeTrend,
       });
     }
 
