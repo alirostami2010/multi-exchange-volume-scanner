@@ -17,7 +17,7 @@ async function scanSymbol(symbol) {
     if (!result || !result.volumeSpike) return null;
 
     return {
-      exchange: 'Bybit',
+      exchange: 'Gate.io',
       symbol,
       ...result
     };
@@ -53,7 +53,7 @@ async function scanAllSymbols(symbols) {
 }
 
 async function runScanner() {
-  console.log('Starting Bybit market scan...');
+  console.log('Starting Gate.io market scan...');
 
   try {
     const tickers = await getMarketTickers();
