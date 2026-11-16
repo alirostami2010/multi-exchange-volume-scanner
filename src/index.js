@@ -1,1 +1,1 @@
-import './marketScanner.js';
+import './scanner/marketScanner.js';
