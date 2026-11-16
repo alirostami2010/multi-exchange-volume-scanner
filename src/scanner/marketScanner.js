@@ -24,7 +24,6 @@ async function getAnalysis(symbol, interval) {
 
 async function scanSymbol(symbol) {
   try {
-    // دریافت اطلاعات شش تایم‌فریم
     const weekly = await getAnalysis(symbol, TIMEFRAMES.weekly);
     await sleep(120);
 
@@ -48,7 +47,6 @@ async function scanSymbol(symbol) {
       TIMEFRAMES.fiveMinute
     );
 
-    // اطمینان از معتبر بودن اطلاعات
     if (
       !weekly ||
       !daily ||
@@ -60,7 +58,7 @@ async function scanSymbol(symbol) {
       return null;
     }
 
-    // شناسایی روند افزایشی حجم در تایم‌فریم‌های بزرگ
+    // شناسایی نامزدهای انباشت بلندمدت
     const watch =
       weekly.gradualVolumeGrowth &&
       daily.gradualVolumeGrowth &&
@@ -73,72 +71,74 @@ async function scanSymbol(symbol) {
       weekly.trendRatio >= 1.25 &&
       daily.trendRatio >= 1.25;
 
-    
-const fastLongTrigger =
-  fifteenMinute.volumeRatio >= 2 &&
-  fiveMinute.volumeRatio >= 1.5 &&
-  fifteenMinute.direction === 'BULLISH' &&
-  fiveMinute.direction === 'BULLISH' &&
-  fifteenMinute.closePosition >= 60 &&
-  fiveMinute.closePosition >= 60 &&
-  fifteenMinute.priceChangePercent <= 3 &&
-  fiveMinute.priceChangePercent <= 2;
+    // هشدار سریع لانگ در ۱۵ و ۵ دقیقه
+    const fastLongTrigger =
+      fifteenMinute.volumeRatio >= 2 &&
+      fiveMinute.volumeRatio >= 1.5 &&
+      fifteenMinute.direction === 'BULLISH' &&
+      fiveMinute.direction === 'BULLISH' &&
+      fifteenMinute.closePosition >= 60 &&
+      fiveMinute.closePosition >= 60 &&
+      fifteenMinute.priceChangePercent <= 3 &&
+      fiveMinute.priceChangePercent <= 2;
 
-const fastShortTrigger =
-  fifteenMinute.volumeRatio >= 2 &&
-  fiveMinute.volumeRatio >= 1.5 &&
-  fifteenMinute.direction === 'BEARISH' &&
-  fiveMinute.direction === 'BEARISH' &&
-  fifteenMinute.closePosition <= 40 &&
-  fiveMinute.closePosition <= 40 &&
-  fifteenMinute.priceChangePercent >= -3 &&
-  fiveMinute.priceChangePercent >= -2;
+    // هشدار سریع شورت در ۱۵ و ۵ دقیقه
+    const fastShortTrigger =
+      fifteenMinute.volumeRatio >= 2 &&
+      fiveMinute.volumeRatio >= 1.5 &&
+      fifteenMinute.direction === 'BEARISH' &&
+      fiveMinute.direction === 'BEARISH' &&
+      fifteenMinute.closePosition <= 40 &&
+      fiveMinute.closePosition <= 40 &&
+      fifteenMinute.priceChangePercent >= -3 &&
+      fiveMinute.priceChangePercent >= -2;
 
-if (
-  !accumulationCandidate &&
-  !fastLongTrigger &&
-  !fastShortTrigger
-) return null;
+    if (
+      !accumulationCandidate &&
+      !fastLongTrigger &&
+      !fastShortTrigger
+    ) {
+      return null;
+    }
 
-const longSetup =
-  accumulationCandidate &&
-  fourHour.volumeRatio >= 2 &&
-  oneHour.volumeRatio >= 1.5 &&
-  fourHour.direction === 'BULLISH' &&
-  oneHour.direction === 'BULLISH' &&
-  fourHour.closePosition >= 60 &&
-  oneHour.closePosition >= 60 &&
-  fourHour.priceChangePercent <= 8 &&
-  oneHour.priceChangePercent <= 5;
+    // تأیید حرکت در تایم‌فریم‌های ۴ و ۱ ساعته
+    const longSetup =
+      accumulationCandidate &&
+      fourHour.volumeRatio >= 2 &&
+      oneHour.volumeRatio >= 1.5 &&
+      fourHour.direction === 'BULLISH' &&
+      oneHour.direction === 'BULLISH' &&
+      fourHour.closePosition >= 60 &&
+      oneHour.closePosition >= 60 &&
+      fourHour.priceChangePercent <= 8 &&
+      oneHour.priceChangePercent <= 5;
 
-const shortSetup =
-  accumulationCandidate &&
-  fourHour.volumeRatio >= 2 &&
-  oneHour.volumeRatio >= 1.5 &&
-  fourHour.direction === 'BEARISH' &&
-  oneHour.direction === 'BEARISH' &&
-  fourHour.closePosition <= 40 &&
-  oneHour.closePosition <= 40 &&
-  fourHour.priceChangePercent >= -8 &&
-  oneHour.priceChangePercent >= -5;
+    const shortSetup =
+      accumulationCandidate &&
+      fourHour.volumeRatio >= 2 &&
+      oneHour.volumeRatio >= 1.5 &&
+      fourHour.direction === 'BEARISH' &&
+      oneHour.direction === 'BEARISH' &&
+      fourHour.closePosition <= 40 &&
+      oneHour.closePosition <= 40 &&
+      fourHour.priceChangePercent >= -8 &&
+      oneHour.priceChangePercent >= -5;
 
-let status = 'WATCH';
-let direction = 'UNCONFIRMED';
+    let status = 'WATCH';
+    let direction = 'UNCONFIRMED';
 
-if (longSetup) {
-  status = 'PRE-PUMP LONG';
-  direction = 'BULLISH';
-} else if (shortSetup) {
-  status = 'PRE-PUMP SHORT';
-  direction = 'BEARISH';
-} else if (fastLongTrigger) {
-  status = 'FAST LONG WATCH';
-  direction = 'BULLISH';
-} else if (fastShortTrigger) {
-  status = 'FAST SHORT WATCH';
-  direction = 'BEARISH';
-}
-
+    if (longSetup) {
+      status = 'PRE-PUMP LONG';
+      direction = 'BULLISH';
+    } else if (shortSetup) {
+      status = 'PRE-PUMP SHORT';
+      direction = 'BEARISH';
+    } else if (fastLongTrigger) {
+      status = 'FAST LONG WATCH';
+      direction = 'BULLISH';
+    } else if (fastShortTrigger) {
+      status = 'FAST SHORT WATCH';
+      direction = 'BEARISH';
     }
 
     // خروجی نهایی هر ارز
@@ -222,17 +222,18 @@ async function runScanner() {
     );
 
     results.sort((a, b) => {
-      if (
-        a.status === 'PRE-PUMP LONG' &&
-        b.status !== 'PRE-PUMP LONG'
-      ) return -1;
+      const priority = {
+        'PRE-PUMP LONG': 1,
+        'PRE-PUMP SHORT': 2,
+        'FAST LONG WATCH': 3,
+        'FAST SHORT WATCH': 4,
+        'WATCH': 5
+      };
 
-      if (
-        b.status === 'PRE-PUMP LONG' &&
-        a.status !== 'PRE-PUMP LONG'
-      ) return 1;
-
-      return b.weeklyTrend - a.weeklyTrend;
+      return (
+        (priority[a.status] || 99) -
+        (priority[b.status] || 99)
+      ) || b.weeklyTrend - a.weeklyTrend;
     });
 
     console.log('\n===== MARKET WATCHLIST =====');
@@ -280,6 +281,22 @@ async function runScanner() {
       `Pre-pump short: ${
         results.filter(
           x => x.status === 'PRE-PUMP SHORT'
+        ).length
+      }`
+    );
+
+    console.log(
+      `Fast long watch: ${
+        results.filter(
+          x => x.status === 'FAST LONG WATCH'
+        ).length
+      }`
+    );
+
+    console.log(
+      `Fast short watch: ${
+        results.filter(
+          x => x.status === 'FAST SHORT WATCH'
         ).length
       }`
     );
