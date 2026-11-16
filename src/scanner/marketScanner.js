@@ -917,6 +917,114 @@ async function mapWithConcurrency(
   return results;
 }
 
+
+// ------------------------------------------
+// TELEGRAM REPORT
+// ------------------------------------------
+
+async function sendTelegramReport(output) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+
+  if (!token || !chatId) {
+    console.log('Telegram credentials not configured. Skipping Telegram report.');
+    return;
+  }
+
+  const botUrl = `https://api.telegram.org/bot${token}`;
+
+  const date = new Date(output.scannedAt).toLocaleString('en-GB', {
+    timeZone: 'UTC',
+    hour12: false
+  });
+
+  const lines = [
+    '📊 GATE.IO MARKET SCANNER',
+    '',
+    `🕒 Scan time: ${date} UTC`,
+    `📈 Timeframe: ${output.timeframe}`,
+    '',
+    '📋 SCAN SUMMARY',
+    `Total markets: ${output.totalMarkets}`,
+    `Successful: ${output.successfulMarkets}`,
+    `Insufficient history: ${output.insufficientHistoryMarkets}`,
+    `Failed: ${output.failedMarkets}`,
+    '',
+    '🏆 TOP 20 MARKETS',
+    ''
+  ];
+
+  for (const market of output.top20) {
+    const growth = market.metrics.priceChange24hPct;
+    const growthText = growth === null
+      ? 'N/A'
+      : `${growth > 0 ? '+' : ''}${growth}%`;
+
+    lines.push(
+      `${market.rank}. ${market.contract}`,
+      `Score: ${market.score} | Signal: ${market.signal}`,
+      `24h: ${growthText} | Volume ratio: ${market.metrics.volumeStrengthRatio}x`,
+      ''
+    );
+  }
+
+  const message = lines.join('\n');
+
+  // Send summary message.
+  const messageResponse = await fetch(`${botUrl}/sendMessage`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      chat_id: chatId,
+      text: message
+    })
+  });
+
+  const messageResult = await messageResponse.json();
+
+  if (!messageResponse.ok || !messageResult.ok) {
+    throw new Error(
+      `Telegram message failed: ${messageResult.description || messageResponse.status}`
+    );
+  }
+
+  console.log('Telegram summary sent successfully.');
+
+  // Send complete JSON report as a document.
+  const reportJson = JSON.stringify(output, null, 2);
+
+  const form = new FormData();
+
+  form.append('chat_id', chatId);
+
+  form.append(
+    'document',
+    new Blob(
+      [reportJson],
+      { type: 'application/json' }
+    ),
+    `gate-scan-${output.scannedAt.replace(/[:.]/g, '-')}.json`
+  );
+
+  const documentResponse = await fetch(`${botUrl}/sendDocument`, {
+    method: 'POST',
+    body: form
+  });
+
+  const documentResult = await documentResponse.json();
+
+  if (!documentResponse.ok || !documentResult.ok) {
+    throw new Error(
+      `Telegram document failed: ${documentResult.description || documentResponse.status}`
+    );
+  }
+
+  console.log('Telegram full report sent successfully.');
+}
+
+
 // ------------------------------------------
 // MAIN SCANNER
 // ------------------------------------------
