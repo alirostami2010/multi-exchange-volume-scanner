@@ -1,26 +1,24 @@
 
-name: Crypto Volume Scanner
+name: Gate API Connection Test
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "*/5 * * * *"
 
 jobs:
-  scan:
+  test:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Test Gate.io Futures API
+        run: |
+          set -e
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
+          echo "Testing futures contracts..."
+          curl -fsS "https://api.gateio.ws/api/v4/futures/usdt/contracts" | jq '.[0]'
 
-      - name: Install dependencies
-        run: npm install
+          echo "Testing futures tickers..."
+          curl -fsS "https://api.gateio.ws/api/v4/futures/usdt/tickers" | jq '.[0]'
 
-      - name: Run scanner
-        run: timeout 4m npm start
+          echo "Testing 1m candles..."
+          curl -fsS "https://api.gateio.ws/api/v4/futures/usdt/candlesticks?contract=BTC_USDT&interval=1m&limit=3" | jq '.'
+
+          echo "GATE API TEST SUCCESSFUL"
