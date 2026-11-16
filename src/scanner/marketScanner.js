@@ -3,6 +3,8 @@ import { getMarketTickers, getKlines } from '../exchanges/gateio.js';
 import { analyzeVolume } from './volumeScanner.js';
 
 const TOP_SYMBOLS = 150;
+const TOP_EARLY = 20;
+const TOP_MOMENTUM = 20;
 const CONCURRENCY = 4;
 
 const TIMEFRAMES = {
@@ -50,7 +52,7 @@ async function scanSymbol(symbol) {
     }
 
     // =====================================
-    // 1. EARLY ACCUMULATION
+    // 1. EARLY ACCUMULATION SCORE
     // =====================================
 
     const earlyPriceStable =
@@ -59,31 +61,19 @@ async function scanSymbol(symbol) {
 
     const earlyVolumeGrowing =
       weekly.trendRatio >= 1.15 &&
-      daily.trendRatio >= 1.15 &&
-      weekly.volumeTrend === 'RISING' &&
-      daily.volumeTrend === 'RISING';
+      daily.trendRatio >= 1.15;
 
     const earlyIntradayActivity =
       fourHour.trendRatio >= 1.10 ||
       oneHour.trendRatio >= 1.10;
 
-    const earlyAccumulation =
-      earlyPriceStable &&
-      earlyVolumeGrowing &&
-      earlyIntradayActivity;
-
-    const weeklyScore =
-      clamp((weekly.trendRatio - 1) / 1.5, 0, 1) * 30;
-
-    const dailyScore =
+    const earlyVolumeScore =
+      clamp((weekly.trendRatio - 1) / 1.5, 0, 1) * 30 +
       clamp((daily.trendRatio - 1) / 1.5, 0, 1) * 30;
 
-    const intradayScore =
-      clamp(
-        ((fourHour.trendRatio + oneHour.trendRatio) / 2 - 1) / 1.5,
-        0,
-        1
-      ) * 20;
+    const earlyIntradayScore =
+      clamp((fourHour.trendRatio - 1) / 1.5, 0, 1) * 10 +
+      clamp((oneHour.trendRatio - 1) / 1.5, 0, 1) * 10;
 
     const stabilityScore = clamp(
       20 -
@@ -94,12 +84,44 @@ async function scanSymbol(symbol) {
     );
 
     const earlyScore = Math.round(
-      weeklyScore + dailyScore +
-      intradayScore + stabilityScore
+      earlyVolumeScore +
+      earlyIntradayScore +
+      stabilityScore
+    );
+
+    const earlyAccumulation =
+      earlyPriceStable &&
+      earlyVolumeGrowing &&
+      earlyIntradayActivity;
+
+    // =====================================
+    // 2. MOMENTUM SCORE
+    // =====================================
+
+    const momentumVolumeScore =
+      clamp((fifteenMinute.volumeRatio - 1) / 3, 0, 1) * 30 +
+      clamp((fiveMinute.volumeRatio - 1) / 2, 0, 1) * 25;
+
+    const momentumTrendScore =
+      clamp((fourHour.volumeRatio - 1) / 2, 0, 1) * 15 +
+      clamp((oneHour.volumeRatio - 1) / 2, 0, 1) * 15;
+
+    const momentumDirectionScore =
+      (
+        (fifteenMinute.direction === 'BULLISH' &&
+         fiveMinute.direction === 'BULLISH') ||
+        (fifteenMinute.direction === 'BEARISH' &&
+         fiveMinute.direction === 'BEARISH')
+      ) ? 15 : 0;
+
+    const momentumScore = Math.round(
+      momentumVolumeScore +
+      momentumTrendScore +
+      momentumDirectionScore
     );
 
     // =====================================
-    // 2. MOMENTUM ALERT
+    // 3. MOMENTUM DIRECTION
     // =====================================
 
     const momentumLong =
@@ -126,28 +148,9 @@ async function scanSymbol(symbol) {
       fifteenMinute.closePosition <= 40 &&
       fiveMinute.closePosition <= 40;
 
-    const momentumVolumeScore =
-      clamp((fifteenMinute.volumeRatio - 1) / 3, 0, 1) * 35 +
-      clamp((fiveMinute.volumeRatio - 1) / 2, 0, 1) * 25;
-
-    const momentumTrendScore =
-      clamp((fourHour.volumeRatio - 1) / 2, 0, 1) * 20 +
-      clamp((oneHour.volumeRatio - 1) / 2, 0, 1) * 20;
-
-    const momentumScore = Math.round(
-      momentumVolumeScore + momentumTrendScore
-    );
-
     // =====================================
-    // 3. FILTER AND STATUS
+    // 4. EARLY DIRECTION
     // =====================================
-
-    const hasEarlySignal = earlyAccumulation && earlyScore >= 35;
-    const hasMomentumSignal = momentumLong || momentumShort;
-
-    if (!hasEarlySignal && !hasMomentumSignal) {
-      return null;
-    }
 
     let earlyDirection = 'UNCONFIRMED';
 
@@ -173,9 +176,9 @@ async function scanSymbol(symbol) {
 
     let status = 'WATCH';
 
-    if (hasEarlySignal && hasMomentumSignal) {
+    if (earlyAccumulation && (momentumLong || momentumShort)) {
       status = 'EARLY + MOMENTUM';
-    } else if (hasEarlySignal) {
+    } else if (earlyAccumulation) {
       status = 'EARLY ACCUMULATION';
     } else if (momentumLong) {
       status = 'MOMENTUM LONG';
@@ -184,7 +187,7 @@ async function scanSymbol(symbol) {
     }
 
     // =====================================
-    // 4. FINAL RESULT
+    // 5. RETURN ALL ANALYZED SYMBOLS
     // =====================================
 
     return {
@@ -192,6 +195,9 @@ async function scanSymbol(symbol) {
       status,
 
       earlyAccumulation,
+      earlyPriceStable,
+      earlyVolumeGrowing,
+      earlyIntradayActivity,
       earlyScore,
       earlyDirection,
 
@@ -265,72 +271,109 @@ async function runScanner() {
     console.log(`Found ${tickers.length} markets`);
     console.log(`Scanning ${selected.length} markets`);
     console.log('Timeframes: 7D / 1D / 4H / 1H / 15M / 5M');
-    console.log('Modes: EARLY ACCUMULATION + MOMENTUM');
 
     const results = await scanAllSymbols(
       selected.map(item => item.symbol)
     );
 
-    results.sort((a, b) =>
-      Math.max(b.earlyScore, b.momentumScore) -
-      Math.max(a.earlyScore, a.momentumScore)
-    );
+    // =====================================
+    // 6. FILTER COUNTERS
+    // =====================================
 
-    console.log('\n===== DUAL SIGNAL WATCHLIST =====');
+    console.log('\n===== FILTER DIAGNOSTICS =====');
 
-    for (const item of results) {
-      console.log({
-        symbol: item.symbol,
-        status: item.status,
-
-        earlyScore: item.earlyScore,
-        earlyDirection: item.earlyDirection,
-
-        momentumScore: item.momentumScore,
-        momentumDirection: item.momentumDirection,
-
-        weeklyVolume: item.weeklyVolume + 'x',
-        dailyVolume: item.dailyVolume + 'x',
-        fourHourVolume: item.fourHourVolume + 'x',
-        oneHourVolume: item.oneHourVolume + 'x',
-        fifteenMinuteVolume: item.fifteenMinuteVolume + 'x',
-        fiveMinuteVolume: item.fiveMinuteVolume + 'x',
-
-        dailyChange: item.dailyChange + '%',
-        fourHourChange: item.fourHourChange + '%',
-        oneHourChange: item.oneHourChange + '%',
-        fifteenMinuteChange: item.fifteenMinuteChange + '%',
-        fiveMinuteChange: item.fiveMinuteChange + '%',
-
-        weeklyTrend: item.weeklyTrend + 'x',
-        dailyTrend: item.dailyTrend + 'x',
-        fourHourTrend: item.fourHourTrend + 'x',
-        oneHourTrend: item.oneHourTrend + 'x'
-      });
-    }
-
-    console.log('\n===== SCAN SUMMARY =====');
-
-    console.log(`Total signals: ${results.length}`);
+    console.log(`Analyzed: ${results.length}`);
 
     console.log(
-      `Early accumulation: ${
+      `Early stable price: ${
+        results.filter(x => x.earlyPriceStable).length
+      }`
+    );
+
+    console.log(
+      `Early volume growing: ${
+        results.filter(x => x.earlyVolumeGrowing).length
+      }`
+    );
+
+    console.log(
+      `Early intraday activity: ${
+        results.filter(x => x.earlyIntradayActivity).length
+      }`
+    );
+
+    console.log(
+      `Early accumulation confirmed: ${
         results.filter(x => x.earlyAccumulation).length
       }`
     );
 
     console.log(
-      `Momentum long: ${
+      `Momentum long confirmed: ${
         results.filter(x => x.momentumLong).length
       }`
     );
 
     console.log(
-      `Momentum short: ${
+      `Momentum short confirmed: ${
         results.filter(x => x.momentumShort).length
       }`
     );
 
+    // =====================================
+    // 7. TOP 20 EARLY ACCUMULATION
+    // =====================================
+
+    const earlyTop = [...results]
+      .sort((a, b) => b.earlyScore - a.earlyScore)
+      .slice(0, TOP_EARLY);
+
+    console.log('\n===== TOP 20 EARLY ACCUMULATION =====');
+
+    for (const item of earlyTop) {
+      console.log({
+        symbol: item.symbol,
+        score: item.earlyScore,
+        confirmed: item.earlyAccumulation,
+        direction: item.earlyDirection,
+        weeklyTrend: item.weeklyTrend + 'x',
+        dailyTrend: item.dailyTrend + 'x',
+        fourHourTrend: item.fourHourTrend + 'x',
+        dailyChange: item.dailyChange + '%',
+        fourHourChange: item.fourHourChange + '%'
+      });
+    }
+
+    // =====================================
+    // 8. TOP 20 MOMENTUM
+    // =====================================
+
+    const momentumTop = [...results]
+      .sort((a, b) => b.momentumScore - a.momentumScore)
+      .slice(0, TOP_MOMENTUM);
+
+    console.log('\n===== TOP 20 MOMENTUM =====');
+
+    for (const item of momentumTop) {
+      console.log({
+        symbol: item.symbol,
+        score: item.momentumScore,
+        longConfirmed: item.momentumLong,
+        shortConfirmed: item.momentumShort,
+        direction: item.momentumDirection,
+        fourHourVolume: item.fourHourVolume + 'x',
+        oneHourVolume: item.oneHourVolume + 'x',
+        fifteenMinuteVolume: item.fifteenMinuteVolume + 'x',
+        fiveMinuteVolume: item.fiveMinuteVolume + 'x',
+        fifteenMinuteChange: item.fifteenMinuteChange + '%',
+        fiveMinuteChange: item.fiveMinuteChange + '%'
+      });
+    }
+
+    console.log('\n===== SCAN SUMMARY =====');
+    console.log(`Analyzed: ${results.length}`);
+    console.log(`Early list: ${earlyTop.length}`);
+    console.log(`Momentum list: ${momentumTop.length}`);
     console.log('Scan completed successfully.');
 
   } catch (error) {
