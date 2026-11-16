@@ -1221,7 +1221,20 @@ export async function scanGateMarkets() {
     JSON.stringify(top20, null, 2)
   );
 
-  console.log('\n===== SCAN FINISHED =====');
+    console.log('\n===== SCAN FINISHED =====');
+
+  // ----------------------------------------
+  // SEND REPORT TO TELEGRAM
+  // ----------------------------------------
+
+  try {
+    await sendTelegramReport(output);
+  } catch (error) {
+    console.error(
+      'TELEGRAM REPORT ERROR:',
+      error.message
+    );
+  }
 
   return output;
 }
