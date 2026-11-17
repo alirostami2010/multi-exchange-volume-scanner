@@ -1,10 +1,6 @@
 
 name: Gate.io Volume Scanner
 
-on:
-  workflow_dispatch:
-  schedule:
-    - cron: "7,22,37,52 * * * *"
 
 jobs:
   scan:
