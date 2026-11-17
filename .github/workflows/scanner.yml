@@ -1,10 +1,17 @@
 
 name: Gate.io Volume Scanner
 
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: gate-io-manual-scanner
+  cancel-in-progress: false
 
 jobs:
   scan:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout repository
@@ -14,6 +21,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 24
+          cache: npm
 
       - name: Install dependencies
         run: npm install
@@ -29,4 +37,4 @@ jobs:
         run: |
           echo "Event: $GITHUB_EVENT_NAME"
           echo "Branch: $GITHUB_REF_NAME"
-          echo "Started: $(date -u)"
+          echo "Finished: $(date -u)"
