@@ -40,12 +40,10 @@
  *   TELEGRAM_DISABLE=false
  */
 
-'use strict';
-
-const fs = require('node:fs/promises');
-const path = require('node:path');
-const zlib = require('node:zlib');
-const { promisify } = require('node:util');
+import * as fs from 'node:fs/promises';
+import path from 'node:path';
+import * as zlib from 'node:zlib';
+import { promisify } from 'node:util';
 
 const gzip = promisify(zlib.gzip);
 const gunzip = promisify(zlib.gunzip);
