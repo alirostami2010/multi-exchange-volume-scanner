@@ -1000,7 +1000,7 @@ async function sendTelegramReport(output) {
       `│ 📈 رشد ۲۴س: ${growthText} ` ,
       `│ 🔊 نسبت حجم: ${volumeRatio}x`,
       `│ 📊 حجم: قدرت ${fmt(scores.volumeStrength)}  ·  شتاب ${fmt(scores.volumeAcceleration)}`,
-      `│ ⚡ قیمت: سرعت ${fmt(scores.priceSpeed)}  ·  شتاب ${fmt(scores.priceAcceleration)}  ·  رشد ${fmt(scores.priceGrowth)}`,
+      `│ ⚡قیمت: سرعت ${fmt(scores.priceSpeed)}  ·  شتاب ${fmt(scores.priceAcceleration)}  ·  رشد ${fmt(scores.priceGrowth)}`,
       `│ 🎯 هماهنگی: ${fmt(scores.coordination)}`,
       
       '○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○'
