@@ -547,7 +547,6 @@ function analyzeMarket(contract, rawCandles) {
       : null;
 
   // Logarithmic volume acceleration.
-  // This avoids extreme percentage changes from tiny candles.
   const volumeLogGrowthLatest = safeLogRatio(
     last4[3].quoteVolume,
     last4[2].quoteVolume
@@ -625,14 +624,10 @@ function analyzeMarket(contract, rawCandles) {
   // SIX COMPONENT SCORES
   // ----------------------------------------
 
-  // 1. Volume strength.
   const volumeStrengthScore = scoreRatio(
     volumeStrengthRatio
   );
 
-  // 2. Volume acceleration.
-  // Combines candle-to-candle acceleration
-  // and recent volume momentum.
   const volumeAccelerationScore = (
     scoreSigned(
       volumeAccelerationLog ?? 0,
@@ -644,7 +639,6 @@ function analyzeMarket(contract, rawCandles) {
     ) * 0.3
   );
 
-  // 3. Price speed.
   const normalizedPriceSpeed =
     priceSpeedAverage /
     historicalMedianAbsReturnPct;
@@ -654,7 +648,6 @@ function analyzeMarket(contract, rawCandles) {
     1
   );
 
-  // 4. Price acceleration.
   const normalizedPriceAcceleration =
     (priceAcceleration ?? 0) /
     historicalMedianAbsReturnPct;
@@ -664,8 +657,6 @@ function analyzeMarket(contract, rawCandles) {
     1
   );
 
-  // 5. 24-hour price growth.
-  // Scale baseline using square root of 24 hours.
   const expected24hMove =
     historicalMedianAbsReturnPct *
     Math.sqrt(24);
@@ -681,9 +672,6 @@ function analyzeMarket(contract, rawCandles) {
   // ----------------------------------------
   // COORDINATION SCORE
   // ----------------------------------------
-
-  // A factor is considered positive only when
-  // it shows meaningful bullish behavior.
 
   const positiveFactors = [
     volumeStrengthRatio > 1.15,
@@ -918,7 +906,7 @@ async function mapWithConcurrency(
 }
 
 // ------------------------------------------
-// TELEGRAM REPORT
+// TELEGRAM REPORT - MINIMAL GRAPHIC DESIGN
 // ------------------------------------------
 
 async function sendTelegramReport(output) {
@@ -926,19 +914,24 @@ async function sendTelegramReport(output) {
   const chatId = process.env.TELEGRAM_CHAT_ID;
 
   if (!token || !chatId) {
-    console.log('Telegram credentials not configured. Skipping Telegram report.');
+    console.log(
+      'Telegram credentials not configured. Skipping Telegram report.'
+    );
     return;
   }
 
   const botUrl = `https://api.telegram.org/bot${token}`;
 
-  const date = new Date(output.scannedAt).toLocaleString('en-GB', {
-    timeZone: 'UTC',
-    hour12: false
-  });
+  const date = new Date(output.scannedAt).toLocaleString(
+    'en-GB',
+    {
+      timeZone: 'UTC',
+      hour12: false
+    }
+  );
 
-  // Format numbers safely
-  const fmt = (value, decimals = 2) => {
+  // Safe number formatter
+  const fmt = (value, decimals = 0) => {
     if (
       value === null ||
       value === undefined ||
@@ -950,29 +943,33 @@ async function sendTelegramReport(output) {
     return Number(value).toFixed(decimals);
   };
 
-  // Compact score bar
+  // Compact graphical score bar
   const scoreBar = score => {
     const value = Math.max(
       0,
       Math.min(100, Number(score) || 0)
     );
 
-    const filled = Math.round(value / 10);
+    const totalBlocks = 8;
+    const filled = Math.round(
+      value / 100 * totalBlocks
+    );
 
     const color =
       value >= 75 ? '🟩' :
       value >= 55 ? '🟨' : '🟥';
 
-    return color.repeat(filled) + '⬜'.repeat(10 - filled);
+    return color.repeat(filled) +
+      '⬜'.repeat(totalBlocks - filled);
   };
 
   const lines = [
-    '📡 اسکنر بازار Gate.io',
-    `🕒 ${date} UTC | تایم‌فریم 1H`,
+    '📡 GATE.IO  |  MARKET RADAR',
+    `🕒 ${date} UTC  ·  تایم‌فریم 1H`,
     '',
-    `📋 بازار: ${output.totalMarkets} | موفق: ${output.successfulMarkets} | تاریخچه ناکافی: ${output.insufficientHistoryMarkets} | ناموفق: ${output.failedMarkets}`,
+    `بازارها: ${output.totalMarkets}  |  موفق: ${output.successfulMarkets}  |  ناقص: ${output.insufficientHistoryMarkets}  |  ناموفق: ${output.failedMarkets}`,
     '',
-    '🏆 ۲۰ ارز برتر',
+    '🏆 TOP 20 MARKETS',
     ''
   ];
 
@@ -985,22 +982,27 @@ async function sendTelegramReport(output) {
     const growthText =
       growth === null || growth === undefined
         ? '—'
-        : `${growth > 0 ? '+' : ''}${fmt(growth)}%`;
+        : `${growth > 0 ? '+' : ''}${fmt(growth, 2)}%`;
 
     const volumeRatio = fmt(
       metrics.volumeStrengthRatio,
       2
     );
 
+    const rank = String(market.rank).padStart(2, '0');
+
+    // Each market is displayed as a compact individual card.
     lines.push(
-      `${String(market.rank).padStart(2, '0')}. ${market.contract} | ${fmt(market.score, 2)}/100`,
-      `${scoreBar(market.score)} | ${growthText} | حجم ${volumeRatio}x`,
-      `📊 ${fmt(scores.volumeStrength, 0)}/${fmt(scores.volumeAcceleration, 0)} | ⚡ ${fmt(scores.priceSpeed, 0)}/${fmt(scores.priceAcceleration, 0)}/${fmt(scores.priceGrowth, 0)} | 🎯 ${fmt(scores.coordination, 0)}`,
-      ''
+      `┌ ${rank} · ${market.contract}  |  ${fmt(market.score, 2)}/100`,
+      `│ ${scoreBar(market.score)}  ·  📈 رشد ۲۴س: ${growthText}  ·  🔊 نسبت حجم: ${volumeRatio}x`,
+      `│ 📊 حجم: قدرت ${fmt(scores.volumeStrength)}  ·  شتاب ${fmt(scores.volumeAcceleration)}`,
+      `│ ⚡ قیمت: سرعت ${fmt(scores.priceSpeed)}  ·  شتاب ${fmt(scores.priceAcceleration)}  ·  رشد ${fmt(scores.priceGrowth)}`,
+      `│ 🎯 هماهنگی: ${fmt(scores.coordination)}`,
+      '└────────────────'
     );
   }
 
-  const message = lines.join('\n').trim();
+  const message = lines.join('\n');
 
   // Telegram message limit
   if (message.length > 4096) {
@@ -1009,17 +1011,20 @@ async function sendTelegramReport(output) {
     );
   }
 
-  // Send compact summary
-  const messageResponse = await fetch(`${botUrl}/sendMessage`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text: message
-    })
-  });
+  // Send summary message
+  const messageResponse = await fetch(
+    `${botUrl}/sendMessage`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: message
+      })
+    }
+  );
 
   const messageResult = await messageResponse.json();
 
@@ -1029,9 +1034,11 @@ async function sendTelegramReport(output) {
     );
   }
 
-  console.log('Telegram compact summary sent successfully.');
+  console.log(
+    'Telegram graphic summary sent successfully.'
+  );
 
-  // Send complete JSON report as before
+  // Send complete JSON report
   const reportJson = JSON.stringify(output, null, 2);
 
   const form = new FormData();
@@ -1047,10 +1054,13 @@ async function sendTelegramReport(output) {
     `gate-scan-${output.scannedAt.replace(/[:.]/g, '-')}.json`
   );
 
-  const documentResponse = await fetch(`${botUrl}/sendDocument`, {
-    method: 'POST',
-    body: form
-  });
+  const documentResponse = await fetch(
+    `${botUrl}/sendDocument`,
+    {
+      method: 'POST',
+      body: form
+    }
+  );
 
   const documentResult = await documentResponse.json();
 
@@ -1060,7 +1070,9 @@ async function sendTelegramReport(output) {
     );
   }
 
-  console.log('Telegram full report sent successfully.');
+  console.log(
+    'Telegram full report sent successfully.'
+  );
 }
 
 // ------------------------------------------
