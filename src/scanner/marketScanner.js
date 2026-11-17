@@ -34,7 +34,7 @@ const MIN_REQUEST_INTERVAL_MS = 450;
 const REQUEST_TIMEOUT_MS = 12000;
 const MAX_RETRIES = 4;
 
-const TOP_LIMIT = 20;
+const TOP_LIMIT = 10;
 
 const WEIGHTS = {
   volumeStrength: 20,
