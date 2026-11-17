@@ -1,50 +1,41 @@
-name: Gate.io Early Move Radar
+name: Gate.io Volume Scanner
 
 on:
-  workflow_dispatch:
-
-  schedule:
-    - cron: "*/15 * * * *"
-
-permissions:
-  contents: write
+workflow_dispatch:
 
 concurrency:
-  group: gate-io-market-scanner
-  cancel-in-progress: false
+group: gate-io-manual-scanner
+cancel-in-progress: false
 
 jobs:
-  scan:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+scan:
+runs-on: ubuntu-latest
+timeout-minutes: 30
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+steps:  
+  - name: Checkout repository  
+    uses: actions/checkout@v4  
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
+  - name: Setup Node.js  
+    uses: actions/setup-node@v4  
+    with:  
+      node-version: 24  
+      cache: npm  
 
-      - name: Install dependencies
-        run: npm install
+  - name: Install dependencies  
+    run: npm install  
 
-      - name: Run scanner
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TOP_LIMIT: 10
-          DEEP_CANDIDATES: 55
-          CONCURRENCY: 3
-          MIN_REQUEST_INTERVAL_MS: 280
-        run: npm start
+  - name: Run scanner  
+    env:  
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}  
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}  
+    run: npm start  
 
-      - name: Show trigger information
-        if: always()
-        run: |
-          echo "Event: $GITHUB_EVENT_NAME"
-          echo "Branch: $GITHUB_REF_NAME"
-          echo "Finished: $(date -u)"
+  - name: Show trigger information  
+    if: always()  
+    run: |  
+      echo "Event: $GITHUB_EVENT_NAME"  
+      echo "Branch: $GITHUB_REF_NAME"  
+      echo "Finished: $(date -u)"
+
+تغییرات لازم رو انجام بده و فایل کامل برای جای گذاری بده
