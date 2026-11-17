@@ -27,3 +27,10 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: npm start
+
+      - name: Show trigger information
+        if: always()
+        run: |
+          echo "Event: $GITHUB_EVENT_NAME"
+          echo "Branch: $GITHUB_REF_NAME"
+          echo "Started: $(date -u)"
