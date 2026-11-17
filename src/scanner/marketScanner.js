@@ -993,8 +993,9 @@ async function sendTelegramReport(output) {
 
     // Each market is displayed as a compact individual card.
     lines.push(
-      `┌ ${rank} · ${market.contract}  |  ${fmt(market.score, 2)}/100`,
-      `│ ${scoreBar(market.score)}  ·  📈 رشد ۲۴س: ${growthText}  ·  🔊 نسبت حجم: ${volumeRatio}x`,
+      `┌ ${rank} · ${market.contract}             ${fmt(market.score, 2)}/100`,
+      `│ ${scoreBar(market.score)} ` ,
+      `│ 📈 رشد ۲۴س: ${growthText}  ·  🔊 نسبت حجم: ${volumeRatio}x`,
       `│ 📊 حجم: قدرت ${fmt(scores.volumeStrength)}  ·  شتاب ${fmt(scores.volumeAcceleration)}`,
       `│ ⚡ قیمت: سرعت ${fmt(scores.priceSpeed)}  ·  شتاب ${fmt(scores.priceAcceleration)}  ·  رشد ${fmt(scores.priceGrowth)}`,
       `│ 🎯 هماهنگی: ${fmt(scores.coordination)}`,
