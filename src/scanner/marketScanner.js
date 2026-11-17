@@ -917,7 +917,6 @@ async function mapWithConcurrency(
   return results;
 }
 
-
 // ------------------------------------------
 // TELEGRAM REPORT
 // ------------------------------------------
@@ -938,39 +937,79 @@ async function sendTelegramReport(output) {
     hour12: false
   });
 
+  // Format numbers safely
+  const fmt = (value, decimals = 2) => {
+    if (
+      value === null ||
+      value === undefined ||
+      !Number.isFinite(Number(value))
+    ) {
+      return '—';
+    }
+
+    return Number(value).toFixed(decimals);
+  };
+
+  // Compact score bar
+  const scoreBar = score => {
+    const value = Math.max(
+      0,
+      Math.min(100, Number(score) || 0)
+    );
+
+    const filled = Math.round(value / 10);
+
+    const color =
+      value >= 75 ? '🟩' :
+      value >= 55 ? '🟨' : '🟥';
+
+    return color.repeat(filled) + '⬜'.repeat(10 - filled);
+  };
+
   const lines = [
-    '📊 GATE.IO MARKET SCANNER',
+    '📡 اسکنر بازار Gate.io',
+    `🕒 ${date} UTC | تایم‌فریم 1H`,
     '',
-    `🕒 Scan time: ${date} UTC`,
-    `📈 Timeframe: ${output.timeframe}`,
+    `📋 بازار: ${output.totalMarkets} | موفق: ${output.successfulMarkets} | تاریخچه ناکافی: ${output.insufficientHistoryMarkets} | ناموفق: ${output.failedMarkets}`,
     '',
-    '📋 SCAN SUMMARY',
-    `Total markets: ${output.totalMarkets}`,
-    `Successful: ${output.successfulMarkets}`,
-    `Insufficient history: ${output.insufficientHistoryMarkets}`,
-    `Failed: ${output.failedMarkets}`,
-    '',
-    '🏆 TOP 20 MARKETS',
+    '🏆 ۲۰ ارز برتر',
     ''
   ];
 
   for (const market of output.top20) {
-    const growth = market.metrics.priceChange24hPct;
-    const growthText = growth === null
-      ? 'N/A'
-      : `${growth > 0 ? '+' : ''}${growth}%`;
+    const scores = market.scores || {};
+    const metrics = market.metrics || {};
+
+    const growth = metrics.priceChange24hPct;
+
+    const growthText =
+      growth === null || growth === undefined
+        ? '—'
+        : `${growth > 0 ? '+' : ''}${fmt(growth)}%`;
+
+    const volumeRatio = fmt(
+      metrics.volumeStrengthRatio,
+      2
+    );
 
     lines.push(
-      `${market.rank}. ${market.contract}`,
-      `Score: ${market.score} | Signal: ${market.signal}`,
-      `24h: ${growthText} | Volume ratio: ${market.metrics.volumeStrengthRatio}x`,
+      `${String(market.rank).padStart(2, '0')}. ${market.contract} | ${fmt(market.score, 2)}/100`,
+      `${scoreBar(market.score)} | ${growthText} | حجم ${volumeRatio}x`,
+      `📊 ${fmt(scores.volumeStrength, 0)}/${fmt(scores.volumeAcceleration, 0)} | ⚡ ${fmt(scores.priceSpeed, 0)}/${fmt(scores.priceAcceleration, 0)}/${fmt(scores.priceGrowth, 0)} | 🎯 ${fmt(scores.coordination, 0)}`,
       ''
     );
   }
 
-  const message = lines.join('\n');
+  const message = lines.join('\n').trim();
 
-  // Send summary message.
+  // Telegram message limit
+  if (message.length > 4096) {
+    throw new Error(
+      `Telegram message is too long: ${message.length} characters`
+    );
+  }
+
+  // Send compact summary
   const messageResponse = await fetch(`${botUrl}/sendMessage`, {
     method: 'POST',
     headers: {
@@ -990,9 +1029,9 @@ async function sendTelegramReport(output) {
     );
   }
 
-  console.log('Telegram summary sent successfully.');
+  console.log('Telegram compact summary sent successfully.');
 
-  // Send complete JSON report as a document.
+  // Send complete JSON report as before
   const reportJson = JSON.stringify(output, null, 2);
 
   const form = new FormData();
@@ -1023,7 +1062,6 @@ async function sendTelegramReport(output) {
 
   console.log('Telegram full report sent successfully.');
 }
-
 
 // ------------------------------------------
 // MAIN SCANNER
@@ -1221,7 +1259,7 @@ export async function scanGateMarkets() {
     JSON.stringify(top20, null, 2)
   );
 
-    console.log('\n===== SCAN FINISHED =====');
+  console.log('\n===== SCAN FINISHED =====');
 
   // ----------------------------------------
   // SEND REPORT TO TELEGRAM
