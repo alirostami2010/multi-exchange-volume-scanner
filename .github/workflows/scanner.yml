@@ -1,41 +1,44 @@
+
 name: Gate.io Volume Scanner
 
 on:
-workflow_dispatch:
+  workflow_dispatch:
 
 concurrency:
-group: gate-io-manual-scanner
-cancel-in-progress: false
+  group: gate-io-manual-scanner
+  cancel-in-progress: false
 
 jobs:
-scan:
-runs-on: ubuntu-latest
-timeout-minutes: 30
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
 
-steps:  
-  - name: Checkout repository  
-    uses: actions/checkout@v4  
+    permissions:
+      contents: write
 
-  - name: Setup Node.js  
-    uses: actions/setup-node@v4  
-    with:  
-      node-version: 24  
-      cache: npm  
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-  - name: Install dependencies  
-    run: npm install  
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
 
-  - name: Run scanner  
-    env:  
-      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}  
-      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}  
-    run: npm start  
+      - name: Install dependencies
+        run: npm install
 
-  - name: Show trigger information  
-    if: always()  
-    run: |  
-      echo "Event: $GITHUB_EVENT_NAME"  
-      echo "Branch: $GITHUB_REF_NAME"  
-      echo "Finished: $(date -u)"
+      - name: Run scanner
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: npm start
 
-تغییرات لازم رو انجام بده و فایل کامل برای جای گذاری بده
+      - name: Show trigger information
+        if: always()
+        run: |
+          echo "Event: $GITHUB_EVENT_NAME"
+          echo "Branch: $GITHUB_REF_NAME"
+          echo "Finished: $(date -u)"
