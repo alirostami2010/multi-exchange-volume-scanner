@@ -14,7 +14,7 @@
  * 5. 24h price growth         15%
  * 6. Factor coordination      10%
  *
- * Output: Top 20 ranked bullish opportunities.
+ * Output: Top 10 ranked bullish opportunities.
  */
 
 const BASE_URL = 'https://api.gateio.ws/api/v4';
@@ -253,7 +253,6 @@ function normalizeCandle(raw) {
 
     contractVolume: Number(raw.v ?? 0),
 
-    // Gate futures quote volume in USDT.
     quoteVolume: Number(raw.sum ?? 0)
   };
 
@@ -277,16 +276,6 @@ function normalizeCandle(raw) {
 // SCORING FUNCTIONS
 // ------------------------------------------
 
-/**
- * Ratio scoring:
- *
- * 0.25x = 10
- * 0.50x = 30
- * 1.00x = 50
- * 2.00x = 70
- * 4.00x = 90
- * 8.00x = 100 (capped)
- */
 function scoreRatio(ratio) {
   if (!Number.isFinite(ratio) || ratio <= 0) {
     return 0;
@@ -297,13 +286,6 @@ function scoreRatio(ratio) {
   );
 }
 
-/**
- * Directional scoring:
- *
- * Zero movement = 50
- * Positive movement = above 50
- * Negative movement = below 50
- */
 function scoreSigned(value, scale) {
   if (
     !Number.isFinite(value) ||
@@ -532,7 +514,6 @@ function analyzeMarket(contract, rawCandles) {
     averageVolumeLast3 /
     historicalMedianQuoteVolume;
 
-  // Compare last 2 hours with the preceding 2 hours.
   const averageLast2Volumes = mean(
     last4.slice(-2).map(c => c.quoteVolume)
   );
@@ -546,7 +527,6 @@ function analyzeMarket(contract, rawCandles) {
       ? averageLast2Volumes / averagePrevious2Volumes
       : null;
 
-  // Logarithmic volume acceleration.
   const volumeLogGrowthLatest = safeLogRatio(
     last4[3].quoteVolume,
     last4[2].quoteVolume
@@ -906,7 +886,7 @@ async function mapWithConcurrency(
 }
 
 // ------------------------------------------
-// TELEGRAM REPORT - MINIMAL GRAPHIC DESIGN
+// TELEGRAM REPORT - MINIMAL UNICODE DESIGN
 // ------------------------------------------
 
 async function sendTelegramReport(output) {
@@ -922,15 +902,10 @@ async function sendTelegramReport(output) {
 
   const botUrl = `https://api.telegram.org/bot${token}`;
 
-  const date = new Date(output.scannedAt).toLocaleString(
-    'en-GB',
-    {
-      timeZone: 'UTC',
-      hour12: false
-    }
-  );
+  // ----------------------------------------
+  // FORMAT HELPERS
+  // ----------------------------------------
 
-  // Safe number formatter
   const fmt = (value, decimals = 0) => {
     if (
       value === null ||
@@ -943,103 +918,182 @@ async function sendTelegramReport(output) {
     return Number(value).toFixed(decimals);
   };
 
-  // Compact graphical score bar
-  const scoreBar = score => {
+  const formatChange = value => {
+    if (
+      value === null ||
+      value === undefined ||
+      !Number.isFinite(Number(value))
+    ) {
+      return '—';
+    }
+
+    const n = Number(value);
+
+    const icon = n > 0 ? '▲' : n < 0 ? '▼' : '●';
+
+    return `${icon} ${n > 0 ? '+' : ''}${n.toFixed(2)}%`;
+  };
+
+  // ----------------------------------------
+  // UNICODE SCORE BAR
+  // ----------------------------------------
+
+  const scoreBar = (score, size = 20) => {
     const value = Math.max(
       0,
       Math.min(100, Number(score) || 0)
     );
 
-    const totalBlocks = 8;
     const filled = Math.round(
-      value / 100 * totalBlocks
+      (value / 100) * size
     );
 
-    const color =
-      value >= 75 ? '🟩' :
-      value >= 55 ? '🟨' : '🟥';
-
-    return color.repeat(filled) +
-      '⬜'.repeat(totalBlocks - filled);
+    return '█'.repeat(filled) +
+      '░'.repeat(size - filled);
   };
 
+  // ----------------------------------------
+  // TELEGRAM API
+  // ----------------------------------------
+
+  async function telegramRequest(method, options) {
+    const response = await fetch(
+      `${botUrl}/${method}`,
+      options
+    );
+
+    const result = await response.json();
+
+    if (!response.ok || !result.ok) {
+      throw new Error(
+        result.description || `Telegram HTTP ${response.status}`
+      );
+    }
+
+    return result;
+  }
+
+  // ----------------------------------------
+  // HEADER
+  // ----------------------------------------
+
+  const scanDate = output.scannedAt
+    ? new Date(output.scannedAt).toLocaleString(
+        'en-GB',
+        {
+          timeZone: 'UTC',
+          hour12: false
+        }
+      )
+    : 'Unknown';
+
+  const markets = (output.top20 || []).slice(0, 10);
+
   const lines = [
-    '📡 GATE.IO  |  MARKET RADAR',
-    `🕒 ${date} UTC  ·  تایم‌فریم 1H`,
+    '◈ GATE.IO RADAR',
+    '━━━━━━━━━━━━━━━━━━━━',
+    `🕒 ${scanDate} UTC  ·  1H`,
     '',
-    `بازارها: ${output.totalMarkets}  |  موفق: ${output.successfulMarkets}  |  ناقص: ${output.insufficientHistoryMarkets}  |  ناموفق: ${output.failedMarkets}`,
-    '',
-    '🏆 TOP 20 MARKETS',
-    ''
+    `◉ بازارها ${output.totalMarkets}`,
+    `✓ موفق ${output.successfulMarkets}  ·  ناقص ${output.insufficientHistoryMarkets}  ·  خطا ${output.failedMarkets}`,
+    '━━━━━━━━━━━━━━━━━━━━'
   ];
 
-  for (const market of output.top20) {
+  // ----------------------------------------
+  // TOP 10
+  // ----------------------------------------
+
+  for (const market of markets) {
     const scores = market.scores || {};
     const metrics = market.metrics || {};
 
-    const growth = metrics.priceChange24hPct;
+    const rank = String(market.rank ?? 0).padStart(2, '0');
 
-    const growthText =
-      growth === null || growth === undefined
-        ? '—'
-        : `${growth > 0 ? '+' : ''}${fmt(growth, 2)}%`;
+    const symbol = market.contract || 'UNKNOWN';
+
+    const score = Number(market.score) || 0;
+
+    const priceChange = formatChange(
+      metrics.priceChange24hPct
+    );
 
     const volumeRatio = fmt(
       metrics.volumeStrengthRatio,
       2
     );
 
-    const rank = String(market.rank).padStart(2, '0');
-
-    // Each market is displayed as a compact individual card.
     lines.push(
-      `┌ ${rank} · ${market.contract}  |  ${fmt(market.score, 2)}/100`,
-      `│ ${scoreBar(market.score)}  ·  📈 رشد ۲۴س: ${growthText}  ·  🔊 نسبت حجم: ${volumeRatio}x`,
-      `│ 📊 حجم: قدرت ${fmt(scores.volumeStrength)}  ·  شتاب ${fmt(scores.volumeAcceleration)}`,
-      `│ ⚡ قیمت: سرعت ${fmt(scores.priceSpeed)}  ·  شتاب ${fmt(scores.priceAcceleration)}  ·  رشد ${fmt(scores.priceGrowth)}`,
-      `│ 🎯 هماهنگی: ${fmt(scores.coordination)}`,
-      '└────────────────'
+      `${rank} · ${symbol}          ${fmt(score, 1)}`,
+      `${priceChange}  ·  حجم ${volumeRatio}×`,
+      scoreBar(score),
+      `حجم ${fmt(scores.volumeStrength)}%  ·  شتاب حجم ${fmt(scores.volumeAcceleration)}%`,
+      `سرعت قیمت ${fmt(scores.priceSpeed)}%  ·  رشد قیمت ${fmt(scores.priceGrowth)}%`,
+      `شتاب قیمت ${fmt(scores.priceAcceleration)}%  ·  هماهنگی ${fmt(scores.coordination)}%`,
+      '━━━━━━━━━━━━━━━━━━━━'
     );
   }
 
-  const message = lines.join('\n');
+  lines.push('📡 GATE.IO · USDT PERPETUAL');
 
-  // Telegram message limit
-  if (message.length > 4096) {
-    throw new Error(
-      `Telegram message is too long: ${message.length} characters`
-    );
+  // ----------------------------------------
+  // SPLIT LONG MESSAGES
+  // ----------------------------------------
+
+  const chunks = [];
+  let currentChunk = '';
+
+  for (const line of lines) {
+    const candidate = currentChunk
+      ? `${currentChunk}\n${line}`
+      : line;
+
+    if (candidate.length > 3900 && currentChunk) {
+      chunks.push(currentChunk);
+      currentChunk = line;
+    } else {
+      currentChunk = candidate;
+    }
   }
 
-  // Send summary message
-  const messageResponse = await fetch(
-    `${botUrl}/sendMessage`,
-    {
+  if (currentChunk) {
+    chunks.push(currentChunk);
+  }
+
+  // ----------------------------------------
+  // SEND TELEGRAM MESSAGES
+  // ----------------------------------------
+
+  for (const chunk of chunks) {
+    await telegramRequest('sendMessage', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
         chat_id: chatId,
-        text: message
+        text: chunk,
+        disable_web_page_preview: true
       })
-    }
-  );
-
-  const messageResult = await messageResponse.json();
-
-  if (!messageResponse.ok || !messageResult.ok) {
-    throw new Error(
-      `Telegram message failed: ${messageResult.description || messageResponse.status}`
-    );
+    });
   }
 
   console.log(
-    'Telegram graphic summary sent successfully.'
+    'Telegram market radar sent successfully.'
   );
 
-  // Send complete JSON report
-  const reportJson = JSON.stringify(output, null, 2);
+  // ----------------------------------------
+  // SEND JSON REPORT
+  // ----------------------------------------
+
+  const reportJson = JSON.stringify(
+    output,
+    null,
+    2
+  );
+
+  const timestamp = (
+    output.scannedAt || new Date().toISOString()
+  ).replace(/[:.]/g, '-');
 
   const form = new FormData();
 
@@ -1051,27 +1105,16 @@ async function sendTelegramReport(output) {
       [reportJson],
       { type: 'application/json' }
     ),
-    `gate-scan-${output.scannedAt.replace(/[:.]/g, '-')}.json`
+    `gate-scan-${timestamp}.json`
   );
 
-  const documentResponse = await fetch(
-    `${botUrl}/sendDocument`,
-    {
-      method: 'POST',
-      body: form
-    }
-  );
-
-  const documentResult = await documentResponse.json();
-
-  if (!documentResponse.ok || !documentResult.ok) {
-    throw new Error(
-      `Telegram document failed: ${documentResult.description || documentResponse.status}`
-    );
-  }
+  await telegramRequest('sendDocument', {
+    method: 'POST',
+    body: form
+  });
 
   console.log(
-    'Telegram full report sent successfully.'
+    'Telegram JSON report sent successfully.'
   );
 }
 
