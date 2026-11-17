@@ -1,11 +1,16 @@
-
-name: Gate.io Volume Scanner
+name: Gate.io Early Move Radar
 
 on:
   workflow_dispatch:
 
+  schedule:
+    - cron: "*/15 * * * *"
+
+permissions:
+  contents: write
+
 concurrency:
-  group: gate-io-manual-scanner
+  group: gate-io-market-scanner
   cancel-in-progress: false
 
 jobs:
@@ -30,6 +35,11 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TOP_LIMIT: 10
+          DEEP_CANDIDATES: 55
+          CONCURRENCY: 3
+          MIN_REQUEST_INTERVAL_MS: 280
         run: npm start
 
       - name: Show trigger information
