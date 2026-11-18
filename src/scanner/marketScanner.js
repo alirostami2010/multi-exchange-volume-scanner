@@ -1,22 +1,13 @@
 
 /**
  * GATE.IO USDT PERPETUAL — FOUR TIMEFRAME BULLISH RADAR
- * ----------------------------------------------------
- * Timeframes: 5m / 15m / 1h / 4h / 1d
- *
- * Base scoring and initial filters are preserved.
- * Added:
- * - SWING / SHORT-TERM / SCALP classification
- * - Entry zone and closed-candle confirmation
- * - Structural SL and TP1 / TP2 / TP3
- * - Persistent trade states
- * - Entry / exit lifecycle management
- *
- * File: src/scanner/marketScanner.js
- * Node.js 20+
+ * Timeframes: 5m confirmation + 15m / 1h / 4h / 1d analysis
+ * Base scoring and four-timeframe ranking weights are preserved.
+ * File: src/scanner/marketScanner.js | Node.js 20+
  */
 
 import 'dotenv/config';
+
 import {
   saveMarketSnapshot,
   getTradeStates,
@@ -38,8 +29,11 @@ const CONFIG = {
   },
 
   TOP_COUNT: 20,
+
   MIN_QUOTE_VOLUME_24H: 100000,
+
   CONCURRENCY: 8,
+
   REQUEST_TIMEOUT: 15000,
   RETRIES: 3,
 
@@ -52,19 +46,13 @@ const CONFIG = {
   MAX_RETURN_1H: 6,
   MAX_RETURN_4H: 12,
 
-  // Entry engine
-  ENTRY_NEAR_ATR: 0.45,
-  ENTRY_ZONE_ATR: 0.25,
-  STOP_BUFFER_ATR: 0.35,
+  NEAR_ENTRY_ATR: 1.25,
 
-  // Signal expiration
-  ENTRY_EXPIRY_MINUTES: {
-    SWING: 1440,
-    'SHORT-TERM': 240,
-    SCALP: 60,
+  SETUP_MAX_AGE_HOURS: {
+    SWING: 240,
+    'SHORT-TERM': 72,
+    SCALP: 24,
   },
-
-  CONFIRMATION_VOLUME_RATIO: 1.10,
 };
 
 // ========================
@@ -98,10 +86,10 @@ const median = (values) => {
     : (sorted[mid - 1] + sorted[mid]) / 2;
 };
 
-const pctChange = (current, previous) => {
-  if (!previous || previous <= 0) return 0;
-  return ((current - previous) / previous) * 100;
-};
+const pctChange = (current, previous) =>
+  !previous || previous <= 0
+    ? 0
+    : ((current - previous) / previous) * 100;
 
 const formatPrice = (value) => {
   if (!Number.isFinite(value)) return '-';
@@ -112,7 +100,9 @@ const formatPrice = (value) => {
 };
 
 const getCandleValue = (candle) =>
-  candle.turnover > 0 ? candle.turnover : candle.volume;
+  candle.turnover > 0
+    ? candle.turnover
+    : candle.volume;
 
 // ========================
 // HTTP
@@ -121,15 +111,24 @@ const getCandleValue = (candle) =>
 async function fetchJSON(url) {
   let lastError;
 
-  for (let attempt = 1; attempt <= CONFIG.RETRIES; attempt++) {
+  for (
+    let attempt = 1;
+    attempt <= CONFIG.RETRIES;
+    attempt++
+  ) {
     try {
       const response = await fetch(url, {
-        headers: { Accept: 'application/json' },
-        signal: AbortSignal.timeout(CONFIG.REQUEST_TIMEOUT),
+        headers: {
+          Accept: 'application/json',
+        },
+        signal: AbortSignal.timeout(
+          CONFIG.REQUEST_TIMEOUT
+        ),
       });
 
       if (!response.ok) {
         const body = await response.text();
+
         const error = new Error(
           `HTTP ${response.status}: ${body.slice(0, 200)}`
         );
@@ -144,7 +143,9 @@ async function fetchJSON(url) {
 
       if (attempt < CONFIG.RETRIES) {
         await sleep(
-          error.status === 429 ? 2500 * attempt : 700 * attempt
+          error.status === 429
+            ? 2500 * attempt
+            : 700 * attempt
         );
       }
     }
@@ -158,11 +159,15 @@ async function fetchJSON(url) {
 // ========================
 
 async function getContracts() {
-  return fetchJSON(`${CONFIG.API_BASE}/futures/usdt/contracts`);
+  return fetchJSON(
+    `${CONFIG.API_BASE}/futures/usdt/contracts`
+  );
 }
 
 async function getTickers() {
-  return fetchJSON(`${CONFIG.API_BASE}/futures/usdt/tickers`);
+  return fetchJSON(
+    `${CONFIG.API_BASE}/futures/usdt/tickers`
+  );
 }
 
 async function getCandles(
@@ -182,7 +187,9 @@ async function getCandles(
   );
 
   if (!Array.isArray(raw)) {
-    throw new Error(`Invalid candle response: ${contract} ${interval}`);
+    throw new Error(
+      `Invalid candle response: ${contract} ${interval}`
+    );
   }
 
   const candles = raw
@@ -195,42 +202,47 @@ async function getCandles(
       volume: number(c.v),
       turnover: number(c.sum),
     }))
-    .filter((c) =>
-      c.time > 0 &&
-      c.open > 0 &&
-      c.high > 0 &&
-      c.low > 0 &&
-      c.close > 0
+    .filter(
+      (c) =>
+        c.time > 0 &&
+        c.open > 0 &&
+        c.high > 0 &&
+        c.low > 0 &&
+        c.close > 0
     )
     .sort((a, b) => a.time - b.time);
 
-  const intervalSeconds = CONFIG.TIMEFRAMES[interval].seconds;
+  const intervalSeconds =
+    CONFIG.TIMEFRAMES[interval].seconds;
 
   const currentBucket =
-    Math.floor(Date.now() / 1000 / intervalSeconds) *
-    intervalSeconds;
+    Math.floor(
+      Date.now() / 1000 / intervalSeconds
+    ) * intervalSeconds;
 
-  const closedCandles = candles.filter(
+  const closed = candles.filter(
     (c) => c.time < currentBucket
   );
 
-  if (!includeCurrent) return closedCandles;
+  if (!includeCurrent) return closed;
 
-  const currentCandle =
-    candles.find((c) => c.time === currentBucket) || null;
+  const current =
+    candles.find(
+      (c) => c.time === currentBucket
+    ) || null;
 
   return {
-    closed: closedCandles,
+    closed,
 
-    current: currentCandle
+    current: current
       ? {
           bucketTime: currentBucket,
-          open: currentCandle.open,
-          high: currentCandle.high,
-          low: currentCandle.low,
-          close: currentCandle.close,
-          volume: currentCandle.volume,
-          turnover: currentCandle.turnover,
+          open: current.open,
+          high: current.high,
+          low: current.low,
+          close: current.close,
+          volume: current.volume,
+          turnover: current.turnover,
         }
       : null,
   };
@@ -242,6 +254,7 @@ async function getCandles(
 
 async function mapLimit(items, limit, worker) {
   const results = new Array(items.length);
+
   let nextIndex = 0;
 
   async function runner() {
@@ -251,7 +264,10 @@ async function mapLimit(items, limit, worker) {
       if (index >= items.length) return;
 
       try {
-        results[index] = await worker(items[index], index);
+        results[index] = await worker(
+          items[index],
+          index
+        );
       } catch (error) {
         results[index] = {
           error: error.message,
@@ -263,7 +279,9 @@ async function mapLimit(items, limit, worker) {
 
   await Promise.all(
     Array.from(
-      { length: Math.min(limit, items.length) },
+      {
+        length: Math.min(limit, items.length),
+      },
       () => runner()
     )
   );
@@ -282,49 +300,33 @@ function calculateEMA(values, period) {
   const result = [];
 
   let ema = average(values.slice(0, period));
+
   result.push(ema);
 
   for (let i = period; i < values.length; i++) {
-    ema = (values[i] - ema) * multiplier + ema;
+    ema =
+      (values[i] - ema) * multiplier + ema;
+
     result.push(ema);
   }
 
   return result;
 }
 
-function calculateATR(candles, period = 14) {
-  if (candles.length < period + 1) return 0;
-
-  const ranges = [];
-
-  for (let i = 1; i < candles.length; i++) {
-    const current = candles[i];
-    const previous = candles[i - 1];
-
-    ranges.push(
-      Math.max(
-        current.high - current.low,
-        Math.abs(current.high - previous.close),
-        Math.abs(current.low - previous.close)
-      )
-    );
-  }
-
-  return average(ranges.slice(-period));
-}
-
 function getVolumeRatio(candles) {
   if (candles.length < 25) return 0;
 
-  const recent = candles.slice(-3);
-  const baseline = candles.slice(-23, -3);
+  const recentAverage = average(
+    candles.slice(-3).map(getCandleValue)
+  );
 
-  const recentAverage = average(recent.map(getCandleValue));
-  const baselineMedian = median(baseline.map(getCandleValue));
+  const baselineMedian = median(
+    candles.slice(-23, -3).map(getCandleValue)
+  );
 
-  if (baselineMedian <= 0) return 0;
-
-  return recentAverage / baselineMedian;
+  return baselineMedian > 0
+    ? recentAverage / baselineMedian
+    : 0;
 }
 
 function getCandleStrength(candle) {
@@ -404,24 +406,21 @@ function analyzeStructure(candles) {
       breakout: false,
       bullishStructure: false,
       score: 0,
-      resistance: 0,
-      support: 0,
     };
   }
 
-  const recent = candles.slice(-35);
-  const swings = findSwingPoints(recent, 2);
-
-  const highs = swings.highs;
-  const lows = swings.lows;
+  const swings = findSwingPoints(
+    candles.slice(-35),
+    2
+  );
 
   const higherHigh =
-    highs.length >= 2 &&
-    highs[highs.length - 1] > highs[highs.length - 2];
+    swings.highs.length >= 2 &&
+    swings.highs.at(-1) > swings.highs.at(-2);
 
   const higherLow =
-    lows.length >= 2 &&
-    lows[lows.length - 1] > lows[lows.length - 2];
+    swings.lows.length >= 2 &&
+    swings.lows.at(-1) > swings.lows.at(-2);
 
   const previous = candles.slice(-13, -1);
 
@@ -429,11 +428,7 @@ function analyzeStructure(candles) {
     ...previous.map((c) => c.high)
   );
 
-  const support = Math.min(
-    ...previous.map((c) => c.low)
-  );
-
-  const last = candles[candles.length - 1];
+  const last = candles.at(-1);
 
   const breakout =
     resistance > 0 &&
@@ -456,10 +451,7 @@ function analyzeStructure(candles) {
     breakout,
     bullishStructure,
     resistance,
-    support,
     score,
-    swingHighs: highs,
-    swingLows: lows,
   };
 }
 
@@ -468,47 +460,49 @@ function analyzeStructure(candles) {
 // ========================
 
 function analyzeTimeframe(candles) {
-  if (!candles || candles.length < 30) return null;
+  if (!candles || candles.length < 30) {
+    return null;
+  }
 
   const closes = candles.map((c) => c.close);
 
   const ema9 = calculateEMA(closes, 9);
   const ema21 = calculateEMA(closes, 21);
 
-  if (ema9.length < 3 || ema21.length < 3) return null;
+  if (ema9.length < 3 || ema21.length < 3) {
+    return null;
+  }
 
-  const last = candles[candles.length - 1];
-  const previous = candles[candles.length - 2];
+  const last = candles.at(-1);
+  const previous = candles.at(-2);
 
-  const currentEma9 = ema9[ema9.length - 1];
-  const currentEma21 = ema21[ema21.length - 1];
-  const previousEma21 = ema21[ema21.length - 2];
-
-  const emaBullish =
-    last.close > currentEma9 &&
-    currentEma9 > currentEma21;
-
-  const emaSlope =
-    currentEma21 > previousEma21;
-
-  const structure = analyzeStructure(candles);
-  const volumeRatio = getVolumeRatio(candles);
-  const strength = getCandleStrength(last);
-  const atr = calculateATR(candles);
+  const currentEma9 = ema9.at(-1);
+  const currentEma21 = ema21.at(-1);
+  const previousEma21 = ema21.at(-2);
 
   return {
     price: last.close,
+
     ema9: currentEma9,
     ema21: currentEma21,
-    emaBullish,
-    emaSlope,
-    structure,
-    volumeRatio,
-    strength,
-    atr,
+
+    emaBullish:
+      last.close > currentEma9 &&
+      currentEma9 > currentEma21,
+
+    emaSlope: currentEma21 > previousEma21,
+
+    structure: analyzeStructure(candles),
+
+    volumeRatio: getVolumeRatio(candles),
+
+    strength: getCandleStrength(last),
 
     returns: {
-      return1: pctChange(last.close, previous.close),
+      return1: pctChange(
+        last.close,
+        previous.close
+      ),
 
       return4: pctChange(
         last.close,
@@ -527,8 +521,14 @@ function analyzeTimeframe(candles) {
 // DAILY ANALYSIS
 // ========================
 
-function analyzeDaily(candles, currentCandle, livePrice) {
-  if (!candles || candles.length < 30) return null;
+function analyzeDaily(
+  candles,
+  currentCandle,
+  livePrice
+) {
+  if (!candles || candles.length < 30) {
+    return null;
+  }
 
   const base = analyzeTimeframe(candles);
 
@@ -540,7 +540,7 @@ function analyzeDaily(candles, currentCandle, livePrice) {
   const ema21 = calculateEMA(closes, 21);
   const ema50 = calculateEMA(closes, 50);
 
-  const last = candles[candles.length - 1];
+  const last = candles.at(-1);
 
   const previous5 = candles.slice(-6, -1);
   const previous10 = candles.slice(-11, -1);
@@ -556,18 +556,21 @@ function analyzeDaily(candles, currentCandle, livePrice) {
   const dailyVolume = getCandleValue(last);
 
   const volumeRatio5 =
-    avg5Volume > 0 ? dailyVolume / avg5Volume : 0;
+    avg5Volume > 0
+      ? dailyVolume / avg5Volume
+      : 0;
 
   const volumeRatio10 =
-    avg10Volume > 0 ? dailyVolume / avg10Volume : 0;
+    avg10Volume > 0
+      ? dailyVolume / avg10Volume
+      : 0;
 
   const previous20 = candles.slice(-21, -1);
+  const previous50 = candles.slice(-51, -1);
 
   const resistance20 = previous20.length
     ? Math.max(...previous20.map((c) => c.high))
     : 0;
-
-  const previous50 = candles.slice(-51, -1);
 
   const resistance50 = previous50.length
     ? Math.max(...previous50.map((c) => c.high))
@@ -592,20 +595,29 @@ function analyzeDaily(candles, currentCandle, livePrice) {
 
   const currentRange = currentHigh - currentLow;
 
-  const currentCloseLocation = currentRange > 0
-    ? clamp((price - currentLow) / currentRange, 0, 1)
-    : 0.5;
+  const currentCloseLocation =
+    currentRange > 0
+      ? clamp(
+          (price - currentLow) / currentRange,
+          0,
+          1
+        )
+      : 0.5;
 
-  const dailyReturn = pctChange(price, last.close);
+  const dailyReturn = pctChange(
+    price,
+    last.close
+  );
+
   const dailyOpenReturn = currentCandle
     ? pctChange(price, currentOpen)
     : 0;
 
-  const ema9Value = ema9[ema9.length - 1];
-  const ema21Value = ema21[ema21.length - 1];
+  const ema9Value = ema9.at(-1);
+  const ema21Value = ema21.at(-1);
 
   const ema50Value = ema50.length
-    ? ema50[ema50.length - 1]
+    ? ema50.at(-1)
     : 0;
 
   const emaBullish =
@@ -617,24 +629,26 @@ function analyzeDaily(candles, currentCandle, livePrice) {
     price > ema50Value;
 
   const emaSlope =
-    ema21[ema21.length - 1] >
-    ema21[ema21.length - 2];
+    ema21.at(-1) > ema21.at(-2);
 
   const breakout20 =
-    resistance20 > 0 && price > resistance20;
+    resistance20 > 0 &&
+    price > resistance20;
 
   const breakout50 =
-    resistance50 > 0 && price > resistance50;
+    resistance50 > 0 &&
+    price > resistance50;
 
-  const nowSeconds = Math.floor(Date.now() / 1000);
+  const nowSeconds = Math.floor(
+    Date.now() / 1000
+  );
+
   const dayBucket =
     Math.floor(nowSeconds / 86400) * 86400;
 
   const elapsedSeconds = clamp(
-    nowSeconds - number(
-      currentCandle?.bucketTime,
-      dayBucket
-    ),
+    nowSeconds -
+      number(currentCandle?.bucketTime, dayBucket),
     300,
     86400
   );
@@ -687,21 +701,25 @@ function analyzeDaily(candles, currentCandle, livePrice) {
 
   return {
     score: Math.round(clamp(score, 0, 100)),
+
     price,
     dailyReturn,
     dailyOpenReturn,
+
     emaBullish,
     ema50Bullish,
     emaSlope,
+
     higherHigh: base.structure.higherHigh,
     higherLow: base.structure.higherLow,
+
     breakout20,
     breakout50,
-    resistance20,
-    resistance50,
+
     volumeRatio5,
     volumeRatio10,
     projectedVolumeRatio,
+
     currentCandle: Boolean(currentCandle),
   };
 }
@@ -712,25 +730,30 @@ function emptyDailyAnalysis(price = 0) {
     price,
     dailyReturn: 0,
     dailyOpenReturn: 0,
+
     emaBullish: false,
     ema50Bullish: false,
     emaSlope: false,
+
     higherHigh: false,
     higherLow: false,
+
     breakout20: false,
     breakout50: false,
-    resistance20: 0,
-    resistance50: 0,
+
     volumeRatio5: 0,
     volumeRatio10: 0,
     projectedVolumeRatio: 0,
+
     currentCandle: false,
   };
 }
 
 // ========================
-// ORIGINAL BULLISH SCORING
+// EARLY BULLISH SCORING
 // ========================
+
+// Existing base-score logic and admission thresholds are retained.
 
 function analyzeCoin(data) {
   const {
@@ -940,6 +963,7 @@ function analyzeCoin(data) {
     symbol,
     score,
     stage,
+
     price: tf1h.price,
 
     returns: {
@@ -956,604 +980,437 @@ function analyzeCoin(data) {
     },
 
     daily,
+
     evidence,
     warnings,
 
-    // Internal analysis for the entry engine
     _analysis: {
-      tf15,
-      tf1h,
-      tf4h,
-      daily,
+      tf15: {
+        ema21: tf15.ema21,
+        emaBullish: tf15.emaBullish,
+        structure: tf15.structure,
+      },
+
+      tf1h: {
+        emaBullish: tf1h.emaBullish,
+        structure: tf1h.structure,
+      },
+
+      tf4h: {
+        emaBullish: tf4h.emaBullish,
+        emaSlope: tf4h.emaSlope,
+        structure: tf4h.structure,
+      },
     },
   };
+}
+
+// ========================
+// ATR
+// ========================
+
+function calculateATR(candles, period = 14) {
+  if (!candles || candles.length < period + 1) {
+    return 0;
+  }
+
+  const ranges = [];
+
+  for (
+    let i = candles.length - period;
+    i < candles.length;
+    i++
+  ) {
+    const current = candles[i];
+    const previousClose = candles[i - 1].close;
+
+    ranges.push(
+      Math.max(
+        current.high - current.low,
+        Math.abs(current.high - previousClose),
+        Math.abs(current.low - previousClose)
+      )
+    );
+  }
+
+  return average(ranges);
 }
 
 // ========================
 // OPPORTUNITY CLASSIFICATION
 // ========================
 
-function classifyTradeType(candidate) {
-  const { tf4h, daily } = candidate._analysis;
+function classifyOpportunity(coin) {
+  const a = coin._analysis;
+  const daily = coin.daily || {};
 
-  const dailyStrength =
-    daily.score >= 68 &&
+  const dailyStrong =
+    number(daily.score) >= 68 ||
+    daily.breakout20 ||
+    daily.breakout50;
+
+  const fourHourStrong =
+    a.tf4h.emaBullish ||
+    a.tf4h.structure.higherLow ||
+    a.tf4h.structure.breakout;
+
+  if (dailyStrong && fourHourStrong) {
+    return 'SWING';
+  }
+
+  if (
+    fourHourStrong ||
     (
-      daily.emaBullish ||
-      daily.ema50Bullish ||
-      daily.breakout20 ||
-      daily.higherLow
-    );
-
-  const fourHourStrength =
-    tf4h.emaBullish ||
-    tf4h.structure.higherLow ||
-    tf4h.structure.breakout;
-
-  const strongSwingPotential =
-    dailyStrength &&
-    fourHourStrength &&
-    (
-      daily.breakout20 ||
-      daily.breakout50 ||
-      daily.volumeRatio5 >= 1.4 ||
-      daily.projectedVolumeRatio >= 1.5 ||
-      daily.higherHigh
-    );
-
-  if (strongSwingPotential) return 'SWING';
-
-  const shortTermPotential =
-    tf4h.emaBullish ||
-    tf4h.structure.higherLow ||
-    candidate.score >= 72;
-
-  if (shortTermPotential) return 'SHORT-TERM';
+      a.tf1h.emaBullish &&
+      a.tf1h.structure.higherLow
+    )
+  ) {
+    return 'SHORT-TERM';
+  }
 
   return 'SCALP';
 }
 
 // ========================
-// ENTRY ZONE / STOP / TARGETS
+// TRADE SETUP
 // ========================
 
-function uniqueLevels(values, currentPrice, direction = 'above') {
-  const filtered = values
-    .filter((v) => Number.isFinite(v) && v > 0)
-    .filter((v) =>
-      direction === 'above'
-        ? v > currentPrice
-        : v < currentPrice
-    );
-
-  return [...new Set(filtered.map((v) => Number(v.toPrecision(10))))]
-    .sort((a, b) =>
-      direction === 'above' ? a - b : b - a
-    );
-}
-
-function calculateTradeLevels(candidate, candles15m, candles1h) {
-  const { tf15, tf1h, tf4h, daily } = candidate._analysis;
-
-  const price = number(candidate.livePrice, candidate.price);
-  const atr = Math.max(
-    tf15.atr,
-    price * 0.001
+function buildTradeSetup(coin, candles15m) {
+  const price = number(
+    coin.livePrice,
+    coin.price
   );
 
-  const recent15 = candles15m.slice(-20);
-  const recent1h = candles1h.slice(-20);
+  const atr = calculateATR(candles15m, 14);
 
-  const swingLows = findSwingPoints(recent15, 2).lows;
-  const supportCandidates = [
-    tf15.ema21,
-    tf1h.ema21,
-    tf15.structure.support,
-    ...swingLows.slice(-3),
-    ...recent15.slice(-8).map((c) => c.low),
-  ].filter((v) => v > 0 && v < price);
+  if (!price || !atr) return null;
 
-  // Support nearest to current price
-  const nearestSupport = supportCandidates.length
-    ? Math.max(...supportCandidates)
-    : price - atr;
-
-  // Avoid using a support that is too far away
-  const base = Math.max(
-    nearestSupport,
-    price - atr * 2.2
+  const ema21 = number(
+    coin._analysis?.tf15?.ema21
   );
 
-  let zoneLow = base - atr * CONFIG.ENTRY_ZONE_ATR;
-  let zoneHigh = base + atr * CONFIG.ENTRY_ZONE_ATR;
-
-  // If the price is already close to the support area,
-  // the zone can include the current price.
-  if (price >= zoneLow && price <= zoneHigh) {
-    zoneHigh = Math.max(zoneHigh, price);
-  }
-
-  // Prevent an entry zone from being unrealistically far away.
-  if (price - zoneHigh > atr * 2.5) {
-    zoneLow = price - atr * 2.1;
-    zoneHigh = price - atr * 1.7;
-  }
-
-  const structuralLow = Math.min(
-    ...recent15.slice(-12).map((c) => c.low),
-    ...recent1h.slice(-6).map((c) => c.low),
-    zoneLow
+  const swingPoints = findSwingPoints(
+    candles15m.slice(-60),
+    2
   );
 
-  const stopLoss =
-    structuralLow - atr * CONFIG.STOP_BUFFER_ATR;
+  const validSupports = [
+    ema21,
+    ...swingPoints.lows,
+  ]
+    .filter(
+      (level) =>
+        level > 0 &&
+        level < price &&
+        price - level <= atr * 3.5
+    )
+    .sort((a, b) => b - a);
 
-  const entryReference = (zoneLow + zoneHigh) / 2;
-  const risk = entryReference - stopLoss;
+  const support =
+    validSupports[0] ||
+    Math.max(0, price - atr * 1.25);
 
-  const resistanceCandidates = [
-    ...findSwingPoints(recent1h, 2).highs,
-    ...findSwingPoints(candles15m.slice(-35), 2).highs,
-    tf1h.structure.resistance,
-    tf4h.structure.resistance,
-    daily.resistance20,
-    daily.resistance50,
-  ];
+  const entryLow = support - atr * 0.25;
+  const entryHigh = support + atr * 0.18;
 
-  const resistances = uniqueLevels(
-    resistanceCandidates,
-    entryReference,
-    'above'
+  const structuralLow = swingPoints.lows
+    .filter((level) => level < entryLow)
+    .sort((a, b) => b - a)[0];
+
+  const stopLoss = Math.min(
+    entryLow - atr * 0.35,
+    (structuralLow || entryLow) - atr * 0.25
   );
 
-  const targets = [];
-  const minimumTargetDistance = Math.max(risk * 0.8, atr * 0.7);
+  const risk = Math.max(
+    entryHigh - stopLoss,
+    atr * 0.5
+  );
 
-  for (const resistance of resistances) {
-    if (resistance - entryReference < minimumTargetDistance) {
-      continue;
-    }
+  const resistanceLevels = swingPoints.highs
+    .filter((level) => level > entryHigh)
+    .sort((a, b) => a - b);
 
-    if (
-      !targets.some(
-        (target) =>
-          Math.abs(target - resistance) / entryReference < 0.003
-      )
-    ) {
-      targets.push(resistance);
-    }
+  const target = (multiple, index) =>
+    resistanceLevels[index] &&
+    resistanceLevels[index] > entryHigh + risk * 0.8
+      ? Math.max(
+          resistanceLevels[index],
+          entryHigh + risk * multiple
+        )
+      : entryHigh + risk * multiple;
 
-    if (targets.length === 3) break;
-  }
+  const tp1 = target(1.5, 0);
+  const tp2 = target(2.5, 1);
+  const tp3 = target(4, 2);
 
-  const fallbackMultiples = [1.5, 2.5, 4];
+  const last5m = coin._candles5m?.at(-1);
+  const previous5m = coin._candles5m?.at(-2);
 
-  for (let i = 0; targets.length < 3 && i < fallbackMultiples.length; i++) {
-    const target = entryReference + risk * fallbackMultiples[i];
+  const strength5m = last5m
+    ? getCandleStrength(last5m)
+    : null;
 
-    if (
-      !targets.some(
-        (existing) =>
-          Math.abs(existing - target) / entryReference < 0.003
-      )
-    ) {
-      targets.push(target);
-    }
-  }
-
-  targets.sort((a, b) => a - b);
-
-  const rr = targets.map((target) =>
-    risk > 0 ? (target - entryReference) / risk : 0
+  const bouncedFromZone = Boolean(
+    last5m &&
+    last5m.low <= entryHigh &&
+    last5m.close > entryHigh &&
+    last5m.close > last5m.open &&
+    strength5m.closeLocation >= 0.65 &&
+    previous5m &&
+    last5m.close > previous5m.high
   );
 
   return {
-    entryZone: {
-      low: zoneLow,
-      high: zoneHigh,
-      reference: entryReference,
-    },
+    entryLow,
+    entryHigh,
+    entryMid: (entryLow + entryHigh) / 2,
+
+    confirmation:
+      'کندل بسته‌شده ۵ دقیقه‌ای باید محدوده ورود را لمس کند، صعودی بسته شود و سقف کندل قبلی را بشکند.',
+
+    confirmationMet: bouncedFromZone,
 
     stopLoss,
 
-    takeProfits: {
-      tp1: targets[0],
-      tp2: targets[1],
-      tp3: targets[2],
-    },
+    tp1,
+    tp2,
+    tp3,
 
-    riskReward: {
-      tp1: rr[0],
-      tp2: rr[1],
-      tp3: rr[2],
-    },
+    riskReward: Number(
+      ((tp1 - entryHigh) / risk).toFixed(2)
+    ),
 
     atr,
-    nearestSupport,
+    support,
   };
 }
 
 // ========================
-// 5M ENTRY CONFIRMATION
+// SETUP IDENTITY
 // ========================
 
-function analyzeEntryConfirmation(candles5m) {
-  if (!candles5m || candles5m.length < 30) {
+function isSameSetup(
+  previous,
+  setup,
+  opportunityType
+) {
+  if (
+    !previous?.setup ||
+    !setup ||
+    previous.opportunityType !== opportunityType
+  ) {
+    return false;
+  }
+
+  const oldMid = number(
+    previous.setup.entryMid
+  );
+
+  const newMid = number(
+    setup.entryMid
+  );
+
+  if (!oldMid || !newMid) return false;
+
+  return (
+    Math.abs(newMid - oldMid) / oldMid <= 0.012
+  );
+}
+
+// ========================
+// TRADE STATE LIFECYCLE
+// ========================
+
+function updateTradeState(
+  coin,
+  setup,
+  previousState,
+  nowMs
+) {
+  const opportunityType = coin.opportunityType;
+
+  const sameSetup = isSameSetup(
+    previousState,
+    setup,
+    opportunityType
+  );
+
+  const previous = sameSetup
+    ? previousState
+    : null;
+
+  const price = number(
+    coin.livePrice,
+    coin.price
+  );
+
+  const now = new Date(nowMs).toISOString();
+
+  const statusLabels = {
+    ENTRY_CONFIRMED: 'ورود تأیید شده',
+    NEAR_ENTRY: 'نزدیک ورود',
+    WAITING: 'در انتظار',
+    NEAR_EXIT: 'نزدیک خروج',
+    EXIT_CONFIRMED: 'خروج قطعی',
+    INVALIDATED: 'ابطال موقعیت',
+    EXPIRED: 'منقضی شده',
+  };
+
+  if (!setup) {
     return {
-      confirmed: false,
-      reason: 'کندل 5M کافی نیست',
-      volumeRatio: 0,
+      symbol: coin.symbol,
+      opportunityType,
+      status: 'WAITING',
+      statusLabel: statusLabels.WAITING,
+      setup: null,
+      updatedAt: now,
     };
   }
 
-  const last = candles5m[candles5m.length - 1];
-  const previous = candles5m[candles5m.length - 2];
+  const terminal = new Set([
+    'EXIT_CONFIRMED',
+    'INVALIDATED',
+    'EXPIRED',
+  ]);
 
-  const closes = candles5m.map((c) => c.close);
-  const ema9 = calculateEMA(closes, 9);
-  const ema21 = calculateEMA(closes, 21);
+  const maxAgeHours =
+    CONFIG.SETUP_MAX_AGE_HOURS[opportunityType] || 72;
 
-  const currentEma9 = ema9.at(-1);
-  const currentEma21 = ema21.at(-1);
+  const createdAt = previous?.createdAt || now;
 
-  const strength = getCandleStrength(last);
-  const volumeRatio = getVolumeRatio(candles5m);
+  const ageHours =
+    (nowMs - Date.parse(createdAt)) / 3600000;
 
-  const breaksPreviousHigh =
-    last.close > previous.high;
+  const oldStatus = previous?.status;
 
-  const bullishCandle =
-    last.close > last.open &&
-    strength.closeLocation >= 0.65;
+  let status = previous?.status || 'WAITING';
 
-  const emaConfirmed =
-    last.close > currentEma9 &&
-    currentEma9 >= currentEma21;
+  let enteredAt = previous?.enteredAt || null;
 
-  const volumeConfirmed =
-    volumeRatio >= CONFIG.CONFIRMATION_VOLUME_RATIO;
+  let entryPrice =
+    number(previous?.entryPrice, 0) || null;
 
-  const confirmed =
-    bullishCandle &&
-    breaksPreviousHigh &&
-    emaConfirmed &&
-    volumeConfirmed;
+  let exitReason = previous?.exitReason || null;
 
-  const reasons = [];
-
-  if (bullishCandle) reasons.push('کندل صعودی قدرتمند');
-  if (breaksPreviousHigh) reasons.push('عبور از سقف کندل قبلی');
-  if (emaConfirmed) reasons.push('قرارگیری بالای EMA');
-  if (volumeConfirmed) reasons.push('تأیید حجم');
-
-  return {
-    confirmed,
-    bullishCandle,
-    breaksPreviousHigh,
-    emaConfirmed,
-    volumeConfirmed,
-    volumeRatio,
-    close: last.close,
-    candleTime: last.time,
-    reason: reasons.join(' + ') || 'تأیید کامل نشده',
-  };
-}
-
-// ========================
-// TRADE STATE MANAGEMENT
-// ========================
-
-function getPreviousState(allStates, symbol) {
-  if (!allStates) return null;
-
-  if (allStates[symbol]) return allStates[symbol];
-
-  // Supports a nested state shape if returned by storage.
-  if (allStates.tradeStates?.[symbol]) {
-    return allStates.tradeStates[symbol];
-  }
-
-  return null;
-}
-
-function getEntryExpirationMinutes(tradeType) {
-  return CONFIG.ENTRY_EXPIRY_MINUTES[tradeType] || 240;
-}
-
-function determineInitialStatus(
-  price,
-  levels,
-  confirmation,
-  atr
-) {
-  const { low, high } = levels.entryZone;
-
-  const insideZone =
-    price >= low && price <= high;
-
-  if (insideZone && confirmation.confirmed) {
-    return 'ENTRY_CONFIRMED';
-  }
-
-  const distanceToZone =
-    price > high
-      ? price - high
-      : price < low
-        ? low - price
-        : 0;
-
-  if (
-    distanceToZone <= atr * CONFIG.ENTRY_NEAR_ATR
+  if (previous && terminal.has(oldStatus)) {
+    status = oldStatus;
+  } else if (ageHours > maxAgeHours) {
+    status = 'EXPIRED';
+    exitReason = 'عمر setup از محدوده مجاز گذشت';
+  } else if (
+    price <= setup.stopLoss &&
+    (
+      oldStatus === 'ENTRY_CONFIRMED' ||
+      oldStatus === 'NEAR_EXIT'
+    )
   ) {
-    return 'NEAR_ENTRY';
-  }
-
-  if (price < low) {
-    return 'WAITING';
-  }
-
-  return 'WAITING';
-}
-
-function manageTradeState({
-  candidate,
-  levels,
-  confirmation,
-  previousState,
-  currentPrice,
-  live5m,
-}) {
-  const now = Date.now();
-  const tradeType = classifyTradeType(candidate);
-
-  const expiryMinutes =
-    getEntryExpirationMinutes(tradeType);
-
-  const oldState = previousState || null;
-
-  const sameSetup =
-    oldState &&
-    oldState.tradeType === tradeType &&
-    oldState.entryZone &&
-    Math.abs(
-      oldState.entryZone.reference - levels.entryZone.reference
-    ) / Math.max(currentPrice, 0.00000001) < 0.025;
-
-  let status = determineInitialStatus(
-    currentPrice,
-    levels,
-    confirmation,
-    levels.atr
-  );
-
-  let firstSignalAt = now;
-  let entryExpiresAt = now + expiryMinutes * 60 * 1000;
-  let entryPrice = null;
-  let enteredAt = null;
-  let setupId = `${candidate.symbol}-${now}`;
-
-  if (sameSetup) {
-    firstSignalAt = oldState.firstSignalAt || now;
-    entryExpiresAt = oldState.entryExpiresAt || entryExpiresAt;
-    entryPrice = oldState.entryPrice ?? null;
-    enteredAt = oldState.enteredAt ?? null;
-    setupId = oldState.setupId || setupId;
-
-    const oldStatus = oldState.status;
-
-    // Do not revive a completed or invalidated setup automatically.
-    if (
-      oldStatus === 'EXIT_CONFIRMED' ||
-      oldStatus === 'INVALIDATED' ||
-      oldStatus === 'EXPIRED'
-    ) {
-      status = oldStatus;
-    } else if (oldStatus === 'ENTRY_CONFIRMED') {
-      status = 'ENTRY_CONFIRMED';
-    }
-
-    if (
-      oldStatus !== 'ENTRY_CONFIRMED' &&
-      oldStatus !== 'EXIT_CONFIRMED' &&
-      oldStatus !== 'INVALIDATED' &&
-      oldStatus !== 'EXPIRED' &&
-      now > entryExpiresAt
-    ) {
-      status = 'EXPIRED';
-    }
-  }
-
-  const stopLoss = sameSetup
-    ? number(oldState.stopLoss, levels.stopLoss)
-    : levels.stopLoss;
-
-  const takeProfits = sameSetup && oldState.takeProfits
-    ? oldState.takeProfits
-    : levels.takeProfits;
-
-  const entryZone = sameSetup && oldState.entryZone
-    ? oldState.entryZone
-    : levels.entryZone;
-
-  const reachedStop =
-    currentPrice <= stopLoss;
-
-  const reachedTP3 =
-    currentPrice >= number(takeProfits.tp3);
-
-  const reachedTP1 =
-    currentPrice >= number(takeProfits.tp1);
-
-  const distanceToTP1 =
-    Math.abs(currentPrice - number(takeProfits.tp1));
-
-  const nearTP1 =
-    distanceToTP1 <= levels.atr * 0.45;
-
-  const priceBelowEntryStructure =
-    currentPrice < entryZone.low - levels.atr * 0.5;
-
-  // Exit lifecycle for an already confirmed entry.
-  if (
-    status === 'ENTRY_CONFIRMED' ||
-    (sameSetup && oldState.status === 'ENTRY_CONFIRMED')
+    status = 'EXIT_CONFIRMED';
+    exitReason = 'حد ضرر معامله فعال لمس شد';
+  } else if (price <= setup.stopLoss) {
+    status = 'INVALIDATED';
+    exitReason = 'شکست حد ضرر ساختاری پیش از ورود';
+  } else if (
+    oldStatus === 'ENTRY_CONFIRMED' ||
+    oldStatus === 'NEAR_EXIT'
   ) {
-    if (reachedStop || priceBelowEntryStructure) {
-      status = 'INVALIDATED';
-    } else if (reachedTP3) {
+    const nearTarget = price >= setup.tp1 * 0.985;
+
+    const nearStop =
+      price <= setup.stopLoss + setup.atr * 0.25;
+
+    if (price >= setup.tp1) {
       status = 'EXIT_CONFIRMED';
-    } else if (nearTP1 || reachedTP1) {
+      exitReason = 'هدف اول لمس شد';
+    } else if (nearTarget || nearStop) {
       status = 'NEAR_EXIT';
+
+      exitReason = nearTarget
+        ? 'قیمت به هدف اول نزدیک شده'
+        : 'قیمت به حد ضرر نزدیک شده';
     } else {
       status = 'ENTRY_CONFIRMED';
+      exitReason = null;
     }
-  }
-
-  // If the 5m current candle is moving toward the entry zone,
-  // it may create proximity, but never entry confirmation.
-  if (
-    status === 'WAITING' &&
-    live5m &&
-    currentPrice >= entryZone.low &&
-    currentPrice <= entryZone.high &&
-    !confirmation.confirmed
-  ) {
-    status = 'NEAR_ENTRY';
-  }
-
-  if (
-    status === 'NEAR_ENTRY' &&
-    confirmation.confirmed &&
-    currentPrice >= entryZone.low &&
-    currentPrice <= entryZone.high
+  } else if (
+    setup.confirmationMet &&
+    price > setup.entryHigh
   ) {
     status = 'ENTRY_CONFIRMED';
-    entryPrice = currentPrice;
     enteredAt = now;
-  }
-
-  if (
-    status === 'ENTRY_CONFIRMED' &&
-    !entryPrice
+    entryPrice = price;
+  } else if (
+    price >=
+      setup.entryLow -
+        setup.atr * CONFIG.NEAR_ENTRY_ATR &&
+    price <=
+      setup.entryHigh +
+        setup.atr * CONFIG.NEAR_ENTRY_ATR
   ) {
-    entryPrice = currentPrice;
-    enteredAt = now;
-  }
-
-  if (sameSetup && oldState.entryPrice && !entryPrice) {
-    entryPrice = oldState.entryPrice;
-  }
-
-  if (sameSetup && oldState.enteredAt && !enteredAt) {
-    enteredAt = oldState.enteredAt;
-  }
-
-  let confirmationCondition =
-    'قیمت وارد محدوده شود و کندل بسته‌شده 5M تأیید صعودی بدهد';
-
-  if (confirmation.confirmed) {
-    confirmationCondition =
-      `تأیید 5M: ${confirmation.reason}`;
+    status = 'NEAR_ENTRY';
+  } else {
+    status = 'WAITING';
   }
 
   return {
-    symbol: candidate.symbol,
-    setupId,
-    tradeType,
+    symbol: coin.symbol,
+    opportunityType,
+
     status,
+    statusLabel: statusLabels[status] || status,
 
-    firstSignalAt,
-    lastSignalAt: now,
-    lastSeenAt: now,
-    entryExpiresAt,
+    setup,
 
-    entryZone,
-    entryPrice,
-    enteredAt,
-
-    stopLoss,
-    takeProfits,
-    riskReward: sameSetup && oldState.riskReward
-      ? oldState.riskReward
-      : levels.riskReward,
-
-    currentPrice,
-
-    confirmation: {
-      confirmed: confirmation.confirmed,
-      condition: confirmationCondition,
-      volumeRatio: confirmation.volumeRatio,
-      candleTime: confirmation.candleTime || null,
-    },
-
-    exit: {
-      reachedTP1,
-      reachedTP3,
-      nearTP1,
-      reachedStop,
-    },
-
+    createdAt,
     updatedAt: now,
+
+    enteredAt,
+    entryPrice,
+
+    exitReason,
+
+    ageHours: Number(
+      Math.max(0, ageHours).toFixed(1)
+    ),
   };
 }
 
 // ========================
-// APPLY ENTRY ENGINE
+// ATTACH TRADE LIFECYCLE
 // ========================
 
-function enrichCandidateWithTradeSetup(
-  candidate,
-  candles5m,
+function attachTradeLifecycle(
+  coin,
   candles15m,
-  candles1h,
+  candles5m,
   previousStates,
-  live5m
+  nowMs
 ) {
-  const currentPrice = number(
-    candidate.livePrice,
-    candidate.price
+  coin.opportunityType = classifyOpportunity(coin);
+
+  coin._candles5m = candles5m;
+
+  const setup = buildTradeSetup(
+    coin,
+    candles15m
   );
 
-  const levels = calculateTradeLevels(
-    candidate,
-    candles15m,
-    candles1h
+  const tradeState = updateTradeState(
+    coin,
+    setup,
+    previousStates[coin.symbol],
+    nowMs
   );
 
-  const confirmation =
-    analyzeEntryConfirmation(candles5m);
+  coin.tradeStatus = tradeState.status;
+  coin.tradeStatusLabel = tradeState.statusLabel;
+  coin.tradeSetup = tradeState.setup;
+  coin.tradeState = tradeState;
 
-  const previousState = getPreviousState(
-    previousStates,
-    candidate.symbol
-  );
+  delete coin._candles5m;
+  delete coin._analysis;
 
-  const tradeState = manageTradeState({
-    candidate,
-    levels,
-    confirmation,
-    previousState,
-    currentPrice,
-    live5m,
-  });
-
-  candidate.tradeType = tradeState.tradeType;
-  candidate.entryStatus = tradeState.status;
-
-  candidate.tradeSetup = {
-    entryZone: tradeState.entryZone,
-    confirmation: tradeState.confirmation,
-    stopLoss: tradeState.stopLoss,
-    takeProfits: tradeState.takeProfits,
-    riskReward: tradeState.riskReward,
-    entryPrice: tradeState.entryPrice,
-    atr: levels.atr,
-    nearestSupport: levels.nearestSupport,
-  };
-
-  candidate.tradeState = tradeState;
-
-  return candidate;
+  return coin;
 }
 
 // ========================
@@ -1574,7 +1431,10 @@ async function sendTelegram(message) {
     `https://api.telegram.org/bot${token}/sendMessage`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+
+      headers: {
+        'Content-Type': 'application/json',
+      },
 
       body: JSON.stringify({
         chat_id: chatId,
@@ -1590,18 +1450,24 @@ async function sendTelegram(message) {
 
   if (!response.ok || !result.ok) {
     const error = new Error(
-      result.description || `Telegram HTTP ${response.status}`
+      result.description ||
+        `Telegram HTTP ${response.status}`
     );
 
-    error.retryAfter = result.parameters?.retry_after;
+    error.retryAfter =
+      result.parameters?.retry_after;
+
     throw error;
   }
 }
 
 function splitTelegramMessage(text, maxLength) {
-  const blocks = text.split('\n\n').filter(Boolean);
+  const blocks = text
+    .split('\n\n')
+    .filter(Boolean);
 
   const messages = [];
+
   let current = '';
 
   for (const block of blocks) {
@@ -1624,9 +1490,7 @@ function splitTelegramMessage(text, maxLength) {
       continue;
     }
 
-    const lines = block.split('\n');
-
-    for (const line of lines) {
+    for (const line of block.split('\n')) {
       const next = current
         ? `${current}\n${line}`
         : line;
@@ -1652,15 +1516,19 @@ async function sendReports(report) {
   );
 
   for (let i = 0; i < messages.length; i++) {
-    const header = `📄 گزارش ${i + 1}/${messages.length}\n\n`;
+    const payload =
+      `📄 گزارش ${i + 1}/${messages.length}\n\n${messages[i]}`;
 
     try {
-      await sendTelegram(header + messages[i]);
+      await sendTelegram(payload);
     } catch (error) {
       if (!error.retryAfter) throw error;
 
-      await sleep(error.retryAfter * 1000 + 500);
-      await sendTelegram(header + messages[i]);
+      await sleep(
+        error.retryAfter * 1000 + 500
+      );
+
+      await sendTelegram(payload);
     }
 
     if (i < messages.length - 1) {
@@ -1670,8 +1538,26 @@ async function sendReports(report) {
 }
 
 // ========================
-// REPORT
-// Original Telegram layout preserved
+// REPORT GROUPS
+// ========================
+
+const GROUPS = [
+  {
+    key: 'SWING',
+    title: '🟣 فرصت‌های حرکت بزرگ (SWING)',
+  },
+  {
+    key: 'SHORT-TERM',
+    title: '🔵 فرصت‌های کوتاه‌مدت (SHORT-TERM)',
+  },
+  {
+    key: 'SCALP',
+    title: '🟡 فرصت‌های لحظه‌ای (SCALP)',
+  },
+];
+
+// ========================
+// BUILD REPORT
 // ========================
 
 function buildReport(
@@ -1680,122 +1566,142 @@ function buildReport(
   duration,
   rankChanges = null
 ) {
-  const selected = candidates.slice(0, CONFIG.TOP_COUNT);
-  const blocks = [];
+  const selected = GROUPS.flatMap((group) =>
+    candidates
+      .filter(
+        (coin) => coin.opportunityType === group.key
+      )
+      .slice(0, CONFIG.TOP_COUNT)
+  );
 
-  blocks.push([
+  const blocks = [[
     '🚀 GATE.IO | FOUR TIMEFRAME BULLISH RADAR',
     '━━━━━━━━━━━━━━━━━━',
-    '📌 راهنمای علائم:',
+    '🎯 هدف: شکار زودهنگام روندهای صعودی و تشخیص نقطه ورود',
     '🟢↑ بهبود رتبه | 🔴↓ افت رتبه | ➖ ثابت | 🆕 جدید',
-    '▲ بازده مثبت | ▼ بازده منفی | ⚡ حجم بالا',
-    '━━━━━━━━━━━━━━━━━━',
-    `🎯 کاندید: ${selected.length}/${candidates.length}`,
+    `📌 کاندید: ${selected.length}/${candidates.length}`,
     `📊 قرارداد: ${stats.active} | نقدشونده: ${stats.liquid}`,
-    `🔍 بررسی: ${stats.success} | خطا: ${stats.errors}`,
+    `🔍 بررسی موفق: ${stats.success} | خطا: ${stats.errors}`,
     `⏱ زمان اسکن: ${(duration / 1000).toFixed(1)} ثانیه`,
     '━━━━━━━━━━━━━━━━━━',
-  ].join('\n'));
+  ].join('\n')];
 
   if (!selected.length) {
-    blocks.push('❌ در این اسکن ارزی شرایط لازم را نداشت.');
+    blocks.push(
+      '❌ در این اسکن ارزی شرایط لازم را نداشت.'
+    );
   }
 
-  selected.forEach((coin, index) => {
-    const currentRank = index + 1;
-    const movement = rankChanges?.[coin.symbol];
+  let printed = 0;
 
-    let rankText = '▫️';
-
-    if (movement) {
-      if (movement.status === 'NEW') {
-        rankText = '🆕';
-      } else if (movement.status === 'UP') {
-        rankText = `🟢↑${movement.change}`;
-      } else if (movement.status === 'DOWN') {
-        rankText = `🔴↓${Math.abs(movement.change)}`;
-      } else {
-        rankText = '➖';
-      }
-    }
-
-    const formatReturn = (value) => {
-      const arrow = value >= 0 ? '▲' : '▼';
-      return `${arrow}${Math.abs(value).toFixed(2)}%`;
-    };
-
-    const volume15 = number(coin.volume['15m']);
-    const volume1h = number(coin.volume['1h']);
-    const volume1d = number(coin.volume['1d']);
-
-    const volume15Text =
-      `${volume15.toFixed(2)}x${volume15 >= 1.5 ? '⚡' : ''}`;
-
-    const volume1hText =
-      `${volume1h.toFixed(2)}x${volume1h >= 1.5 ? '⚡' : ''}`;
-
-    const volume1dText =
-      `${volume1d.toFixed(2)}x${volume1d >= 1.5 ? '⚡' : ''}`;
-
-    const displayPrice =
-      number(coin.livePrice) > 0
-        ? number(coin.livePrice)
-        : coin.price;
-
-    blocks.push([
-      `${currentRank}. ${coin.symbol} ${rankText} | امتیاز ${coin.score} | رتبه ${coin.rankScore ?? '-'}`,
-      `💰 ${formatPrice(displayPrice)} | 15M ${formatReturn(coin.returns['15m'])} | 1H ${formatReturn(coin.returns['1h'])}`,
-      `📈 4H ${formatReturn(coin.returns['4h'])} | 1D ${formatReturn(coin.returns['1d'])}`,
-      `📊 حجم 15M ${volume15Text} | 1H ${volume1hText} | 1D ${volume1dText}`,
-      `🌞 روزانه: ${coin.daily?.score ?? 50}/100 | حجم جاری ${number(coin.daily?.projectedVolumeRatio).toFixed(2)}x`,
-    ].join('\n'));
-
-    if (index < selected.length - 1) {
-      blocks.push('━━━━━━━━━━━━━━━━━━');
-    }
-  });
-
-  blocks.push([
-    '━━━━━━━━━━━━━━━━━━',
-    'ℹ️ رتبه و امتیاز، تضمین رشد یا سیگنال ورود نیستند.',
-  ].join('\n'));
-
-  return blocks.join('\n\n');
-}
-
-// ========================
-// STORAGE HELPERS
-// ========================
-
-async function loadPreviousTradeStates() {
-  try {
-    const stored = await getTradeStates();
-
-    if (!stored || typeof stored !== 'object') {
-      return {};
-    }
-
-    return stored.tradeStates || stored;
-  } catch (error) {
-    console.error(
-      '⚠️ Could not load previous trade states:',
-      error.message
+  for (const group of GROUPS) {
+    const coins = selected.filter(
+      (coin) => coin.opportunityType === group.key
     );
 
-    return {};
-  }
-}
+    blocks.push(
+      `${group.title}\n━━━━━━━━━━━━━━━━━━\nتعداد: ${coins.length}`
+    );
 
-function collectTradeStateUpdates(candidates) {
-  const updates = {};
+    if (!coins.length) {
+      blocks.push('— موردی در این گروه نیست.');
+      continue;
+    }
 
-  for (const candidate of candidates) {
-    if (candidate.tradeState) {
-      updates[candidate.symbol] = candidate.tradeState;
+    for (const coin of coins) {
+      printed++;
+
+      const movement = rankChanges?.[coin.symbol];
+
+      let rankText = '▫️';
+
+      if (movement?.status === 'NEW') {
+        rankText = '🆕';
+      } else if (movement?.status === 'UP') {
+        rankText = `🟢↑${movement.change}`;
+      } else if (movement?.status === 'DOWN') {
+        rankText = `🔴↓${Math.abs(movement.change)}`;
+      } else if (movement?.status === 'SAME') {
+        rankText = '➖';
+      }
+
+      const setup = coin.tradeSetup;
+
+      const statusText =
+        coin.tradeStatusLabel ||
+        coin.tradeStatus ||
+        'نامشخص';
+
+      const ret = (value) =>
+        `${value >= 0 ? '▲' : '▼'}${Math.abs(number(value)).toFixed(2)}%`;
+
+      const lines = [
+        `${printed}. ${coin.symbol} ${rankText} | پایه ${coin.score} | رتبه ${coin.rankScore ?? '-'}`,
+
+        `🏷 وضعیت: ${statusText} | مرحله: ${coin.stage}`,
+
+        `💰 قیمت: ${formatPrice(number(coin.livePrice, coin.price))}`,
+
+        `📈 بازده: 15M ${ret(coin.returns['15m'])} | 1H ${ret(coin.returns['1h'])} | 4H ${ret(coin.returns['4h'])} | 1D ${ret(coin.returns['1d'])}`,
+
+        `📊 حجم: 15M ${number(coin.volume['15m']).toFixed(2)}x | 1H ${number(coin.volume['1h']).toFixed(2)}x | 1D ${number(coin.volume['1d']).toFixed(2)}x | روزانه ${coin.daily?.score ?? 50}/100`,
+      ];
+
+      if (setup) {
+        lines.push(
+          `🎯 محدوده ورود: ${formatPrice(setup.entryLow)} تا ${formatPrice(setup.entryHigh)}`
+        );
+
+        lines.push(
+          `🧭 تأیید: ${setup.confirmationMet ? 'تأیید 5m دریافت شد' : 'هنوز تأیید نشده'}`
+        );
+
+        lines.push(
+          `🛑 حد ضرر ساختاری: ${formatPrice(setup.stopLoss)}`
+        );
+
+        lines.push(
+          `🏁 اهداف: TP1 ${formatPrice(setup.tp1)} | TP2 ${formatPrice(setup.tp2)} | TP3 ${formatPrice(setup.tp3)}`
+        );
+
+        lines.push(
+          `⚖️ نسبت ریسک به بازده تا TP1: ${setup.riskReward}R`
+        );
+      }
+
+      if (coin.tradeState?.enteredAt) {
+        lines.push(
+          `✅ زمان ورود: ${coin.tradeState.enteredAt} | قیمت ورود: ${formatPrice(coin.tradeState.entryPrice)}`
+        );
+      }
+
+      if (coin.tradeState?.exitReason) {
+        lines.push(
+          `⚠️ ${coin.tradeState.exitReason}`
+        );
+      }
+
+      if (coin.evidence?.length) {
+        lines.push(
+          `✔️ شواهد: ${coin.evidence.slice(0, 4).join('، ')}`
+        );
+      }
+
+      if (coin.warnings?.length) {
+        lines.push(
+          `⚠️ هشدار: ${coin.warnings.join('، ')}`
+        );
+      }
+
+      blocks.push(lines.join('\n'));
     }
   }
 
-  return updates;
+  blocks.push(
+    '━━━━━━━━━━━━━━━━━━\nℹ️ این رتبه‌بندی و سطوح، تضمین سود نیستند. ورود فقط پس از تأیید کندل بسته‌شده ۵ دقیقه‌ای معتبر است.'
+  );
+
+  return blocks.join('\n\n');
 }
 
 // ========================
@@ -1804,37 +1710,60 @@ function collectTradeStateUpdates(candidates) {
 
 async function main() {
   const startedAt = Date.now();
+  const nowMs = Date.now();
 
-  console.log('\n🚀 GATE.IO FIVE TIMEFRAME BULLISH RADAR');
-  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log('🎯 Target: Strong bullish momentum and potential large moves');
-  console.log('⏱ Timeframes: 5m / 15m / 1h / 4h / 1d');
-  console.log('📈 Ranking: Base + Multi-Timeframe Momentum + Persistence');
-  console.log('🎯 Entry engine: 5m confirmation + structural levels\n');
+  console.log(
+    '\n🚀 GATE.IO FOUR TIMEFRAME BULLISH RADAR'
+  );
 
-  const [contracts, tickers, previousTradeStates] =
-    await Promise.all([
-      getContracts(),
-      getTickers(),
-      loadPreviousTradeStates(),
-    ]);
+  console.log(
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
+  );
 
-  if (!Array.isArray(contracts) || !Array.isArray(tickers)) {
-    throw new Error('داده قراردادها یا تیکرهای Gate.io معتبر نیست.');
+  console.log(
+    '🎯 Target: Early detection of strong bullish moves'
+  );
+
+  console.log(
+    '⏱ Timeframes: 5m confirmation / 15m / 1h / 4h / 1d'
+  );
+
+  console.log(
+    '📈 Ranking: Base + Multi-Timeframe Momentum + Persistence'
+  );
+
+  const [
+    contracts,
+    tickers,
+    previousTradeStates,
+  ] = await Promise.all([
+    getContracts(),
+    getTickers(),
+    getTradeStates(),
+  ]);
+
+  if (
+    !Array.isArray(contracts) ||
+    !Array.isArray(tickers)
+  ) {
+    throw new Error(
+      'داده قراردادها یا تیکرهای Gate.io معتبر نیست.'
+    );
   }
 
   const tickerMap = new Map(
-    tickers.map((ticker) => [ticker.contract, ticker])
+    tickers.map((ticker) => [
+      ticker.contract,
+      ticker,
+    ])
   );
 
-  const activeContracts = contracts.filter((contract) => {
-    return (
-      contract &&
-      contract.name &&
+  const activeContracts = contracts.filter(
+    (contract) =>
+      contract?.name &&
       contract.in_delisting !== true &&
       tickerMap.has(contract.name)
-    );
-  });
+  );
 
   const liquidMarkets = activeContracts
     .map((contract) => {
@@ -1843,19 +1772,36 @@ async function main() {
       return {
         symbol: contract.name,
         ticker,
-        quoteVolume: number(ticker.volume_24h_quote),
+
+        quoteVolume: number(
+          ticker.volume_24h_quote
+        ),
+
         lastPrice: number(ticker.last),
       };
     })
-    .filter((market) =>
-      market.lastPrice > 0 &&
-      market.quoteVolume >= CONFIG.MIN_QUOTE_VOLUME_24H
+    .filter(
+      (market) =>
+        market.lastPrice > 0 &&
+        market.quoteVolume >=
+          CONFIG.MIN_QUOTE_VOLUME_24H
     )
-    .sort((a, b) => b.quoteVolume - a.quoteVolume);
+    .sort(
+      (a, b) =>
+        b.quoteVolume - a.quoteVolume
+    );
 
-  console.log(`📊 Active contracts: ${activeContracts.length}`);
-  console.log(`💧 Liquid contracts: ${liquidMarkets.length}`);
-  console.log('🔍 Scanning all liquid contracts...\n');
+  console.log(
+    `📊 Active contracts: ${activeContracts.length}`
+  );
+
+  console.log(
+    `💧 Liquid contracts: ${liquidMarkets.length}`
+  );
+
+  console.log(
+    '🔍 Scanning all liquid contracts...\n'
+  );
 
   let success = 0;
   let errors = 0;
@@ -1865,7 +1811,7 @@ async function main() {
     CONFIG.CONCURRENCY,
     async (market) => {
       const [
-        candles5m,
+        candles5mData,
         candles15mData,
         candles1h,
         candles4h,
@@ -1874,7 +1820,8 @@ async function main() {
         getCandles(
           market.symbol,
           '5m',
-          CONFIG.TIMEFRAMES['5m'].limit
+          CONFIG.TIMEFRAMES['5m'].limit,
+          true
         ),
 
         getCandles(
@@ -1904,6 +1851,7 @@ async function main() {
         ),
       ]);
 
+      const candles5m = candles5mData.closed;
       const candles15m = candles15mData.closed;
       const candles1d = candles1dData.closed;
 
@@ -1913,7 +1861,9 @@ async function main() {
         candles1h.length < 30 ||
         candles4h.length < 30
       ) {
-        throw new Error('کندل کافی برای تایم‌فریم‌ها دریافت نشد.');
+        throw new Error(
+          'کندل کافی برای تحلیل تایم‌فریم‌ها دریافت نشد.'
+        );
       }
 
       success++;
@@ -1935,17 +1885,36 @@ async function main() {
       if (!candidate) return null;
 
       candidate.livePrice = market.lastPrice;
+
       candidate.live15m = candles15mData.current;
       candidate.live1d = candles1dData.current;
 
-      enrichCandidateWithTradeSetup(
+      candidate.opportunityType =
+        classifyOpportunity(candidate);
+
+      candidate._candles5m = candles5m;
+
+      const setup = buildTradeSetup(
         candidate,
-        candles5m,
-        candles15m,
-        candles1h,
-        previousTradeStates,
-        null
+        candles15m
       );
+
+      const tradeState = updateTradeState(
+        candidate,
+        setup,
+        previousTradeStates[market.symbol],
+        nowMs
+      );
+
+      candidate.tradeStatus = tradeState.status;
+      candidate.tradeStatusLabel =
+        tradeState.statusLabel;
+
+      candidate.tradeSetup = tradeState.setup;
+      candidate.tradeState = tradeState;
+
+      delete candidate._analysis;
+      delete candidate._candles5m;
 
       return candidate;
     }
@@ -1959,7 +1928,22 @@ async function main() {
       continue;
     }
 
-    if (result) candidates.push(result);
+    if (result) {
+      candidates.push(result);
+    }
+  }
+
+  // ========================
+  // TRADE STATE STORAGE
+  // ========================
+
+  const updatedTradeStates = {
+    ...previousTradeStates,
+  };
+
+  for (const coin of candidates) {
+    updatedTradeStates[coin.symbol] =
+      coin.tradeState;
   }
 
   // ========================
@@ -1969,39 +1953,83 @@ async function main() {
   let rankChanges = null;
   let rankedCandidates = candidates;
 
-  const tradeStateUpdates =
-    collectTradeStateUpdates(candidates);
-
   try {
     const storageResult = await saveMarketSnapshot(
       candidates,
       {
-        tradeStates: tradeStateUpdates,
+        tradeStates: updatedTradeStates,
       }
     );
 
     rankChanges = storageResult.rankChanges;
-    rankedCandidates = storageResult.rankedCandidates;
+
+    rankedCandidates =
+      storageResult.rankedCandidates;
 
     console.log('\n💾 MARKET DATA SAVED');
-    console.log(`Snapshots: ${storageResult.snapshotsSaved}`);
-    console.log(`History records: ${storageResult.historyCount}`);
-    console.log(`Coin summaries: ${storageResult.summaryCount}`);
+
     console.log(
-      `Trade states updated: ${Object.keys(tradeStateUpdates).length}`
+      `Snapshots: ${storageResult.snapshotsSaved}`
     );
-    console.log('📊 Four-timeframe ranking calculated successfully.');
+
+    console.log(
+      `History records: ${storageResult.historyCount}`
+    );
+
+    console.log(
+      `Coin summaries: ${storageResult.summaryCount}`
+    );
+
+    console.log(
+      `Trade states: ${storageResult.tradeStateCount}`
+    );
+
+    console.log(
+      '📊 Four-timeframe ranking + opportunity/status ordering calculated.'
+    );
   } catch (storageError) {
     console.error(
       '⚠️ MARKET STORAGE FAILED:',
       storageError
     );
 
-    rankedCandidates = [...candidates].sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      return b.volume['1h'] - a.volume['1h'];
-    });
+    rankedCandidates = [...candidates].sort(
+      (a, b) => {
+        const groups = {
+          SWING: 0,
+          'SHORT-TERM': 1,
+          SCALP: 2,
+        };
+
+        const statuses = {
+          ENTRY_CONFIRMED: 0,
+          NEAR_ENTRY: 1,
+          WAITING: 2,
+          NEAR_EXIT: 3,
+          EXIT_CONFIRMED: 4,
+          INVALIDATED: 5,
+          EXPIRED: 6,
+        };
+
+        return (
+          (groups[a.opportunityType] ?? 9) -
+            (groups[b.opportunityType] ?? 9) ||
+
+          (statuses[a.tradeStatus] ?? 9) -
+            (statuses[b.tradeStatus] ?? 9) ||
+
+          number(b.rankScore) -
+            number(a.rankScore) ||
+
+          b.score - a.score
+        );
+      }
+    );
   }
+
+  // ========================
+  // CONSOLE REPORT
+  // ========================
 
   const duration = Date.now() - startedAt;
 
@@ -2012,42 +2040,68 @@ async function main() {
     errors,
   };
 
-  console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log('🏆 TOP EARLY BULLISH CANDIDATES');
-  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log(
+    '\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
+  );
 
-  rankedCandidates
-    .slice(0, CONFIG.TOP_COUNT)
-    .forEach((coin, index) => {
-      console.log(
-        `${index + 1}. ${coin.symbol} | ` +
-        `Base: ${coin.score} | ` +
-        `Rank: ${coin.rankScore ?? '-'} | ` +
-        `Persistence: ${coin.persistenceScore ?? '-'} | ` +
-        `Daily: ${coin.dailyScore ?? '-'} | ` +
-        `Type: ${coin.tradeType ?? '-'} | ` +
-        `Entry: ${coin.entryStatus ?? '-'} | ` +
-        `${coin.stage}`
-      );
+  console.log('🏆 TOP BULLISH OPPORTUNITIES');
 
-      if (coin.tradeSetup) {
+  console.log(
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
+  );
+
+  for (const group of GROUPS) {
+    const groupCoins = rankedCandidates.filter(
+      (coin) =>
+        coin.opportunityType === group.key
+    );
+
+    console.log(
+      `\n${group.title} (${groupCoins.length})`
+    );
+
+    groupCoins
+      .slice(0, CONFIG.TOP_COUNT)
+      .forEach((coin, index) => {
         console.log(
-          `   Entry: ${formatPrice(coin.tradeSetup.entryZone.low)} - ` +
-          `${formatPrice(coin.tradeSetup.entryZone.high)} | ` +
-          `SL: ${formatPrice(coin.tradeSetup.stopLoss)} | ` +
-          `TP1: ${formatPrice(coin.tradeSetup.takeProfits.tp1)} | ` +
-          `TP2: ${formatPrice(coin.tradeSetup.takeProfits.tp2)} | ` +
-          `TP3: ${formatPrice(coin.tradeSetup.takeProfits.tp3)}`
+          `${index + 1}. ${coin.symbol} | ${coin.tradeStatusLabel} | Base: ${coin.score} | Rank: ${coin.rankScore ?? '-'} | ${coin.stage}`
         );
-      }
-    });
 
-  console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log(`Candidates: ${rankedCandidates.length}`);
-  console.log(`Successful analyses: ${success}`);
-  console.log(`Errors: ${errors}`);
-  console.log(`Duration: ${(duration / 1000).toFixed(1)}s`);
-  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+        if (coin.tradeSetup) {
+          console.log(
+            `   Entry ${formatPrice(coin.tradeSetup.entryLow)}-${formatPrice(coin.tradeSetup.entryHigh)} | SL ${formatPrice(coin.tradeSetup.stopLoss)} | TP1 ${formatPrice(coin.tradeSetup.tp1)} | RR ${coin.tradeSetup.riskReward}R`
+          );
+        }
+      });
+  }
+
+  console.log(
+    '\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
+  );
+
+  console.log(
+    `Candidates: ${rankedCandidates.length}`
+  );
+
+  console.log(
+    `Successful analyses: ${success}`
+  );
+
+  console.log(
+    `Errors: ${errors}`
+  );
+
+  console.log(
+    `Duration: ${(duration / 1000).toFixed(1)}s`
+  );
+
+  console.log(
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'
+  );
+
+  // ========================
+  // TELEGRAM REPORT
+  // ========================
 
   const report = buildReport(
     rankedCandidates,
@@ -2058,10 +2112,16 @@ async function main() {
 
   await sendReports(report);
 
-  console.log('✅ Telegram report sent successfully.');
+  console.log(
+    '✅ Telegram report sent successfully.'
+  );
 }
 
 main().catch((error) => {
-  console.error('\n❌ SCANNER FAILED:', error);
+  console.error(
+    '\n❌ SCANNER FAILED:',
+    error
+  );
+
   process.exitCode = 1;
 });
