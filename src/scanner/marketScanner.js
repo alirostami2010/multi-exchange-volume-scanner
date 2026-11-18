@@ -28,7 +28,7 @@ const CONFIG = {
     '4h': { seconds: 14400, limit: 100 },
   },
 
-  TOP_COUNT: 20,
+  TOP_COUNT: 10,
   MIN_QUOTE_VOLUME_24H: 100000,
   CONCURRENCY: 8,
   REQUEST_TIMEOUT: 15000,
