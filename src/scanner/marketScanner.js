@@ -1,74 +1,100 @@
 
 /**
- * GATE.IO USDT PERPETUAL — ACCUMULATION CYCLE RADAR V2
- * ------------------------------------------------------------
- * هدف:
- * شناسایی بازارهایی که پس از یک افت معتبر وارد فاز تثبیت شده‌اند
- * و نشانه‌هایی از کاهش فشار فروش، حفظ کف و جذب احتمالی عرضه دارند.
+ * GATE.IO USDT PERPETUAL
+ * ACCUMULATION ZONE RADAR — V3
+ * ---------------------------------------------------------
+ * Goal:
+ * Detect possible accumulation zones BEFORE bullish breakouts.
  *
  * Timeframe: 4H
- * History: 180 candles
- * Markets: All active direct USDT perpetual contracts
- * Output: ALL qualified candidates (no TOP N limit)
+ * Scans all active direct USDT perpetual contracts.
  *
- * Required GitHub Secrets:
- * TELEGRAM_BOT_TOKEN
- * TELEGRAM_CHAT_ID
+ * Detection stages:
+ * 1) ACCUMULATION_ZONE
+ * 2) DEMAND_BUILDING
+ *
+ * Important:
+ * Scores are technical ranking scores, NOT probabilities.
+ * This scanner does not generate buy/sell orders.
  *
  * Node.js 20+
  */
 
-"use strict";
+// =========================================================
+// CONFIG
+// =========================================================
 
 const CONFIG = {
-  API_BASE: "https://api.gateio.ws/api/v4",
-  TELEGRAM_API: "https://api.telegram.org",
+  BASE_URL: "https://api.gateio.ws/api/v4",
 
   INTERVAL: "4h",
-  CANDLE_LIMIT: 180,
-  CANDLE_SECONDS: 4 * 60 * 60,
+  CANDLE_LIMIT: 240,
 
   CONCURRENCY: 6,
   RETRIES: 3,
   REQUEST_TIMEOUT: 15000,
-  REQUEST_DELAY_MS: 100,
 
-  // Minimum 24-hour quote turnover in USDT.
   MIN_24H_TURNOVER: 200000,
 
-  // Minimum valid historical candles.
-  MIN_CANDLES: 100,
+  MIN_CANDLES: 110,
 
-  // Accumulation analysis windows.
-  BASE_WINDOW: 18,
-  DECLINE_LOOKBACK: 90,
-  MIN_DECLINE_CANDLES: 12,
+  BASE_WINDOWS: [18, 24, 30, 36],
 
-  // Hard filters.
-  MIN_DECLINE_PCT: 10,
-  MAX_DECLINE_PCT: 65,
-  MAX_BASE_WIDTH_PCT: 24,
-  MIN_BASE_VOLUME_RATIO: 0.15,
+  DECLINE_LOOKBACK: 100,
 
-  MIN_SCORE: 62,
+  MIN_DECLINE_PCT: 8,
+  MAX_DECLINE_PCT: 70,
 
-  TELEGRAM_MAX_LENGTH: 3800,
+  MAX_BASE_WIDTH_PCT: 22,
 
-  // Set true only if you want detailed failed-market logs.
-  DEBUG_ERRORS: false
+  MIN_FLOOR_STABILITY: -0.035,
+
+  MIN_ZONE_SCORE: 58,
+  MIN_DEMAND_SCORE: 70,
+
+  TELEGRAM_MAX_LENGTH: 3500,
+
+  TELEGRAM_BOT_TOKEN:
+    process.env.TELEGRAM_BOT_TOKEN,
+
+  TELEGRAM_CHAT_ID:
+    process.env.TELEGRAM_CHAT_ID,
 };
+
+// =========================================================
+// GLOBAL STATS
+// =========================================================
+
+const stats = {
+  totalContracts: 0,
+  eligibleContracts: 0,
+  checked: 0,
+  failed: 0,
+  insufficient: 0,
+
+  accumulationZones: 0,
+  demandBuilding: 0,
+
+  errors: [],
+};
+
+// =========================================================
+// HELPERS
+// =========================================================
 
 const sleep = (ms) =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
-function number(value, fallback = 0) {
+function number(value) {
   const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
+  return Number.isFinite(n) ? n : 0;
 }
 
 function average(values) {
   if (!values.length) return 0;
-  return values.reduce((a, b) => a + b, 0) / values.length;
+
+  return values.reduce((a, b) => a + b, 0) /
+    values.length;
 }
 
 function sum(values) {
@@ -76,932 +102,863 @@ function sum(values) {
 }
 
 function min(values) {
-  return values.length ? Math.min(...values) : 0;
+  return Math.min(...values);
 }
 
 function max(values) {
-  return values.length ? Math.max(...values) : 0;
+  return Math.max(...values);
 }
 
-function pctChange(from, to) {
-  if (!from) return 0;
-  return ((to - from) / from) * 100;
+function clamp(value, low, high) {
+  return Math.max(low, Math.min(high, value));
 }
 
-function formatNumber(value, digits = 2) {
-  return number(value).toFixed(digits);
+function percent(value) {
+  return `${value.toFixed(2)}%`;
+}
+
+function price(value) {
+  if (!Number.isFinite(value)) return "-";
+
+  return value.toLocaleString("en-US", {
+    maximumFractionDigits: 8,
+  });
 }
 
 function formatMoney(value) {
-  const n = number(value);
-
-  if (n >= 1_000_000_000) {
-    return `${(n / 1_000_000_000).toFixed(2)}B`;
+  if (value >= 1_000_000_000) {
+    return `${(value / 1_000_000_000).toFixed(2)}B`;
   }
 
-  if (n >= 1_000_000) {
-    return `${(n / 1_000_000).toFixed(2)}M`;
+  if (value >= 1_000_000) {
+    return `${(value / 1_000_000).toFixed(2)}M`;
   }
 
-  if (n >= 1_000) {
-    return `${(n / 1_000).toFixed(2)}K`;
+  if (value >= 1_000) {
+    return `${(value / 1_000).toFixed(2)}K`;
   }
 
-  return n.toFixed(0);
+  return value.toFixed(0);
 }
 
-function safeError(error) {
-  return String(error?.message || error || "Unknown error")
-    .replace(/\s+/g, " ")
-    .slice(0, 180);
+function median(values) {
+  if (!values.length) return 0;
+
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+
+  if (sorted.length % 2) {
+    return sorted[middle];
+  }
+
+  return (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
-/* ------------------------------------------------------------
-   HTTP
------------------------------------------------------------- */
+// =========================================================
+// HTTP
+// =========================================================
 
-async function fetchJSON(url) {
+async function request(url) {
   let lastError;
 
   for (let attempt = 1; attempt <= CONFIG.RETRIES; attempt++) {
-    const controller = new AbortController();
-    const timeout = setTimeout(
-      () => controller.abort(),
-      CONFIG.REQUEST_TIMEOUT
-    );
-
     try {
       const response = await fetch(url, {
         method: "GET",
         headers: {
           Accept: "application/json",
-          "User-Agent": "Gate-Accumulation-Radar/2.0"
         },
-        signal: controller.signal
+        signal: AbortSignal.timeout(
+          CONFIG.REQUEST_TIMEOUT
+        ),
       });
 
-      const text = await response.text();
-
       if (!response.ok) {
+        const body = await response.text();
+
         throw new Error(
-          `HTTP ${response.status}: ${text.slice(0, 120)}`
+          `HTTP ${response.status}: ${body.slice(0, 180)}`
         );
       }
 
-      let data;
+      return await response.json();
 
-      try {
-        data = JSON.parse(text);
-      } catch {
-        throw new Error("Invalid JSON response");
-      }
-
-      if (data && !Array.isArray(data) && data.label && data.message) {
-        throw new Error(`${data.label}: ${data.message}`);
-      }
-
-      return data;
     } catch (error) {
       lastError = error;
 
       if (attempt < CONFIG.RETRIES) {
-        await sleep(500 * Math.pow(2, attempt - 1));
+        await sleep(attempt * 1000);
       }
-    } finally {
-      clearTimeout(timeout);
     }
   }
 
-  throw lastError || new Error("Request failed");
+  throw lastError;
 }
 
-/* ------------------------------------------------------------
-   GATE.IO MARKET DATA
------------------------------------------------------------- */
+// =========================================================
+// GATE.IO MARKET DATA
+// =========================================================
 
 async function getContracts() {
-  const url = `${CONFIG.API_BASE}/futures/usdt/contracts`;
-  const data = await fetchJSON(url);
+  const url =
+    `${CONFIG.BASE_URL}/futures/usdt/contracts`;
+
+  const data = await request(url);
 
   if (!Array.isArray(data)) {
     throw new Error("Invalid contracts response");
   }
 
-  return data.filter((contract) => {
-    return (
-      contract &&
-      contract.status === "trading" &&
-      contract.in_delisting !== true &&
-      contract.type === "direct" &&
-      typeof contract.name === "string" &&
-      contract.name.endsWith("_USDT")
-    );
-  });
+  return data;
 }
 
 async function getTickers() {
-  const url = `${CONFIG.API_BASE}/futures/usdt/tickers`;
-  const data = await fetchJSON(url);
+  const url =
+    `${CONFIG.BASE_URL}/futures/usdt/tickers`;
+
+  const data = await request(url);
 
   if (!Array.isArray(data)) {
     throw new Error("Invalid tickers response");
   }
 
-  const map = new Map();
-
-  for (const ticker of data) {
-    if (ticker && ticker.contract) {
-      map.set(ticker.contract, ticker);
-    }
-  }
-
-  return map;
+  return data;
 }
 
 async function getCandles(contract) {
-  const params = new URLSearchParams({
-    contract,
-    interval: CONFIG.INTERVAL,
-    limit: String(CONFIG.CANDLE_LIMIT)
-  });
+  const url = new URL(
+    `${CONFIG.BASE_URL}/futures/usdt/candlesticks`
+  );
 
-  const url =
-    `${CONFIG.API_BASE}/futures/usdt/candlesticks?${params}`;
+  url.searchParams.set("contract", contract);
+  url.searchParams.set("interval", CONFIG.INTERVAL);
+  url.searchParams.set(
+    "limit",
+    String(CONFIG.CANDLE_LIMIT)
+  );
 
-  const raw = await fetchJSON(url);
+  const data = await request(url.toString());
 
-  if (!Array.isArray(raw)) {
-    throw new Error("Invalid candlestick response");
+  if (!Array.isArray(data)) {
+    throw new Error("Invalid candles response");
   }
 
-  const now = Math.floor(Date.now() / 1000);
-  const currentCandleStart =
-    Math.floor(now / CONFIG.CANDLE_SECONDS) *
-    CONFIG.CANDLE_SECONDS;
+  const candles = data
+    .map((c) => ({
+      time: number(c.t),
+      open: number(c.o),
+      high: number(c.h),
+      low: number(c.l),
+      close: number(c.c),
 
-  const candles = raw
-    .map((item) => ({
-      time: number(item.t),
-      open: number(item.o),
-      high: number(item.h),
-      low: number(item.l),
-      close: number(item.c),
-      volume: number(item.v),
-      turnover: number(item.sum)
+      // Gate futures candle "sum" is quote turnover.
+      turnover: number(c.sum),
+
+      volume: number(c.v),
     }))
-    .filter((c) => {
-      return (
-        c.time > 0 &&
-        c.time < currentCandleStart &&
-        c.open > 0 &&
-        c.high > 0 &&
-        c.low > 0 &&
-        c.close > 0 &&
-        c.high >= c.low &&
-        c.high >= c.open &&
-        c.high >= c.close &&
-        c.low <= c.open &&
-        c.low <= c.close
-      );
-    })
+    .filter((c) =>
+      c.time > 0 &&
+      c.open > 0 &&
+      c.high > 0 &&
+      c.low > 0 &&
+      c.close > 0
+    )
     .sort((a, b) => a.time - b.time);
 
   // Remove duplicate timestamps.
-  const unique = [];
-  const seen = new Set();
+  const unique = new Map();
 
   for (const candle of candles) {
-    if (!seen.has(candle.time)) {
-      seen.add(candle.time);
-      unique.push(candle);
-    }
+    unique.set(candle.time, candle);
   }
 
-  return unique;
+  const result = [...unique.values()];
+
+  // Exclude the currently forming 4H candle.
+  const intervalSeconds = 4 * 60 * 60;
+  const currentBucket =
+    Math.floor(Date.now() / 1000 / intervalSeconds) *
+    intervalSeconds;
+
+  return result.filter(
+    (c) => c.time < currentBucket
+  );
 }
 
-/* ------------------------------------------------------------
-   CANDLE METRICS
------------------------------------------------------------- */
+// =========================================================
+// CANDLE FEATURES
+// =========================================================
 
-function candleMetrics(candle) {
-  const range = Math.max(candle.high - candle.low, 0);
-  const body = Math.abs(candle.close - candle.open);
+function candleFeatures(c) {
+  const range = Math.max(c.high - c.low, 0);
 
-  const upperWick =
-    candle.high - Math.max(candle.open, candle.close);
+  const body = Math.abs(c.close - c.open);
 
   const lowerWick =
-    Math.min(candle.open, candle.close) - candle.low;
+    Math.min(c.open, c.close) - c.low;
+
+  const upperWick =
+    c.high - Math.max(c.open, c.close);
 
   const closeLocation =
     range > 0
-      ? (candle.close - candle.low) / range
+      ? (c.close - c.low) / range
       : 0.5;
 
   return {
     range,
     body,
-    upperWick,
     lowerWick,
+    upperWick,
     closeLocation,
-    bullish: candle.close > candle.open,
-    bearish: candle.close < candle.open
+
+    green: c.close > c.open,
+    red: c.close < c.open,
+
+    lowerWickRatio:
+      range > 0 ? lowerWick / range : 0,
+
+    upperWickRatio:
+      range > 0 ? upperWick / range : 0,
   };
 }
 
-function trueRange(candle, previous) {
-  if (!previous) {
-    return candle.high - candle.low;
-  }
+// =========================================================
+// FIND PREVIOUS DECLINE
+// =========================================================
 
-  return Math.max(
-    candle.high - candle.low,
-    Math.abs(candle.high - previous.close),
-    Math.abs(candle.low - previous.close)
-  );
-}
-
-function averageTrueRange(candles) {
-  if (candles.length < 2) return 0;
-
-  const values = [];
-
-  for (let i = 1; i < candles.length; i++) {
-    values.push(trueRange(candles[i], candles[i - 1]));
-  }
-
-  return average(values);
-}
-
-/* ------------------------------------------------------------
-   FIND PREVIOUS DECLINE
------------------------------------------------------------- */
-
-function findDecline(candles, baseStartIndex) {
+function findPreviousDecline(candles, baseStart) {
   const start = Math.max(
     0,
-    baseStartIndex - CONFIG.DECLINE_LOOKBACK
+    baseStart - CONFIG.DECLINE_LOOKBACK
   );
+
+  const history = candles.slice(start, baseStart);
+
+  if (history.length < 12) return null;
 
   let peakIndex = -1;
   let peakPrice = 0;
 
-  for (let i = start; i < baseStartIndex; i++) {
-    if (candles[i].high > peakPrice) {
-      peakPrice = candles[i].high;
+  // Find the highest high in the preceding history.
+  for (let i = 0; i < history.length; i++) {
+    if (history[i].high > peakPrice) {
+      peakPrice = history[i].high;
       peakIndex = i;
     }
   }
 
   if (peakIndex < 0) return null;
 
-  const declineCandles = candles.slice(
-    peakIndex,
-    baseStartIndex
-  );
+  const afterPeak = history.slice(peakIndex + 1);
 
-  if (
-    declineCandles.length <
-    CONFIG.MIN_DECLINE_CANDLES
-  ) {
-    return null;
-  }
+  if (afterPeak.length < 8) return null;
 
   const troughPrice = min(
-    declineCandles.map((c) => c.low)
+    afterPeak.map((c) => c.low)
   );
+
+  if (troughPrice <= 0) return null;
 
   const declinePct =
     ((peakPrice - troughPrice) / peakPrice) * 100;
 
+  if (
+    declinePct < CONFIG.MIN_DECLINE_PCT ||
+    declinePct > CONFIG.MAX_DECLINE_PCT
+  ) {
+    return null;
+  }
+
   return {
-    peakIndex,
     peakPrice,
     troughPrice,
     declinePct,
-    candles: declineCandles
+    candlesFromPeak: afterPeak.length,
   };
 }
 
-/* ------------------------------------------------------------
-   BASE STRUCTURE
------------------------------------------------------------- */
+// =========================================================
+// ANALYZE BASE STRUCTURE
+// =========================================================
 
-function analyzeBase(base) {
-  const firstHalf = base.slice(
-    0,
-    Math.floor(base.length / 2)
+function analyzeBase(candles, windowSize, ticker) {
+  if (candles.length < windowSize + 30) {
+    return null;
+  }
+
+  const baseStart = candles.length - windowSize;
+  const base = candles.slice(baseStart);
+
+  const previous = findPreviousDecline(
+    candles,
+    baseStart
   );
 
-  const secondHalf = base.slice(
-    Math.floor(base.length / 2)
+  if (!previous) return null;
+
+  const highs = base.map((c) => c.high);
+  const lows = base.map((c) => c.low);
+  const closes = base.map((c) => c.close);
+
+  const baseHigh = max(highs);
+  const baseLow = min(lows);
+
+  if (baseLow <= 0 || baseHigh <= baseLow) {
+    return null;
+  }
+
+  const baseMid = (baseHigh + baseLow) / 2;
+
+  const baseWidthPct =
+    ((baseHigh - baseLow) / baseMid) * 100;
+
+  if (
+    baseWidthPct > CONFIG.MAX_BASE_WIDTH_PCT
+  ) {
+    return null;
+  }
+
+  // -------------------------------------------------------
+  // FLOOR STABILITY
+  // Compare first half and second half.
+  // Do NOT compare recent low to the absolute base low.
+  // -------------------------------------------------------
+
+  const half = Math.floor(windowSize / 2);
+
+  const firstHalf = base.slice(0, half);
+  const secondHalf = base.slice(half);
+
+  const firstHalfLow = min(
+    firstHalf.map((c) => c.low)
   );
 
-  const baseHigh = max(base.map((c) => c.high));
-  const baseLow = min(base.map((c) => c.low));
-
-  const referencePrice = average(
-    base.map((c) => c.close)
+  const secondHalfLow = min(
+    secondHalf.map((c) => c.low)
   );
 
-  const widthPct =
-    referencePrice > 0
-      ? ((baseHigh - baseLow) / referencePrice) * 100
-      : 100;
+  const floorChangePct =
+    ((secondHalfLow - firstHalfLow) /
+      firstHalfLow) * 100;
 
-  const firstLow = min(firstHalf.map((c) => c.low));
-  const secondLow = min(secondHalf.map((c) => c.low));
+  const floorStable =
+    floorChangePct >=
+    CONFIG.MIN_FLOOR_STABILITY * 100;
 
-  const lowChangePct =
-    firstLow > 0
-      ? ((secondLow - firstLow) / firstLow) * 100
-      : -100;
-
-  const recentLows = base
-    .slice(-6)
-    .map((c) => c.low);
-
-  const previousLows = base
+  // Higher-low check using averages of local lows.
+  const firstRecentLows = base
     .slice(-12, -6)
     .map((c) => c.low);
 
-  const recentLow = min(recentLows);
-  const previousLow = min(previousLows);
+  const lastRecentLows = base
+    .slice(-6)
+    .map((c) => c.low);
 
-  const recentFloorHeld =
-    recentLow >= baseLow * 0.985;
+  const firstRecentLow =
+    average(firstRecentLows);
 
-  const higherLow =
-    previousLow > 0 &&
-    recentLow >= previousLow * 0.985;
+  const lastRecentLow =
+    average(lastRecentLows);
 
-  const closesAboveFloor = base.filter(
-    (c) => c.close > baseLow * 1.02
-  ).length;
+  const higherLows =
+    lastRecentLow > firstRecentLow * 1.005;
 
-  return {
-    baseHigh,
-    baseLow,
-    widthPct,
-    lowChangePct,
-    recentLow,
-    previousLow,
-    recentFloorHeld,
-    higherLow,
-    closesAboveFloor,
-    floorHoldRatio: closesAboveFloor / base.length
-  };
-}
+  // -------------------------------------------------------
+  // VOLUME BEHAVIOR
+  // -------------------------------------------------------
 
-/* ------------------------------------------------------------
-   SUPPLY / DEMAND PROXIES
------------------------------------------------------------- */
-
-function analyzeSupplyDemand(base, declineCandles) {
-  const baseMetrics = base.map(candleMetrics);
-
-  const greenCandles = [];
-  const redCandles = [];
-
-  let absorptionCount = 0;
-  let strongCloseCount = 0;
-  let rejectionCount = 0;
-
-  for (let i = 0; i < base.length; i++) {
-    const candle = base[i];
-    const metric = baseMetrics[i];
-
-    if (metric.bullish) {
-      greenCandles.push(candle);
-    }
-
-    if (metric.bearish) {
-      redCandles.push(candle);
-    }
-
-    // Lower wick with close in upper half:
-    // possible selling-pressure absorption.
-    if (
-      metric.lowerWick >= Math.max(metric.body * 0.8, metric.range * 0.2) &&
-      metric.closeLocation >= 0.55
-    ) {
-      absorptionCount++;
-    }
-
-    if (metric.closeLocation >= 0.70) {
-      strongCloseCount++;
-    }
-
-    if (
-      metric.lowerWick > metric.upperWick * 1.25 &&
-      metric.closeLocation > 0.50
-    ) {
-      rejectionCount++;
-    }
-  }
-
-  const greenVolume = sum(
-    greenCandles.map((c) => c.turnover)
+  const baseTurnovers = base.map(
+    (c) => c.turnover
   );
 
-  const redVolume = sum(
-    redCandles.map((c) => c.turnover)
+  const earlyTurnover = average(
+    base.slice(0, half).map((c) => c.turnover)
   );
 
-  const greenRedRatio =
-    redVolume > 0
-      ? greenVolume / redVolume
-      : greenVolume > 0
-        ? 2
-        : 0;
-
-  const baseTurnover = average(
-    base.map((c) => c.turnover)
+  const lateTurnover = average(
+    base.slice(half).map((c) => c.turnover)
   );
 
-  const declineTurnover = average(
-    declineCandles.map((c) => c.turnover)
-  );
+  const volumeTrend =
+    earlyTurnover > 0
+      ? lateTurnover / earlyTurnover
+      : 1;
 
-  const volumeRatio =
-    declineTurnover > 0
-      ? baseTurnover / declineTurnover
-      : 0;
+  const features = base.map(candleFeatures);
 
-  const declineRedVolume = sum(
-    declineCandles
-      .filter((c) => c.close < c.open)
-      .map((c) => c.turnover)
-  );
-
-  const declineGreenVolume = sum(
-    declineCandles
+  const greenTurnover = sum(
+    base
       .filter((c) => c.close > c.open)
       .map((c) => c.turnover)
   );
 
-  const declineSellRatio =
-    declineRedVolume > 0
-      ? declineGreenVolume / declineRedVolume
-      : 1;
-
-  return {
-    greenVolume,
-    redVolume,
-    greenRedRatio,
-    baseTurnover,
-    declineTurnover,
-    volumeRatio,
-    declineSellRatio,
-    absorptionCount,
-    strongCloseCount,
-    rejectionCount,
-    absorptionRatio: absorptionCount / base.length,
-    strongCloseRatio: strongCloseCount / base.length,
-    rejectionRatio: rejectionCount / base.length
-  };
-}
-
-/* ------------------------------------------------------------
-   SCORE MODEL
------------------------------------------------------------- */
-
-function calculateScore(data) {
-  let score = 0;
-  const reasons = [];
-
-  // 1. Previous meaningful decline: 15 points.
-  if (data.declinePct >= 10 && data.declinePct < 15) {
-    score += 8;
-  } else if (
-    data.declinePct >= 15 &&
-    data.declinePct < 30
-  ) {
-    score += 15;
-  } else if (
-    data.declinePct >= 30 &&
-    data.declinePct <= 50
-  ) {
-    score += 13;
-  } else if (data.declinePct > 50) {
-    score += 7;
-  }
-
-  reasons.push(`افت قبلی ${formatNumber(data.declinePct)}٪`);
-
-  // 2. Base compression: 15 points.
-  if (data.widthPct <= 8) {
-    score += 15;
-  } else if (data.widthPct <= 13) {
-    score += 12;
-  } else if (data.widthPct <= 18) {
-    score += 8;
-  } else if (data.widthPct <= 24) {
-    score += 4;
-  }
-
-  reasons.push(`عرض محدوده ${formatNumber(data.widthPct)}٪`);
-
-  // 3. Volume behavior: 15 points.
-  if (
-    data.volumeRatio >= 0.45 &&
-    data.volumeRatio <= 1.10
-  ) {
-    score += 15;
-  } else if (
-    data.volumeRatio > 1.10 &&
-    data.volumeRatio <= 1.50
-  ) {
-    score += 10;
-  } else if (
-    data.volumeRatio >= 0.25 &&
-    data.volumeRatio < 0.45
-  ) {
-    score += 8;
-  } else if (data.volumeRatio > 1.50) {
-    score += 5;
-  }
-
-  reasons.push(
-    `حجم پایه/افت ${formatNumber(data.volumeRatio)}`
+  const redTurnover = sum(
+    base
+      .filter((c) => c.close < c.open)
+      .map((c) => c.turnover)
   );
 
-  // 4. Absorption and rejection proxies: 20 points.
-  if (data.absorptionRatio >= 0.30) {
-    score += 10;
-  } else if (data.absorptionRatio >= 0.20) {
-    score += 7;
-  } else if (data.absorptionRatio >= 0.12) {
-    score += 4;
+  const greenRedRatio =
+    redTurnover > 0
+      ? greenTurnover / redTurnover
+      : greenTurnover > 0
+        ? 2
+        : 1;
+
+  const greenCount = features.filter(
+    (f) => f.green
+  ).length;
+
+  const greenRatio =
+    greenCount / windowSize;
+
+  // -------------------------------------------------------
+  // VOLATILITY CONTRACTION
+  // -------------------------------------------------------
+
+  const candleRanges = features.map(
+    (f) => f.range
+  );
+
+  const baseRangeRatio =
+    average(candleRanges) / baseMid;
+
+  const previousRangeCandles = candles.slice(
+    Math.max(0, baseStart - 24),
+    baseStart
+  );
+
+  const previousRangeRatio =
+    previousRangeCandles.length
+      ? average(
+          previousRangeCandles.map(
+            (c) => c.high - c.low
+          )
+        ) / baseMid
+      : baseRangeRatio;
+
+  const volatilityRatio =
+    previousRangeRatio > 0
+      ? baseRangeRatio / previousRangeRatio
+      : 1;
+
+  // -------------------------------------------------------
+  // PRICE POSITION
+  // -------------------------------------------------------
+
+  const lastClose = base[base.length - 1].close;
+
+  const closePosition =
+    (lastClose - baseLow) /
+    (baseHigh - baseLow);
+
+  const recentCloseAverage = average(
+    base.slice(-6).map((c) => c.close)
+  );
+
+  const recentCloseStrength =
+    recentCloseAverage > baseMid;
+
+  const recentRelativeVolume =
+    average(
+      base.slice(-6).map((c) => c.turnover)
+    );
+
+  const previousRelativeVolume =
+    average(
+      base.slice(-12, -6).map((c) => c.turnover)
+    );
+
+  const recentVolumeExpansion =
+    previousRelativeVolume > 0
+      ? recentRelativeVolume / previousRelativeVolume
+      : 1;
+
+  // -------------------------------------------------------
+  // POSSIBLE SELLING ABSORPTION PROXY
+  // This is NOT real order-flow absorption.
+  // -------------------------------------------------------
+
+  const lowerWickRatio = average(
+    features.map((f) => f.lowerWickRatio)
+  );
+
+  const strongCloseRatio =
+    average(
+      features.map((f) => f.closeLocation)
+    );
+
+  const rejectionCandles = features.filter(
+    (f) =>
+      f.lowerWickRatio >= 0.35 &&
+      f.closeLocation >= 0.55
+  ).length;
+
+  const rejectionRatio =
+    rejectionCandles / windowSize;
+
+  // -------------------------------------------------------
+  // SCORE
+  // -------------------------------------------------------
+
+  let score = 0;
+
+  // Previous decline: max 15
+  score += clamp(
+    ((previous.declinePct - 8) / 42) * 15,
+    0,
+    15
+  );
+
+  // Base compression: max 20
+  score += clamp(
+    ((22 - baseWidthPct) / 22) * 20,
+    0,
+    20
+  );
+
+  // Floor stability: max 20
+  if (floorStable) {
+    score += 12;
   }
 
-  if (data.rejectionRatio >= 0.30) {
-    score += 6;
-  } else if (data.rejectionRatio >= 0.18) {
-    score += 4;
-  } else if (data.rejectionRatio >= 0.10) {
-    score += 2;
+  if (higherLows) {
+    score += 8;
   }
 
-  if (data.strongCloseRatio >= 0.35) {
-    score += 4;
-  } else if (data.strongCloseRatio >= 0.22) {
-    score += 2;
-  }
-
-  // 5. Floor structure: 20 points.
-  if (data.higherLow) {
-    score += 10;
-    reasons.push("کف‌های نسبتاً بالاتر");
-  }
-
-  if (data.recentFloorHeld) {
-    score += 6;
-    reasons.push("حفظ کف محدوده");
-  }
-
-  if (data.floorHoldRatio >= 0.85) {
-    score += 4;
-  } else if (data.floorHoldRatio >= 0.70) {
-    score += 2;
-  }
-
-  // 6. Relative buying behavior: 10 points.
-  if (data.greenRedRatio >= 1.20) {
-    score += 10;
-    reasons.push("حجم صعودی قوی‌تر");
-  } else if (data.greenRedRatio >= 0.90) {
-    score += 7;
-  } else if (data.greenRedRatio >= 0.65) {
-    score += 4;
-  }
-
-  // 7. Volatility contraction: 5 points.
-  if (data.atrRatio <= 0.55) {
+  // Volume behavior: max 15
+  if (volumeTrend < 0.85) {
+    score += 8;
+  } else if (volumeTrend < 1.1) {
     score += 5;
-    reasons.push("کاهش محسوس نوسان");
-  } else if (data.atrRatio <= 0.75) {
-    score += 3;
-  } else if (data.atrRatio <= 0.90) {
-    score += 1;
   }
+
+  if (greenRedRatio >= 1.1) {
+    score += 7;
+  } else if (greenRedRatio >= 0.85) {
+    score += 4;
+  }
+
+  // Volatility contraction: max 10
+  if (volatilityRatio < 0.65) {
+    score += 10;
+  } else if (volatilityRatio < 0.85) {
+    score += 7;
+  } else if (volatilityRatio < 1.0) {
+    score += 4;
+  }
+
+  // Rejection / wick evidence: max 10
+  if (rejectionRatio >= 0.25) {
+    score += 6;
+  } else if (rejectionRatio >= 0.15) {
+    score += 4;
+  }
+
+  if (lowerWickRatio >= 0.25) {
+    score += 4;
+  }
+
+  // Price position: max 10
+  if (closePosition >= 0.75) {
+    score += 6;
+  } else if (closePosition >= 0.55) {
+    score += 4;
+  }
+
+  if (recentCloseStrength) {
+    score += 4;
+  }
+
+  score = Math.round(clamp(score, 0, 100));
+
+  // -------------------------------------------------------
+  // HARD STRUCTURE FILTERS
+  // -------------------------------------------------------
+
+  if (!floorStable) return null;
+
+  if (
+    greenRedRatio < 0.35 &&
+    rejectionRatio < 0.10 &&
+    !higherLows
+  ) {
+    return null;
+  }
+
+  if (score < CONFIG.MIN_ZONE_SCORE) {
+    return null;
+  }
+
+  // -------------------------------------------------------
+  // DEMAND BUILDING SCORE
+  // -------------------------------------------------------
+
+  let demandScore = 0;
+
+  if (higherLows) {
+    demandScore += 20;
+  }
+
+  if (greenRedRatio >= 1.2) {
+    demandScore += 20;
+  } else if (greenRedRatio >= 1.0) {
+    demandScore += 12;
+  }
+
+  if (recentVolumeExpansion >= 1.5) {
+    demandScore += 20;
+  } else if (recentVolumeExpansion >= 1.2) {
+    demandScore += 12;
+  }
+
+  if (closePosition >= 0.75) {
+    demandScore += 20;
+  } else if (closePosition >= 0.60) {
+    demandScore += 12;
+  }
+
+  if (recentCloseStrength) {
+    demandScore += 10;
+  }
+
+  if (greenRatio >= 0.60) {
+    demandScore += 10;
+  }
+
+  demandScore = Math.round(
+    clamp(demandScore, 0, 100)
+  );
+
+  const demandBuilding =
+    demandScore >= CONFIG.MIN_DEMAND_SCORE;
+
+  const tickerTurnover = number(
+    ticker.volume_24h_quote ??
+    ticker.volume_24h_usd ??
+    ticker.volume_24h
+  );
 
   return {
-    score: Math.min(100, score),
-    reasons
+    windowSize,
+
+    score,
+    demandScore,
+
+    stage: demandBuilding
+      ? "DEMAND_BUILDING"
+      : "ACCUMULATION_ZONE",
+
+    baseHigh,
+    baseLow,
+    baseMid,
+    baseWidthPct,
+
+    previousDeclinePct:
+      previous.declinePct,
+
+    floorChangePct,
+
+    greenRedRatio,
+    volumeTrend,
+
+    volatilityRatio,
+
+    closePosition,
+    lastClose,
+
+    recentVolumeExpansion,
+
+    lowerWickRatio,
+    rejectionRatio,
+
+    greenRatio,
+
+    turnover24h: tickerTurnover,
+
+    demandBuilding,
   };
 }
 
-/* ------------------------------------------------------------
-   MAIN ACCUMULATION ANALYSIS
------------------------------------------------------------- */
+// =========================================================
+// ANALYZE ONE MARKET
+// =========================================================
 
-function analyzeAccumulation(candles, ticker) {
-  if (
-    !Array.isArray(candles) ||
-    candles.length < CONFIG.MIN_CANDLES
-  ) {
-    return {
-      qualified: false,
-      reason: "تاریخچه ناکافی"
-    };
+async function analyzeMarket(contract, ticker) {
+  const candles = await getCandles(contract.name);
+
+  if (candles.length < CONFIG.MIN_CANDLES) {
+    stats.insufficient++;
+    return null;
   }
 
   const turnover24h = number(
     ticker.volume_24h_quote ??
     ticker.volume_24h_usd ??
-    0
-  );
-
-  if (turnover24h < CONFIG.MIN_24H_TURNOVER) {
-    return {
-      qualified: false,
-      reason: "نقدشوندگی پایین"
-    };
-  }
-
-  const baseStartIndex =
-    candles.length - CONFIG.BASE_WINDOW;
-
-  const base = candles.slice(baseStartIndex);
-
-  const decline = findDecline(
-    candles,
-    baseStartIndex
-  );
-
-  if (!decline) {
-    return {
-      qualified: false,
-      reason: "افت معتبر پیدا نشد"
-    };
-  }
-
-  if (
-    decline.declinePct < CONFIG.MIN_DECLINE_PCT ||
-    decline.declinePct > CONFIG.MAX_DECLINE_PCT
-  ) {
-    return {
-      qualified: false,
-      reason: "میزان افت خارج از محدوده"
-    };
-  }
-
-  const baseData = analyzeBase(base);
-
-  if (
-    baseData.widthPct >
-    CONFIG.MAX_BASE_WIDTH_PCT
-  ) {
-    return {
-      qualified: false,
-      reason: "محدوده تثبیت بیش از حد وسیع"
-    };
-  }
-
-  const supplyDemand = analyzeSupplyDemand(
-    base,
-    decline.candles
+    ticker.volume_24h
   );
 
   if (
-    supplyDemand.volumeRatio <
-    CONFIG.MIN_BASE_VOLUME_RATIO
+    turnover24h < CONFIG.MIN_24H_TURNOVER
   ) {
-    return {
-      qualified: false,
-      reason: "حجم معاملات بیش از حد ضعیف"
-    };
+    return null;
   }
 
-  const declineATR = averageTrueRange(
-    decline.candles
-  );
+  const results = [];
 
-  const baseATR = averageTrueRange(base);
+  for (const windowSize of CONFIG.BASE_WINDOWS) {
+    const result = analyzeBase(
+      candles,
+      windowSize,
+      ticker
+    );
 
-  const atrRatio =
-    declineATR > 0
-      ? baseATR / declineATR
-      : 1;
-
-  const latestClose = candles[candles.length - 1].close;
-
-  const data = {
-    ...baseData,
-    ...supplyDemand,
-
-    declinePct: decline.declinePct,
-    declinePeak: decline.peakPrice,
-    declineTrough: decline.troughPrice,
-
-    atrRatio,
-
-    latestClose,
-    turnover24h
-  };
-
-  // Mandatory structural conditions:
-  // A quiet market without floor stability is not enough.
-  if (
-    !data.recentFloorHeld ||
-    data.floorHoldRatio < 0.55
-  ) {
-    return {
-      qualified: false,
-      reason: "ساختار کف ضعیف"
-    };
+    if (result) {
+      results.push(result);
+    }
   }
 
-  // Avoid a base where selling volume dominates
-  // and there are almost no signs of rejection.
-  if (
-    data.greenRedRatio < 0.35 &&
-    data.absorptionRatio < 0.12 &&
-    data.rejectionRatio < 0.12
-  ) {
-    return {
-      qualified: false,
-      reason: "فشار فروش همچنان غالب است"
-    };
-  }
+  if (!results.length) return null;
 
-  const scoring = calculateScore(data);
+  // Select the strongest valid window.
+  // A longer window wins only when its score is better.
+  results.sort((a, b) => {
+    if (b.score !== a.score) {
+      return b.score - a.score;
+    }
 
-  if (scoring.score < CONFIG.MIN_SCORE) {
-    return {
-      qualified: false,
-      reason: "امتیاز کمتر از حداقل"
-    };
-  }
+    return b.windowSize - a.windowSize;
+  });
+
+  const best = results[0];
 
   return {
-    qualified: true,
-    score: scoring.score,
-
-    contract: null,
-
-    price: latestClose,
-    turnover24h,
-
-    declinePct: data.declinePct,
-    baseWidthPct: data.widthPct,
-    volumeRatio: data.volumeRatio,
-    greenRedRatio: data.greenRedRatio,
-    absorptionRatio: data.absorptionRatio,
-    rejectionRatio: data.rejectionRatio,
-    atrRatio: data.atrRatio,
-
-    higherLow: data.higherLow,
-    floorHeld: data.recentFloorHeld,
-
-    baseHigh: data.baseHigh,
-    baseLow: data.baseLow,
-
-    reasons: scoring.reasons
+    contract: contract.name,
+    lastPrice: number(ticker.last),
+    change24h: number(ticker.change_percentage),
+    ...best,
   };
 }
 
-/* ------------------------------------------------------------
-   CONCURRENCY WORKER
------------------------------------------------------------- */
+// =========================================================
+// CONCURRENCY WORKER
+// =========================================================
 
-async function processMarkets(contracts, tickers) {
+async function processMarkets(contracts, tickerMap) {
   const results = [];
-  const errors = [];
-
-  let completed = 0;
-  let successful = 0;
-  let failed = 0;
-
-  let nextIndex = 0;
+  let index = 0;
 
   async function worker() {
     while (true) {
-      const index = nextIndex++;
+      const currentIndex = index++;
 
-      if (index >= contracts.length) {
+      if (currentIndex >= contracts.length) {
         return;
       }
 
-      const contract = contracts[index];
-      const ticker = tickers.get(contract.name);
+      const contract = contracts[currentIndex];
 
       try {
+        const ticker = tickerMap.get(contract.name);
+
         if (!ticker) {
-          throw new Error("Ticker not found");
+          stats.failed++;
+
+          stats.errors.push({
+            contract: contract.name,
+            error: "Ticker not found",
+          });
+
+          continue;
         }
 
-        const candles = await getCandles(contract.name);
-
-        const analysis = analyzeAccumulation(
-          candles,
+        const result = await analyzeMarket(
+          contract,
           ticker
         );
 
-        successful++;
+        stats.checked++;
 
-        if (analysis.qualified) {
-          analysis.contract = contract.name;
-          results.push(analysis);
+        if (result) {
+          results.push(result);
+
+          if (result.stage === "DEMAND_BUILDING") {
+            stats.demandBuilding++;
+          } else {
+            stats.accumulationZones++;
+          }
         }
+
       } catch (error) {
-        failed++;
+        stats.failed++;
 
-        errors.push({
+        stats.errors.push({
           contract: contract.name,
-          error: safeError(error)
+          error: String(error.message || error).slice(0, 180),
         });
-
-        if (CONFIG.DEBUG_ERRORS) {
-          console.error(
-            `[ERROR] ${contract.name}: ${safeError(error)}`
-          );
-        }
       }
 
-      completed++;
-
-      if (completed % 100 === 0) {
+      if (stats.checked % 100 === 0) {
         console.log(
-          `[PROGRESS] ${completed}/${contracts.length} | ` +
-          `Success: ${successful} | Failed: ${failed} | ` +
-          `Candidates: ${results.length}`
+          `Progress: ${stats.checked}/${contracts.length}`
         );
       }
-
-      await sleep(CONFIG.REQUEST_DELAY_MS);
     }
   }
 
   const workers = Array.from(
     {
-      length: Math.min(
-        CONFIG.CONCURRENCY,
-        contracts.length
-      )
+      length: CONFIG.CONCURRENCY,
     },
     () => worker()
   );
 
   await Promise.all(workers);
 
-  results.sort((a, b) => {
-    if (b.score !== a.score) {
-      return b.score - a.score;
-    }
-
-    if (b.turnover24h !== a.turnover24h) {
-      return b.turnover24h - a.turnover24h;
-    }
-
-    return a.contract.localeCompare(b.contract);
-  });
-
-  return {
-    results,
-    errors,
-    completed,
-    successful,
-    failed
-  };
+  return results;
 }
 
-/* ------------------------------------------------------------
-   TELEGRAM REPORT
------------------------------------------------------------- */
+// =========================================================
+// TELEGRAM
+// =========================================================
 
-function candidateText(item, index) {
-  const status = item.score >= 80
-    ? "قوی"
-    : item.score >= 70
-      ? "مناسب"
-      : "قابل بررسی";
+async function sendTelegram(message) {
+  if (
+    !CONFIG.TELEGRAM_BOT_TOKEN ||
+    !CONFIG.TELEGRAM_CHAT_ID
+  ) {
+    console.log(
+      "Telegram credentials missing. Report printed locally."
+    );
 
-  const structure = [
-    item.higherLow ? "کف بالاتر" : null,
-    item.floorHeld ? "حفظ کف" : null
-  ].filter(Boolean).join(" | ");
+    console.log(message);
+    return;
+  }
 
-  return [
-    `#${index + 1}  ${item.contract}`,
-    `امتیاز: ${item.score}/100  |  وضعیت: ${status}`,
-    `قیمت: ${item.price}`,
-    `افت قبلی: ${formatNumber(item.declinePct)}٪`,
-    `عرض تثبیت: ${formatNumber(item.baseWidthPct)}٪`,
-    `نسبت حجم پایه به افت: ${formatNumber(item.volumeRatio)}`,
-    `حجم صعودی/نزولی: ${formatNumber(item.greenRedRatio)}`,
-    `نشانه جذب احتمالی: ${formatNumber(item.absorptionRatio * 100, 0)}٪ کندل‌ها`,
-    `رد فشار فروش: ${formatNumber(item.rejectionRatio * 100, 0)}٪ کندل‌ها`,
-    `نسبت نوسان: ${formatNumber(item.atrRatio)}`,
-    `گردش مالی ۲۴ساعته: ${formatMoney(item.turnover24h)} USDT`,
-    `ساختار: ${structure || "تأیید محدود"}`,
-    `کف محدوده: ${item.baseLow}`,
-    `سقف محدوده: ${item.baseHigh}`,
-    `دلایل: ${item.reasons.join("، ")}`,
-    "------------------------"
-  ].join("\n");
+  const url =
+    `https://api.telegram.org/bot${CONFIG.TELEGRAM_BOT_TOKEN}/sendMessage`;
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      chat_id: CONFIG.TELEGRAM_CHAT_ID,
+      text: message,
+      disable_web_page_preview: true,
+    }),
+    signal: AbortSignal.timeout(20000),
+  });
+
+  const data = await response.json();
+
+  if (!response.ok || !data.ok) {
+    throw new Error(
+      `Telegram error: ${JSON.stringify(data).slice(0, 300)}`
+    );
+  }
 }
 
 function splitMessages(text, maxLength) {
@@ -1011,190 +968,205 @@ function splitMessages(text, maxLength) {
   let current = "";
 
   for (const line of lines) {
-    const candidate = current
-      ? `${current}\n${line}`
-      : line;
-
-    if (candidate.length > maxLength && current) {
-      chunks.push(current);
+    if (
+      current.length + line.length + 1 >
+      maxLength
+    ) {
+      if (current) chunks.push(current);
       current = line;
     } else {
-      current = candidate;
+      current += (current ? "\n" : "") + line;
     }
   }
 
-  if (current) {
-    chunks.push(current);
-  }
+  if (current) chunks.push(current);
 
   return chunks;
 }
 
-async function sendTelegramMessage(text) {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.TELEGRAM_CHAT_ID;
+// =========================================================
+// REPORT FORMAT
+// =========================================================
 
-  if (!token || !chatId) {
-    throw new Error(
-      "Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID"
-    );
-  }
+function formatResult(item, index) {
+  const isDemand =
+    item.stage === "DEMAND_BUILDING";
 
-  const url =
-    `${CONFIG.TELEGRAM_API}/bot${token}/sendMessage`;
+  const title = isDemand
+    ? "🟢 DEMAND BUILDING"
+    : "🟡 ACCUMULATION ZONE";
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text,
-      disable_web_page_preview: true
-    })
-  });
-
-  const data = await response.json();
-
-  if (!response.ok || !data.ok) {
-    throw new Error(
-      `Telegram error: ${data.description || response.status}`
-    );
-  }
+  return [
+    `${index}. ${item.contract}`,
+    `${title}`,
+    `━━━━━━━━━━━━━━━━━━`,
+    `⭐ Zone Score: ${item.score}/100`,
+    `🔥 Demand Score: ${item.demandScore}/100`,
+    ``,
+    `💰 Price: ${price(item.lastPrice)}`,
+    `📉 Previous Decline: ${percent(item.previousDeclinePct)}`,
+    `📦 Base Width: ${percent(item.baseWidthPct)}`,
+    `📏 Base Window: ${item.windowSize} candles`,
+    ``,
+    `🔻 Zone Low: ${price(item.baseLow)}`,
+    `🔺 Zone High: ${price(item.baseHigh)}`,
+    `📍 Zone Mid: ${price(item.baseMid)}`,
+    ``,
+    `🧱 Floor Change: ${percent(item.floorChangePct)}`,
+    `📊 Green/Red Volume: ${item.greenRedRatio.toFixed(2)}`,
+    `📉 Volume Trend: ${item.volumeTrend.toFixed(2)}`,
+    `📐 Volatility Ratio: ${item.volatilityRatio.toFixed(2)}`,
+    `📈 Recent Volume Expansion: ${item.recentVolumeExpansion.toFixed(2)}`,
+    `🕯 Rejection Ratio: ${percent(item.rejectionRatio * 100)}`,
+    `💵 24H Turnover: ${formatMoney(item.turnover24h)} USDT`,
+    ``
+  ].join("\n");
 }
 
-async function sendReport(stats) {
-  const now = new Date().toISOString()
-    .replace("T", " ")
-    .replace(/\.\d{3}Z$/, " UTC");
+function buildReport(results) {
+  const demand = results
+    .filter((r) => r.stage === "DEMAND_BUILDING")
+    .sort((a, b) => b.demandScore - a.demandScore);
+
+  const accumulation = results
+    .filter((r) => r.stage === "ACCUMULATION_ZONE")
+    .sort((a, b) => b.score - a.score);
+
+  const all = [...demand, ...accumulation];
+
+  const now = new Date().toISOString();
 
   const header = [
-    "📡 GATE.IO | ACCUMULATION RADAR V2",
-    "━━━━━━━━━━━━━━━━━━━━",
-    `🕒 ${now}`,
-    `⏱ تایم‌فریم: ${CONFIG.INTERVAL}`,
-    "",
-    "📊 MARKET SCAN",
-    `قراردادهای فعال: ${stats.total}`,
-    `بررسی‌شده: ${stats.successful}`,
-    `خطا: ${stats.failed}`,
-    `کاندیدهای انباشت: ${stats.results.length}`,
-    "",
-    "⚠️ امتیازها رتبه‌بندی الگوریتمی هستند، نه احتمال قطعی پامپ.",
-    "نشانه‌های جذب عرضه از رفتار کندل‌ها تخمین زده شده‌اند.",
-    "━━━━━━━━━━━━━━━━━━━━"
+    `🛰 GATE.IO | ACCUMULATION RADAR V3`,
+    `━━━━━━━━━━━━━━━━━━`,
+    `⏱ Timeframe: ${CONFIG.INTERVAL}`,
+    `🕒 UTC: ${now}`,
+    ``,
+    `📊 MARKET SCAN`,
+    `Total Contracts: ${stats.totalContracts}`,
+    `Eligible Contracts: ${stats.eligibleContracts}`,
+    `Checked: ${stats.checked}`,
+    `Failed: ${stats.failed}`,
+    `Insufficient History: ${stats.insufficient}`,
+    ``,
+    `🎯 DETECTION RESULTS`,
+    `🟡 Accumulation Zones: ${accumulation.length}`,
+    `🟢 Demand Building: ${demand.length}`,
+    `📦 Total Candidates: ${all.length}`,
+    ``,
+    `⚠️ Scores are ranking scores, not probabilities.`,
+    `⚠️ These are monitoring alerts, not buy signals.`,
+    `━━━━━━━━━━━━━━━━━━`,
+    ``
   ].join("\n");
 
-  const messages = [header];
+  let body = "";
 
-  if (stats.results.length === 0) {
-    messages.push(
-      "در این اجرا هیچ بازاری تمام شروط شناسایی انباشت را نداشت."
-    );
-  } else {
-    const body = stats.results
-      .map((item, index) => candidateText(item, index))
-      .join("\n");
+  all.forEach((item, index) => {
+    body += formatResult(item, index + 1);
+  });
 
-    messages.push(...splitMessages(
-      body,
-      CONFIG.TELEGRAM_MAX_LENGTH
-    ));
+  if (!all.length) {
+    body = "No valid accumulation zones detected in this scan.\n";
   }
 
-  if (stats.errors.length > 0) {
-    const errorSummary = [
-      "⚠️ نمونه خطاهای دریافت داده:",
+  let errorSection = "";
+
+  if (stats.errors.length) {
+    errorSection = [
+      ``,
+      `⚠️ ERROR SAMPLES`,
       ...stats.errors.slice(0, 12).map(
         (e) => `${e.contract}: ${e.error}`
-      )
+      ),
     ].join("\n");
-
-    messages.push(errorSummary);
   }
 
-  for (let i = 0; i < messages.length; i++) {
-    const page = messages.length > 1
-      ? `\n\n📄 پیام ${i + 1}/${messages.length}`
-      : "";
+  return header + body + errorSection;
+}
 
-    await sendTelegramMessage(
-      `${messages[i]}${page}`
-    );
+// =========================================================
+// MAIN
+// =========================================================
+
+async function main() {
+  console.log("Starting Accumulation Radar V3...");
+
+  const [allContracts, tickers] =
+    await Promise.all([
+      getContracts(),
+      getTickers(),
+    ]);
+
+  stats.totalContracts = allContracts.length;
+
+  const contracts = allContracts.filter((c) =>
+    c &&
+    c.type === "direct" &&
+    c.status === "trading" &&
+    c.in_delisting !== true &&
+    typeof c.name === "string" &&
+    c.name.endsWith("_USDT")
+  );
+
+  stats.eligibleContracts = contracts.length;
+
+  const tickerMap = new Map(
+    tickers.map((t) => [t.contract, t])
+  );
+
+  console.log(
+    `Eligible markets: ${contracts.length}`
+  );
+
+  const results = await processMarkets(
+    contracts,
+    tickerMap
+  );
+
+  const report = buildReport(results);
+
+  const messages = splitMessages(
+    report,
+    CONFIG.TELEGRAM_MAX_LENGTH
+  );
+
+  for (let i = 0; i < messages.length; i++) {
+    const message =
+      messages.length > 1
+        ? `📄 Report ${i + 1}/${messages.length}\n\n${messages[i]}`
+        : messages[i];
+
+    await sendTelegram(message);
 
     await sleep(350);
   }
+
+  console.log("=================================");
+  console.log("SCAN COMPLETED");
+  console.log(`Contracts: ${stats.totalContracts}`);
+  console.log(`Eligible: ${stats.eligibleContracts}`);
+  console.log(`Checked: ${stats.checked}`);
+  console.log(`Failed: ${stats.failed}`);
+  console.log(`Candidates: ${results.length}`);
+  console.log(`Accumulation: ${stats.accumulationZones}`);
+  console.log(`Demand Building: ${stats.demandBuilding}`);
+  console.log("=================================");
 }
 
-/* ------------------------------------------------------------
-   MAIN
------------------------------------------------------------- */
+main().catch(async (error) => {
+  console.error("FATAL ERROR:", error);
 
-async function main() {
-  const startedAt = Date.now();
+  try {
+    await sendTelegram(
+      `🚨 ACCUMULATION RADAR V3 FAILED\n\n${String(error.message || error)}`
+    );
+  } catch (telegramError) {
+    console.error(
+      "Telegram failure:",
+      telegramError.message
+    );
+  }
 
-  console.log("======================================");
-  console.log("GATE.IO ACCUMULATION RADAR V2");
-  console.log("======================================");
-
-  console.log("[1] Fetching active USDT contracts...");
-
-  const contracts = await getContracts();
-
-  console.log(
-    `[INFO] Active direct USDT contracts: ${contracts.length}`
-  );
-
-  console.log("[2] Fetching market tickers...");
-
-  const tickers = await getTickers();
-
-  console.log(
-    `[INFO] Tickers received: ${tickers.size}`
-  );
-
-  console.log("[3] Scanning 4H candles...");
-
-  const scan = await processMarkets(
-    contracts,
-    tickers
-  );
-
-  console.log("[4] Scan completed.");
-
-  console.log(
-    `Successful: ${scan.successful}`
-  );
-
-  console.log(
-    `Failed: ${scan.failed}`
-  );
-
-  console.log(
-    `Candidates: ${scan.results.length}`
-  );
-
-  console.log("[5] Sending Telegram report...");
-
-  await sendReport({
-    total: contracts.length,
-    successful: scan.successful,
-    failed: scan.failed,
-    results: scan.results,
-    errors: scan.errors
-  });
-
-  const elapsed = (
-    (Date.now() - startedAt) / 1000
-  ).toFixed(1);
-
-  console.log(
-    `[DONE] Finished in ${elapsed} seconds.`
-  );
-}
-
-main().catch((error) => {
-  console.error("[FATAL]", safeError(error));
   process.exitCode = 1;
 });
