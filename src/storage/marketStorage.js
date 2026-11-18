@@ -82,6 +82,62 @@ export async function saveMarketSnapshot(candidates) {
 
   const state = await readState();
 
+  // آخرین اجرای ثبت‌شده قبل از اجرای فعلی
+  let previousRunTimestamp = null;
+
+  for (const item of state.history) {
+    if (
+      item.timestamp &&
+      (!previousRunTimestamp ||
+        item.timestamp > previousRunTimestamp)
+    ) {
+      previousRunTimestamp = item.timestamp;
+    }
+  }
+
+  // استخراج رتبه‌های اجرای قبلی
+  const previousRanks = new Map();
+
+  if (previousRunTimestamp) {
+    for (const item of state.history) {
+      if (item.timestamp === previousRunTimestamp) {
+        previousRanks.set(item.symbol, item.rank);
+      }
+    }
+  }
+
+  // مقایسه رتبه‌های فعلی با اجرای قبلی
+  const rankChanges = {};
+
+  candidates.forEach((coin, index) => {
+    const currentRank = index + 1;
+    const previousRank = previousRanks.get(coin.symbol);
+
+    if (previousRank === undefined) {
+      rankChanges[coin.symbol] = {
+        status: 'NEW',
+        previousRank: null,
+        currentRank,
+        change: null,
+      };
+      return;
+    }
+
+    const change = previousRank - currentRank;
+
+    rankChanges[coin.symbol] = {
+      status: change > 0
+        ? 'UP'
+        : change < 0
+          ? 'DOWN'
+          : 'SAME',
+      previousRank,
+      currentRank,
+      change,
+    };
+  });
+
+  // ساخت رکوردهای اجرای فعلی
   const currentSnapshots = candidates.map((coin, index) => {
     const rank = index + 1;
 
@@ -108,6 +164,7 @@ export async function saveMarketSnapshot(candidates) {
 
   state.history.push(...currentSnapshots);
 
+  // پاک‌سازی تاریخچه قدیمی‌تر از ۱۵ روز
   const historyCutoff =
     nowMs - HISTORY_RETENTION_DAYS * DAY_MS;
 
@@ -116,6 +173,7 @@ export async function saveMarketSnapshot(candidates) {
     return Number.isFinite(timestamp) && timestamp >= historyCutoff;
   });
 
+  // نگهداری خلاصه عملکرد تا ۳۰ روز پس از آخرین مشاهده
   const summaryCutoff =
     nowMs - SUMMARY_RETENTION_DAYS * DAY_MS;
 
@@ -151,5 +209,6 @@ export async function saveMarketSnapshot(candidates) {
     snapshotsSaved: currentSnapshots.length,
     historyCount: state.history.length,
     summaryCount: Object.keys(state.summaries).length,
+    rankChanges,
   };
 }
