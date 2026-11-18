@@ -670,20 +670,43 @@ async function sendTelegram(message) {
 }
 
 function splitTelegramMessage(text, maxLength) {
-  const blocks = text.split('\n');
+  const blocks = text.split('\n\n').filter(Boolean);
   const messages = [];
   let current = '';
 
   for (const block of blocks) {
     const candidate = current
-      ? `${current}\n${block}`
+      ? `${current}\n\n${block}`
       : block;
 
-    if (candidate.length > maxLength && current) {
-      messages.push(current);
-      current = block;
-    } else {
+    if (candidate.length <= maxLength) {
       current = candidate;
+      continue;
+    }
+
+    if (current) {
+      messages.push(current);
+      current = '';
+    }
+
+    // بلوک‌های عادی (از جمله اطلاعات هر ارز) یکجا حفظ می‌شوند.
+    if (block.length <= maxLength) {
+      current = block;
+      continue;
+    }
+
+    // فقط برای بلوک‌های غیرعادی و طولانی
+    const lines = block.split('\n');
+
+    for (const line of lines) {
+      const next = current ? `${current}\n${line}` : line;
+
+      if (next.length > maxLength && current) {
+        messages.push(current);
+        current = line;
+      } else {
+        current = next;
+      }
     }
   }
 
@@ -691,11 +714,12 @@ function splitTelegramMessage(text, maxLength) {
 
   return messages;
 }
-
 async function sendReports(report) {
+  // برای جلوگیری از عبور از محدودیت تلگرام،
+  // فضای لازم برای شماره گزارش رزرو می‌شود.
   const messages = splitTelegramMessage(
     report,
-    CONFIG.TELEGRAM_MAX_LENGTH
+    CONFIG.TELEGRAM_MAX_LENGTH - 50
   );
 
   for (let i = 0; i < messages.length; i++) {
