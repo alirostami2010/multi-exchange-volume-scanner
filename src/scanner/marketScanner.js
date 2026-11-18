@@ -1,21 +1,20 @@
-
 /**
- * GATE.IO USDT PERPETUAL — EARLY BULLISH TREND SCANNER
- * ---------------------------------------------------
- * هدف: شناسایی ارزهایی که در وضعیت فعلی بازار در ابتدای
- * روند صعودی قرار دارند.
+ * GATE.IO USDT PERPETUAL — FOUR TIMEFRAME BULLISH RADAR
+ * ----------------------------------------------------
+ * Timeframes: 15m / 1h / 4h / 1d
  *
- * بدون منطق انباشت، جذب عرضه یا تحلیل چرخه تاریخی.
+ * هدف:
+ * شناسایی ارزهای دارای قدرت صعودی، افزایش حجم،
+ * شتاب قیمت و احتمال ادامه حرکت بزرگ.
  *
- * رتبه‌بندی جدید:
- * قدرت امتیاز پایه + حرکت 15m/1h/4h + استمرار قیمت و حجم
+ * فیلتر اولیه و امتیاز پایه حفظ شده‌اند.
+ * رتبه‌بندی نهایی با تحلیل چهار تایم‌فریم انجام می‌شود.
  *
  * File: src/scanner/marketScanner.js
  * Node.js 20+
  */
 
 import 'dotenv/config';
-
 import { saveMarketSnapshot } from '../storage/marketStorage.js';
 
 // ========================
@@ -29,9 +28,10 @@ const CONFIG = {
     '15m': { seconds: 900, limit: 100 },
     '1h': { seconds: 3600, limit: 100 },
     '4h': { seconds: 14400, limit: 100 },
+    '1d': { seconds: 86400, limit: 100 },
   },
 
-  TOP_COUNT: 10,
+  TOP_COUNT: 20,
   MIN_QUOTE_VOLUME_24H: 100000,
   CONCURRENCY: 8,
   REQUEST_TIMEOUT: 15000,
@@ -79,7 +79,7 @@ const median = (values) => {
 };
 
 const pctChange = (current, previous) => {
-  if (!previous) return 0;
+  if (!previous || previous <= 0) return 0;
   return ((current - previous) / previous) * 100;
 };
 
@@ -90,6 +90,9 @@ const formatPrice = (value) => {
   if (value >= 0.001) return value.toFixed(7);
   return value.toPrecision(5);
 };
+
+const getCandleValue = (candle) =>
+  candle.turnover > 0 ? candle.turnover : candle.volume;
 
 // ========================
 // HTTP
@@ -107,6 +110,7 @@ async function fetchJSON(url) {
 
       if (!response.ok) {
         const body = await response.text();
+
         const error = new Error(
           `HTTP ${response.status}: ${body.slice(0, 200)}`
         );
@@ -142,11 +146,6 @@ async function getTickers() {
   return fetchJSON(`${CONFIG.API_BASE}/futures/usdt/tickers`);
 }
 
-/**
- * در حالت عادی فقط کندل‌های بسته‌شده را برمی‌گرداند.
- * اگر includeCurrent=true باشد، علاوه بر کندل‌های بسته،
- * کندل در حال تشکیل همان تایم‌فریم را نیز برمی‌گرداند.
- */
 async function getCandles(
   contract,
   interval,
@@ -209,6 +208,10 @@ async function getCandles(
     current: currentCandle
       ? {
           bucketTime: currentBucket,
+          open: currentCandle.open,
+          high: currentCandle.high,
+          low: currentCandle.low,
+          close: currentCandle.close,
           volume: currentCandle.volume,
           turnover: currentCandle.turnover,
         }
@@ -278,11 +281,8 @@ function getVolumeRatio(candles) {
   const recent = candles.slice(-3);
   const baseline = candles.slice(-23, -3);
 
-  const valueOf = (c) =>
-    c.turnover > 0 ? c.turnover : c.volume;
-
-  const recentAverage = average(recent.map(valueOf));
-  const baselineMedian = median(baseline.map(valueOf));
+  const recentAverage = average(recent.map(getCandleValue));
+  const baselineMedian = median(baseline.map(getCandleValue));
 
   if (baselineMedian <= 0) return 0;
 
@@ -384,6 +384,7 @@ function analyzeStructure(candles) {
     lows[lows.length - 1] > lows[lows.length - 2];
 
   const previous = candles.slice(-13, -1);
+
   const resistance = Math.max(
     ...previous.map((c) => c.high)
   );
@@ -400,6 +401,7 @@ function analyzeStructure(candles) {
     (breakout && higherLow);
 
   let score = 0;
+
   if (higherHigh) score += 30;
   if (higherLow) score += 30;
   if (breakout) score += 40;
@@ -422,6 +424,7 @@ function analyzeTimeframe(candles) {
   if (!candles || candles.length < 30) return null;
 
   const closes = candles.map((c) => c.close);
+
   const ema9 = calculateEMA(closes, 9);
   const ema21 = calculateEMA(closes, 21);
 
@@ -455,10 +458,12 @@ function analyzeTimeframe(candles) {
 
     returns: {
       return1: pctChange(last.close, previous.close),
+
       return4: pctChange(
         last.close,
         candles[candles.length - 5].close
       ),
+
       return16: pctChange(
         last.close,
         candles[candles.length - 17].close
@@ -468,21 +473,252 @@ function analyzeTimeframe(candles) {
 }
 
 // ========================
+// DAILY ANALYSIS
+// ========================
+
+function analyzeDaily(candles, currentCandle, livePrice) {
+  if (!candles || candles.length < 30) return null;
+
+  const base = analyzeTimeframe(candles);
+
+  if (!base) return null;
+
+  const closes = candles.map((c) => c.close);
+
+  const ema9 = calculateEMA(closes, 9);
+  const ema21 = calculateEMA(closes, 21);
+  const ema50 = calculateEMA(closes, 50);
+
+  const last = candles[candles.length - 1];
+
+  const previous5 = candles.slice(-6, -1);
+  const previous10 = candles.slice(-11, -1);
+
+  const avg5Volume = average(
+    previous5.map(getCandleValue)
+  );
+
+  const avg10Volume = average(
+    previous10.map(getCandleValue)
+  );
+
+  const dailyVolume = getCandleValue(last);
+
+  const volumeRatio5 =
+    avg5Volume > 0 ? dailyVolume / avg5Volume : 0;
+
+  const volumeRatio10 =
+    avg10Volume > 0 ? dailyVolume / avg10Volume : 0;
+
+  const previous20 = candles.slice(-21, -1);
+
+  const resistance20 = previous20.length
+    ? Math.max(...previous20.map((c) => c.high))
+    : 0;
+
+  const previous50 = candles.slice(-51, -1);
+
+  const resistance50 = previous50.length
+    ? Math.max(...previous50.map((c) => c.high))
+    : 0;
+
+  const price = number(livePrice, last.close);
+
+  const currentOpen = number(
+    currentCandle?.open,
+    last.close
+  );
+
+  const currentHigh = number(
+    currentCandle?.high,
+    price
+  );
+
+  const currentLow = number(
+    currentCandle?.low,
+    price
+  );
+
+  const currentRange = currentHigh - currentLow;
+
+  const currentCloseLocation = currentRange > 0
+    ? clamp(
+        (price - currentLow) / currentRange,
+        0,
+        1
+      )
+    : 0.5;
+
+  const dailyReturn = pctChange(price, last.close);
+
+  const dailyOpenReturn = currentCandle
+    ? pctChange(price, currentOpen)
+    : 0;
+
+  const ema9Value = ema9[ema9.length - 1];
+  const ema21Value = ema21[ema21.length - 1];
+
+  const ema50Value = ema50.length
+    ? ema50[ema50.length - 1]
+    : 0;
+
+  const emaBullish =
+    price > ema9Value &&
+    ema9Value > ema21Value;
+
+  const ema50Bullish =
+    ema50Value > 0 &&
+    price > ema50Value;
+
+  const emaSlope =
+    ema21[ema21.length - 1] >
+    ema21[ema21.length - 2];
+
+  const breakout20 =
+    resistance20 > 0 &&
+    price > resistance20;
+
+  const breakout50 =
+    resistance50 > 0 &&
+    price > resistance50;
+
+  // حجم روز جاری با توجه به زمان سپری‌شده
+  const nowSeconds = Math.floor(Date.now() / 1000);
+
+  const dayBucket =
+    Math.floor(nowSeconds / 86400) * 86400;
+
+  const elapsedSeconds = clamp(
+    nowSeconds - number(
+      currentCandle?.bucketTime,
+      dayBucket
+    ),
+    300,
+    86400
+  );
+
+  const dayProgress = clamp(
+    elapsedSeconds / 86400,
+    0.05,
+    1
+  );
+
+  const currentTurnover = number(
+    currentCandle?.turnover
+  );
+
+  const projectedVolumeRatio =
+    currentTurnover > 0 && avg10Volume > 0
+      ? (currentTurnover / dayProgress) / avg10Volume
+      : 0;
+
+  let score = 50;
+
+  if (emaBullish) score += 10;
+  if (ema50Bullish) score += 6;
+  if (emaSlope) score += 5;
+
+  if (base.structure.higherHigh) score += 6;
+  if (base.structure.higherLow) score += 7;
+
+  if (breakout20) score += 12;
+  if (breakout50) score += 8;
+
+  if (volumeRatio5 >= 1.5) score += 8;
+  else if (volumeRatio5 >= 1.15) score += 4;
+
+  if (volumeRatio10 >= 1.5) score += 6;
+  else if (volumeRatio10 >= 1.15) score += 3;
+
+  if (projectedVolumeRatio >= 2) score += 8;
+  else if (projectedVolumeRatio >= 1.3) score += 4;
+
+  if (
+    currentCandle &&
+    dailyOpenReturn > 0 &&
+    currentCloseLocation >= 0.7
+  ) {
+    score += 5;
+  }
+
+  if (dailyReturn < -5) score -= 8;
+
+  return {
+    score: Math.round(clamp(score, 0, 100)),
+
+    price,
+    dailyReturn,
+    dailyOpenReturn,
+
+    emaBullish,
+    ema50Bullish,
+    emaSlope,
+
+    higherHigh: base.structure.higherHigh,
+    higherLow: base.structure.higherLow,
+
+    breakout20,
+    breakout50,
+
+    volumeRatio5,
+    volumeRatio10,
+    projectedVolumeRatio,
+
+    currentCandle: Boolean(currentCandle),
+  };
+}
+
+function emptyDailyAnalysis(price = 0) {
+  return {
+    score: 50,
+    price,
+    dailyReturn: 0,
+    dailyOpenReturn: 0,
+    emaBullish: false,
+    ema50Bullish: false,
+    emaSlope: false,
+    higherHigh: false,
+    higherLow: false,
+    breakout20: false,
+    breakout50: false,
+    volumeRatio5: 0,
+    volumeRatio10: 0,
+    projectedVolumeRatio: 0,
+    currentCandle: false,
+  };
+}
+
+// ========================
 // EARLY BULLISH SCORING
 // ========================
 
 function analyzeCoin(data) {
-  const { symbol, candles } = data;
+  const {
+    symbol,
+    candles,
+    dailyCurrent,
+    livePrice,
+  } = data;
 
   const tf15 = analyzeTimeframe(candles['15m']);
   const tf1h = analyzeTimeframe(candles['1h']);
   const tf4h = analyzeTimeframe(candles['4h']);
 
+  const daily =
+    analyzeDaily(
+      candles['1d'],
+      dailyCurrent,
+      livePrice
+    ) || emptyDailyAnalysis(livePrice);
+
   if (!tf15 || !tf1h || !tf4h) return null;
 
   let score = 0;
+
   const evidence = [];
   const warnings = [];
+
+  // امتیاز پایه فعلی بدون تغییر
 
   if (tf1h.structure.higherHigh) {
     score += 10;
@@ -608,6 +844,8 @@ function analyzeCoin(data) {
     warnings.push('حجم معاملات ضعیف');
   }
 
+  // شروط پذیرش اولیه بدون تغییر
+
   const shortTermPositive =
     tf15.emaBullish ||
     tf15.structure.breakout ||
@@ -642,22 +880,47 @@ function analyzeCoin(data) {
     stage = 'اولین نشانه‌های حرکت';
   }
 
+  if (daily.breakout20) {
+    evidence.push('شکست مقاومت روزانه 20D');
+  }
+
+  if (daily.breakout50) {
+    evidence.push('عبور از سقف 50 روزه');
+  }
+
+  if (daily.volumeRatio5 >= 1.5) {
+    evidence.push(
+      `حجم روزانه قوی (${daily.volumeRatio5.toFixed(2)}x)`
+    );
+  }
+
+  if (daily.projectedVolumeRatio >= 1.5) {
+    evidence.push(
+      `شتاب حجم روز جاری (${daily.projectedVolumeRatio.toFixed(2)}x)`
+    );
+  }
+
   return {
     symbol,
     score,
     stage,
+
     price: tf1h.price,
 
     returns: {
       '15m': return15m,
       '1h': return1h,
       '4h': return4h,
+      '1d': daily.dailyReturn,
     },
 
     volume: {
       '15m': tf15.volumeRatio,
       '1h': tf1h.volumeRatio,
+      '1d': daily.volumeRatio5,
     },
+
+    daily,
 
     evidence,
     warnings,
@@ -683,11 +946,13 @@ async function sendTelegram(message) {
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+
       body: JSON.stringify({
         chat_id: chatId,
         text: message,
         disable_web_page_preview: true,
       }),
+
       signal: AbortSignal.timeout(15000),
     }
   );
@@ -706,6 +971,7 @@ async function sendTelegram(message) {
 
 function splitTelegramMessage(text, maxLength) {
   const blocks = text.split('\n\n').filter(Boolean);
+
   const messages = [];
   let current = '';
 
@@ -732,7 +998,9 @@ function splitTelegramMessage(text, maxLength) {
     const lines = block.split('\n');
 
     for (const line of lines) {
-      const next = current ? `${current}\n${line}` : line;
+      const next = current
+        ? `${current}\n${line}`
+        : line;
 
       if (next.length > maxLength && current) {
         messages.push(current);
@@ -776,13 +1044,18 @@ async function sendReports(report) {
 // REPORT
 // ========================
 
-function buildReport(candidates, stats, duration, rankChanges = null) {
+function buildReport(
+  candidates,
+  stats,
+  duration,
+  rankChanges = null
+) {
   const selected = candidates.slice(0, CONFIG.TOP_COUNT);
 
   const blocks = [];
 
   blocks.push([
-    '🚀 GATE.IO | EARLY BULLISH RADAR',
+    '🚀 GATE.IO | FOUR TIMEFRAME BULLISH RADAR',
     '━━━━━━━━━━━━━━━━━━',
     '📌 راهنمای علائم:',
     '🟢↑ بهبود رتبه | 🔴↓ افت رتبه | ➖ ثابت | 🆕 جدید',
@@ -822,8 +1095,9 @@ function buildReport(candidates, stats, duration, rankChanges = null) {
       return `${arrow}${Math.abs(value).toFixed(2)}%`;
     };
 
-    const volume15 = coin.volume['15m'];
-    const volume1h = coin.volume['1h'];
+    const volume15 = number(coin.volume['15m']);
+    const volume1h = number(coin.volume['1h']);
+    const volume1d = number(coin.volume['1d']);
 
     const volume15Text =
       `${volume15.toFixed(2)}x${volume15 >= 1.5 ? '⚡' : ''}`;
@@ -831,16 +1105,20 @@ function buildReport(candidates, stats, duration, rankChanges = null) {
     const volume1hText =
       `${volume1h.toFixed(2)}x${volume1h >= 1.5 ? '⚡' : ''}`;
 
-    // قیمت زنده برای نمایش؛ در صورت نبود، قیمت کندل بسته‌شده
+    const volume1dText =
+      `${volume1d.toFixed(2)}x${volume1d >= 1.5 ? '⚡' : ''}`;
+
     const displayPrice =
       number(coin.livePrice) > 0
         ? number(coin.livePrice)
         : coin.price;
 
     blocks.push([
-      `${currentRank}. ${coin.symbol} ${rankText} | امتیاز ${coin.score}`,
-      `💰 ${formatPrice(displayPrice)} | 15M ${formatReturn(coin.returns['15m'])} | 1H ${formatReturn(coin.returns['1h'])} | 4H ${formatReturn(coin.returns['4h'])}`,
-      `📊 حجم 15M ${volume15Text} | 1H ${volume1hText}`,
+      `${currentRank}. ${coin.symbol} ${rankText} | امتیاز ${coin.score} | رتبه ${coin.rankScore ?? '-'}`,
+      `💰 ${formatPrice(displayPrice)} | 15M ${formatReturn(coin.returns['15m'])} | 1H ${formatReturn(coin.returns['1h'])}`,
+      `📈 4H ${formatReturn(coin.returns['4h'])} | 1D ${formatReturn(coin.returns['1d'])}`,
+      `📊 حجم 15M ${volume15Text} | 1H ${volume1hText} | 1D ${volume1dText}`,
+      `🌞 روزانه: ${coin.daily?.score ?? 50}/100 | حجم جاری ${number(coin.daily?.projectedVolumeRatio).toFixed(2)}x`,
     ].join('\n'));
 
     if (index < selected.length - 1) {
@@ -863,11 +1141,11 @@ function buildReport(candidates, stats, duration, rankChanges = null) {
 async function main() {
   const startedAt = Date.now();
 
-  console.log('\n🚀 GATE.IO EARLY BULLISH TREND SCANNER');
+  console.log('\n🚀 GATE.IO FOUR TIMEFRAME BULLISH RADAR');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log('🎯 Target: Beginning of bullish trend');
-  console.log('⏱ Timeframes: 15m / 1h / 4h');
-  console.log('📈 Ranking: Momentum + Price/Volume Persistence\n');
+  console.log('🎯 Target: Strong bullish momentum and potential large moves');
+  console.log('⏱ Timeframes: 15m / 1h / 4h / 1d');
+  console.log('📈 Ranking: Base + Multi-Timeframe Momentum + Persistence\n');
 
   const [contracts, tickers] = await Promise.all([
     getContracts(),
@@ -923,6 +1201,7 @@ async function main() {
         candles15mData,
         candles1h,
         candles4h,
+        candles1dData,
       ] = await Promise.all([
         getCandles(
           market.symbol,
@@ -942,16 +1221,24 @@ async function main() {
           '4h',
           CONFIG.TIMEFRAMES['4h'].limit
         ),
+
+        getCandles(
+          market.symbol,
+          '1d',
+          CONFIG.TIMEFRAMES['1d'].limit,
+          true
+        ),
       ]);
 
       const candles15m = candles15mData.closed;
+      const candles1d = candles1dData.closed;
 
       if (
         candles15m.length < 30 ||
         candles1h.length < 30 ||
         candles4h.length < 30
       ) {
-        throw new Error('کندل کافی دریافت نشد.');
+        throw new Error('کندل کافی برای تایم‌فریم اصلی دریافت نشد.');
       }
 
       success++;
@@ -963,7 +1250,11 @@ async function main() {
           '15m': candles15m,
           '1h': candles1h,
           '4h': candles4h,
+          '1d': candles1d,
         },
+
+        dailyCurrent: candles1dData.current,
+        livePrice: market.lastPrice,
       });
 
       if (!candidate) return null;
@@ -971,11 +1262,10 @@ async function main() {
       return {
         ...candidate,
 
-        // قیمت لحظه‌ای از تیکر
         livePrice: market.lastPrice,
 
-        // اطلاعات کندل 15 دقیقه‌ای در حال تشکیل
         live15m: candles15mData.current,
+        live1d: candles1dData.current,
       };
     }
   );
@@ -1002,23 +1292,19 @@ async function main() {
     const storageResult = await saveMarketSnapshot(candidates);
 
     rankChanges = storageResult.rankChanges;
-
-    // ترتیب نهایی از امتیاز استمرار و قدرت حرکت می‌آید.
     rankedCandidates = storageResult.rankedCandidates;
 
     console.log('\n💾 MARKET DATA SAVED');
     console.log(`Snapshots: ${storageResult.snapshotsSaved}`);
     console.log(`History records: ${storageResult.historyCount}`);
     console.log(`Coin summaries: ${storageResult.summaryCount}`);
-    console.log('📊 Persistence ranking calculated successfully.');
+    console.log('📊 Four-timeframe ranking calculated successfully.');
   } catch (storageError) {
     console.error(
       '⚠️ MARKET STORAGE FAILED:',
       storageError
     );
 
-    // در صورت خرابی Storage، اسکنر همچنان گزارش می‌فرستد.
-    // ترتیب جایگزین همان ترتیب امتیاز پایه است.
     rankedCandidates = [...candidates].sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score;
       return b.volume['1h'] - a.volume['1h'];
@@ -1046,6 +1332,7 @@ async function main() {
         `Base: ${coin.score} | ` +
         `Rank: ${coin.rankScore ?? '-'} | ` +
         `Persistence: ${coin.persistenceScore ?? '-'} | ` +
+        `Daily: ${coin.dailyScore ?? '-'} | ` +
         `${coin.stage}`
       );
     });
