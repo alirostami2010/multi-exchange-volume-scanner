@@ -13,6 +13,8 @@
 
 import 'dotenv/config';
 
+import { saveMarketSnapshot } from '../storage/marketStorage.js';
+
 // ========================
 // CONFIG
 // ========================
