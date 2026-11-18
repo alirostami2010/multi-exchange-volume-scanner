@@ -1,11 +1,13 @@
 
-name: Gate.io Volume Scanner
+name: Gate.io Accumulation Radar
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "7 */4 * * *"
 
 concurrency:
-  group: gate-io-manual-scanner
+  group: accumulation-radar
   cancel-in-progress: false
 
 jobs:
@@ -13,32 +15,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
-    permissions:
-      contents: write
-
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: npm
 
-      - name: Install dependencies
-        run: npm install
-
-      - name: Run scanner
+      - name: Run Accumulation Scanner
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          GITHUB_TOKEN: ${{ github.token }}
-        run: npm start
-
-      - name: Show trigger information
-        if: always()
-        run: |
-          echo "Event: $GITHUB_EVENT_NAME"
-          echo "Branch: $GITHUB_REF_NAME"
-          echo "Finished: $(date -u)"
+        run: node scanner.js
