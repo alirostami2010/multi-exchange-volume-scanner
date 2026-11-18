@@ -1,103 +1,136 @@
 
 /**
  * GATE.IO USDT PERPETUAL
- * ACCUMULATION ZONE RADAR — V3
- * ---------------------------------------------------------
- * Goal:
- * Detect possible accumulation zones BEFORE bullish breakouts.
+ * HISTORICAL ACCUMULATION RADAR — V4
+ * =========================================================
  *
- * Timeframe: 4H
- * Scans all active direct USDT perpetual contracts.
+ * MAIN OBJECTIVE:
+ * Find accumulation structures BEFORE major bullish moves.
  *
- * Detection stages:
- * 1) ACCUMULATION_ZONE
- * 2) DEMAND_BUILDING
+ * TIMEFRAME: 4H
+ * HISTORY: Up to 1000 closed candles (~166 days)
  *
- * Important:
+ * DETECTION:
+ * 1. Historical rolling-window scan
+ * 2. Accumulation zone detection
+ * 3. Demand building detection
+ * 4. Breakout detection
+ * 5. Breakdown detection
+ * 6. Historical zone deduplication
+ *
+ * NO TOP 20 / TOP 50 LIMIT.
+ *
+ * IMPORTANT:
  * Scores are technical ranking scores, NOT probabilities.
- * This scanner does not generate buy/sell orders.
+ * This is a research and monitoring scanner, NOT a buy signal.
  *
  * Node.js 20+
  */
 
 // =========================================================
-// CONFIG
+// CONFIGURATION
 // =========================================================
 
 const CONFIG = {
   BASE_URL: "https://api.gateio.ws/api/v4",
 
   INTERVAL: "4h",
-  CANDLE_LIMIT: 240,
+  INTERVAL_SECONDS: 4 * 60 * 60,
 
-  CONCURRENCY: 6,
-  RETRIES: 3,
-  REQUEST_TIMEOUT: 15000,
+  // Gate API maximum is 2000 points per request.
+  CANDLE_LIMIT: 1000,
 
-  MIN_24H_TURNOVER: 200000,
-
-  MIN_CANDLES: 110,
-
+  // Rolling-window scan
   BASE_WINDOWS: [18, 24, 30, 36],
+  SCAN_STEP: 3,
 
   DECLINE_LOOKBACK: 100,
+
+  MIN_CANDLES: 120,
 
   MIN_DECLINE_PCT: 8,
   MAX_DECLINE_PCT: 70,
 
   MAX_BASE_WIDTH_PCT: 22,
 
-  MIN_FLOOR_STABILITY: -0.035,
+  MIN_24H_TURNOVER: 200000,
 
   MIN_ZONE_SCORE: 58,
   MIN_DEMAND_SCORE: 70,
 
+  // API protection
+  CONCURRENCY: 3,
+  MIN_REQUEST_INTERVAL_MS: 250,
+  RETRIES: 5,
+  RETRY_BASE_MS: 2000,
+  REQUEST_TIMEOUT: 20000,
+
+  // Historical zone classification
+  ACTIVE_ZONE_MAX_AGE: 6,
+  BREAKOUT_CONFIRM_PCT: 0.5,
+  BREAKDOWN_CONFIRM_PCT: 0.5,
+
+  // Merge overlapping detections
+  MIN_TIME_OVERLAP: 0.55,
+
   TELEGRAM_MAX_LENGTH: 3500,
-
-  TELEGRAM_BOT_TOKEN:
-    process.env.TELEGRAM_BOT_TOKEN,
-
-  TELEGRAM_CHAT_ID:
-    process.env.TELEGRAM_CHAT_ID,
 };
 
 // =========================================================
-// GLOBAL STATS
+// TELEGRAM SECRETS
+// =========================================================
+
+const TELEGRAM_BOT_TOKEN =
+  process.env.TELEGRAM_BOT_TOKEN;
+
+const TELEGRAM_CHAT_ID =
+  process.env.TELEGRAM_CHAT_ID;
+
+// =========================================================
+// STATISTICS
 // =========================================================
 
 const stats = {
   totalContracts: 0,
   eligibleContracts: 0,
+
   checked: 0,
   failed: 0,
   insufficient: 0,
+  lowTurnover: 0,
 
-  accumulationZones: 0,
+  rawDetections: 0,
+  uniqueZones: 0,
+
+  activeZones: 0,
   demandBuilding: 0,
+  breakouts: 0,
+  breakdowns: 0,
+  historicalZones: 0,
 
   errors: [],
 };
 
 // =========================================================
-// HELPERS
+// UTILITIES
 // =========================================================
 
 const sleep = (ms) =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
-function number(value) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : 0;
+function num(value) {
+  const result = Number(value);
+  return Number.isFinite(result) ? result : 0;
 }
 
-function average(values) {
+function avg(values) {
   if (!values.length) return 0;
 
   return values.reduce((a, b) => a + b, 0) /
     values.length;
 }
 
-function sum(values) {
+function total(values) {
   return values.reduce((a, b) => a + b, 0);
 }
 
@@ -113,29 +146,27 @@ function clamp(value, low, high) {
   return Math.max(low, Math.min(high, value));
 }
 
-function percent(value) {
+function pct(value) {
   return `${value.toFixed(2)}%`;
 }
 
-function price(value) {
-  if (!Number.isFinite(value)) return "-";
-
-  return value.toLocaleString("en-US", {
-    maximumFractionDigits: 8,
+function formatPrice(value) {
+  return Number(value).toLocaleString("en-US", {
+    maximumFractionDigits: 10,
   });
 }
 
 function formatMoney(value) {
-  if (value >= 1_000_000_000) {
-    return `${(value / 1_000_000_000).toFixed(2)}B`;
+  if (value >= 1e9) {
+    return `${(value / 1e9).toFixed(2)}B`;
   }
 
-  if (value >= 1_000_000) {
-    return `${(value / 1_000_000).toFixed(2)}M`;
+  if (value >= 1e6) {
+    return `${(value / 1e6).toFixed(2)}M`;
   }
 
-  if (value >= 1_000) {
-    return `${(value / 1_000).toFixed(2)}K`;
+  if (value >= 1e3) {
+    return `${(value / 1e3).toFixed(2)}K`;
   }
 
   return value.toFixed(0);
@@ -147,22 +178,51 @@ function median(values) {
   const sorted = [...values].sort((a, b) => a - b);
   const middle = Math.floor(sorted.length / 2);
 
-  if (sorted.length % 2) {
-    return sorted[middle];
+  if (sorted.length % 2 === 0) {
+    return (sorted[middle - 1] + sorted[middle]) / 2;
   }
 
-  return (sorted[middle - 1] + sorted[middle]) / 2;
+  return sorted[middle];
+}
+
+function safeError(error) {
+  return String(error?.message || error).slice(0, 220);
 }
 
 // =========================================================
-// HTTP
+// GLOBAL REQUEST PACER
+// =========================================================
+
+let nextRequestAt = 0;
+
+async function waitForRequestSlot() {
+  const now = Date.now();
+
+  const wait = Math.max(0, nextRequestAt - now);
+
+  if (wait > 0) {
+    await sleep(wait);
+  }
+
+  nextRequestAt =
+    Date.now() + CONFIG.MIN_REQUEST_INTERVAL_MS;
+}
+
+// =========================================================
+// HTTP WITH 429 RETRIES
 // =========================================================
 
 async function request(url) {
   let lastError;
 
-  for (let attempt = 1; attempt <= CONFIG.RETRIES; attempt++) {
+  for (
+    let attempt = 1;
+    attempt <= CONFIG.RETRIES;
+    attempt++
+  ) {
     try {
+      await waitForRequestSlot();
+
       const response = await fetch(url, {
         method: "GET",
         headers: {
@@ -172,6 +232,34 @@ async function request(url) {
           CONFIG.REQUEST_TIMEOUT
         ),
       });
+
+      if (response.status === 429) {
+        const retryAfter =
+          Number(response.headers.get("Retry-After")) || 0;
+
+        const waitMs = Math.max(
+          retryAfter * 1000,
+          CONFIG.RETRY_BASE_MS * Math.pow(2, attempt - 1)
+        );
+
+        lastError = new Error(
+          `HTTP 429: rate limit exceeded`
+        );
+
+        console.warn(
+          `429 received. Waiting ${waitMs}ms`
+        );
+
+        await sleep(waitMs);
+
+        // Slow down subsequent requests globally.
+        nextRequestAt = Math.max(
+          nextRequestAt,
+          Date.now() + 500
+        );
+
+        continue;
+      }
 
       if (!response.ok) {
         const body = await response.text();
@@ -187,16 +275,19 @@ async function request(url) {
       lastError = error;
 
       if (attempt < CONFIG.RETRIES) {
-        await sleep(attempt * 1000);
+        const waitMs =
+          CONFIG.RETRY_BASE_MS * Math.pow(2, attempt - 1);
+
+        await sleep(waitMs);
       }
     }
   }
 
-  throw lastError;
+  throw lastError || new Error("Request failed");
 }
 
 // =========================================================
-// GATE.IO MARKET DATA
+// GATE.IO API
 // =========================================================
 
 async function getContracts() {
@@ -225,12 +316,12 @@ async function getTickers() {
   return data;
 }
 
-async function getCandles(contract) {
+async function getCandles(contractName) {
   const url = new URL(
     `${CONFIG.BASE_URL}/futures/usdt/candlesticks`
   );
 
-  url.searchParams.set("contract", contract);
+  url.searchParams.set("contract", contractName);
   url.searchParams.set("interval", CONFIG.INTERVAL);
   url.searchParams.set(
     "limit",
@@ -240,47 +331,44 @@ async function getCandles(contract) {
   const data = await request(url.toString());
 
   if (!Array.isArray(data)) {
-    throw new Error("Invalid candles response");
+    throw new Error("Invalid candle response");
   }
 
-  const candles = data
-    .map((c) => ({
-      time: number(c.t),
-      open: number(c.o),
-      high: number(c.h),
-      low: number(c.l),
-      close: number(c.c),
-
-      // Gate futures candle "sum" is quote turnover.
-      turnover: number(c.sum),
-
-      volume: number(c.v),
-    }))
-    .filter((c) =>
-      c.time > 0 &&
-      c.open > 0 &&
-      c.high > 0 &&
-      c.low > 0 &&
-      c.close > 0
-    )
-    .sort((a, b) => a.time - b.time);
-
-  // Remove duplicate timestamps.
   const unique = new Map();
 
-  for (const candle of candles) {
-    unique.set(candle.time, candle);
+  for (const c of data) {
+    const candle = {
+      time: num(c.t),
+      open: num(c.o),
+      high: num(c.h),
+      low: num(c.l),
+      close: num(c.c),
+      volume: num(c.v),
+      turnover: num(c.sum),
+    };
+
+    if (
+      candle.time > 0 &&
+      candle.open > 0 &&
+      candle.high > 0 &&
+      candle.low > 0 &&
+      candle.close > 0 &&
+      candle.high >= candle.low
+    ) {
+      unique.set(candle.time, candle);
+    }
   }
 
-  const result = [...unique.values()];
+  const candles = [...unique.values()]
+    .sort((a, b) => a.time - b.time);
 
-  // Exclude the currently forming 4H candle.
-  const intervalSeconds = 4 * 60 * 60;
+  // Exclude the currently forming candle.
   const currentBucket =
-    Math.floor(Date.now() / 1000 / intervalSeconds) *
-    intervalSeconds;
+    Math.floor(
+      Date.now() / 1000 / CONFIG.INTERVAL_SECONDS
+    ) * CONFIG.INTERVAL_SECONDS;
 
-  return result.filter(
+  return candles.filter(
     (c) => c.time < currentBucket
   );
 }
@@ -289,10 +377,8 @@ async function getCandles(contract) {
 // CANDLE FEATURES
 // =========================================================
 
-function candleFeatures(c) {
-  const range = Math.max(c.high - c.low, 0);
-
-  const body = Math.abs(c.close - c.open);
+function getCandleFeatures(c) {
+  const range = Math.max(0, c.high - c.low);
 
   const lowerWick =
     Math.min(c.open, c.close) - c.low;
@@ -300,17 +386,8 @@ function candleFeatures(c) {
   const upperWick =
     c.high - Math.max(c.open, c.close);
 
-  const closeLocation =
-    range > 0
-      ? (c.close - c.low) / range
-      : 0.5;
-
   return {
     range,
-    body,
-    lowerWick,
-    upperWick,
-    closeLocation,
 
     green: c.close > c.open,
     red: c.close < c.open,
@@ -318,29 +395,33 @@ function candleFeatures(c) {
     lowerWickRatio:
       range > 0 ? lowerWick / range : 0,
 
-    upperWickRatio:
-      range > 0 ? upperWick / range : 0,
+    closeLocation:
+      range > 0 ? (c.close - c.low) / range : 0.5,
   };
 }
 
 // =========================================================
-// FIND PREVIOUS DECLINE
+// PREVIOUS DECLINE DETECTION
 // =========================================================
 
 function findPreviousDecline(candles, baseStart) {
-  const start = Math.max(
+  const historyStart = Math.max(
     0,
     baseStart - CONFIG.DECLINE_LOOKBACK
   );
 
-  const history = candles.slice(start, baseStart);
+  const history = candles.slice(
+    historyStart,
+    baseStart
+  );
 
-  if (history.length < 12) return null;
+  if (history.length < 12) {
+    return null;
+  }
 
   let peakIndex = -1;
   let peakPrice = 0;
 
-  // Find the highest high in the preceding history.
   for (let i = 0; i < history.length; i++) {
     if (history[i].high > peakPrice) {
       peakPrice = history[i].high;
@@ -352,7 +433,9 @@ function findPreviousDecline(candles, baseStart) {
 
   const afterPeak = history.slice(peakIndex + 1);
 
-  if (afterPeak.length < 8) return null;
+  if (afterPeak.length < 8) {
+    return null;
+  }
 
   const troughPrice = min(
     afterPeak.map((c) => c.low)
@@ -379,50 +462,58 @@ function findPreviousDecline(candles, baseStart) {
 }
 
 // =========================================================
-// ANALYZE BASE STRUCTURE
+// ANALYZE ONE HISTORICAL WINDOW
 // =========================================================
 
-function analyzeBase(candles, windowSize, ticker) {
-  if (candles.length < windowSize + 30) {
+function analyzeWindow(
+  candles,
+  ticker,
+  baseStart,
+  windowSize
+) {
+  const baseEnd = baseStart + windowSize;
+
+  if (baseEnd > candles.length) {
     return null;
   }
 
-  const baseStart = candles.length - windowSize;
-  const base = candles.slice(baseStart);
+  const base = candles.slice(
+    baseStart,
+    baseEnd
+  );
 
-  const previous = findPreviousDecline(
+  if (base.length !== windowSize) {
+    return null;
+  }
+
+  const decline = findPreviousDecline(
     candles,
     baseStart
   );
 
-  if (!previous) return null;
+  if (!decline) return null;
 
   const highs = base.map((c) => c.high);
   const lows = base.map((c) => c.low);
-  const closes = base.map((c) => c.close);
 
-  const baseHigh = max(highs);
-  const baseLow = min(lows);
+  const zoneHigh = max(highs);
+  const zoneLow = min(lows);
 
-  if (baseLow <= 0 || baseHigh <= baseLow) {
+  if (zoneLow <= 0 || zoneHigh <= zoneLow) {
     return null;
   }
 
-  const baseMid = (baseHigh + baseLow) / 2;
+  const zoneMid = (zoneHigh + zoneLow) / 2;
 
-  const baseWidthPct =
-    ((baseHigh - baseLow) / baseMid) * 100;
+  const widthPct =
+    ((zoneHigh - zoneLow) / zoneMid) * 100;
 
-  if (
-    baseWidthPct > CONFIG.MAX_BASE_WIDTH_PCT
-  ) {
+  if (widthPct > CONFIG.MAX_BASE_WIDTH_PCT) {
     return null;
   }
 
   // -------------------------------------------------------
-  // FLOOR STABILITY
-  // Compare first half and second half.
-  // Do NOT compare recent low to the absolute base low.
+  // FLOOR STRUCTURE
   // -------------------------------------------------------
 
   const half = Math.floor(windowSize / 2);
@@ -442,58 +533,48 @@ function analyzeBase(candles, windowSize, ticker) {
     ((secondHalfLow - firstHalfLow) /
       firstHalfLow) * 100;
 
+  // Stable floor means the second half has not
+  // materially broken below the first-half floor.
   const floorStable =
-    floorChangePct >=
-    CONFIG.MIN_FLOOR_STABILITY * 100;
+    floorChangePct >= -2.5;
 
-  // Higher-low check using averages of local lows.
-  const firstRecentLows = base
+  // Higher-low using averages of recent lows.
+  const priorLows = base
     .slice(-12, -6)
     .map((c) => c.low);
 
-  const lastRecentLows = base
+  const recentLows = base
     .slice(-6)
     .map((c) => c.low);
 
-  const firstRecentLow =
-    average(firstRecentLows);
-
-  const lastRecentLow =
-    average(lastRecentLows);
-
   const higherLows =
-    lastRecentLow > firstRecentLow * 1.005;
+    avg(recentLows) >
+    avg(priorLows) * 1.005;
 
   // -------------------------------------------------------
-  // VOLUME BEHAVIOR
+  // VOLUME
   // -------------------------------------------------------
 
-  const baseTurnovers = base.map(
-    (c) => c.turnover
+  const firstVolume = avg(
+    firstHalf.map((c) => c.turnover)
   );
 
-  const earlyTurnover = average(
-    base.slice(0, half).map((c) => c.turnover)
-  );
-
-  const lateTurnover = average(
-    base.slice(half).map((c) => c.turnover)
+  const secondVolume = avg(
+    secondHalf.map((c) => c.turnover)
   );
 
   const volumeTrend =
-    earlyTurnover > 0
-      ? lateTurnover / earlyTurnover
+    firstVolume > 0
+      ? secondVolume / firstVolume
       : 1;
 
-  const features = base.map(candleFeatures);
-
-  const greenTurnover = sum(
+  const greenTurnover = total(
     base
       .filter((c) => c.close > c.open)
       .map((c) => c.turnover)
   );
 
-  const redTurnover = sum(
+  const redTurnover = total(
     base
       .filter((c) => c.close < c.open)
       .map((c) => c.turnover)
@@ -506,8 +587,8 @@ function analyzeBase(candles, windowSize, ticker) {
         ? 2
         : 1;
 
-  const greenCount = features.filter(
-    (f) => f.green
+  const greenCount = base.filter(
+    (c) => c.close > c.open
   ).length;
 
   const greenRatio =
@@ -517,117 +598,113 @@ function analyzeBase(candles, windowSize, ticker) {
   // VOLATILITY CONTRACTION
   // -------------------------------------------------------
 
-  const candleRanges = features.map(
-    (f) => f.range
+  const baseRange = avg(
+    base.map((c) => c.high - c.low)
   );
 
-  const baseRangeRatio =
-    average(candleRanges) / baseMid;
-
-  const previousRangeCandles = candles.slice(
+  const previousCandles = candles.slice(
     Math.max(0, baseStart - 24),
     baseStart
   );
 
-  const previousRangeRatio =
-    previousRangeCandles.length
-      ? average(
-          previousRangeCandles.map(
-            (c) => c.high - c.low
-          )
-        ) / baseMid
-      : baseRangeRatio;
+  if (previousCandles.length < 12) {
+    return null;
+  }
+
+  const previousRange = avg(
+    previousCandles.map(
+      (c) => c.high - c.low
+    )
+  );
 
   const volatilityRatio =
-    previousRangeRatio > 0
-      ? baseRangeRatio / previousRangeRatio
+    previousRange > 0
+      ? baseRange / previousRange
       : 1;
 
   // -------------------------------------------------------
   // PRICE POSITION
   // -------------------------------------------------------
 
-  const lastClose = base[base.length - 1].close;
+  const lastBaseClose =
+    base[base.length - 1].close;
 
   const closePosition =
-    (lastClose - baseLow) /
-    (baseHigh - baseLow);
+    (lastBaseClose - zoneLow) /
+    (zoneHigh - zoneLow);
 
-  const recentCloseAverage = average(
+  const recentCloseAverage = avg(
     base.slice(-6).map((c) => c.close)
   );
 
   const recentCloseStrength =
-    recentCloseAverage > baseMid;
+    recentCloseAverage > zoneMid;
 
-  const recentRelativeVolume =
-    average(
-      base.slice(-6).map((c) => c.turnover)
-    );
+  // -------------------------------------------------------
+  // RECENT VOLUME EXPANSION
+  // -------------------------------------------------------
 
-  const previousRelativeVolume =
-    average(
-      base.slice(-12, -6).map((c) => c.turnover)
-    );
+  const recentVolume = avg(
+    base.slice(-6).map((c) => c.turnover)
+  );
+
+  const previousRecentVolume = avg(
+    base.slice(-12, -6).map(
+      (c) => c.turnover
+    )
+  );
 
   const recentVolumeExpansion =
-    previousRelativeVolume > 0
-      ? recentRelativeVolume / previousRelativeVolume
+    previousRecentVolume > 0
+      ? recentVolume / previousRecentVolume
       : 1;
 
   // -------------------------------------------------------
-  // POSSIBLE SELLING ABSORPTION PROXY
-  // This is NOT real order-flow absorption.
+  // LOWER WICK / REJECTION
   // -------------------------------------------------------
 
-  const lowerWickRatio = average(
+  const features = base.map(
+    getCandleFeatures
+  );
+
+  const lowerWickRatio = avg(
     features.map((f) => f.lowerWickRatio)
   );
 
-  const strongCloseRatio =
-    average(
-      features.map((f) => f.closeLocation)
-    );
-
-  const rejectionCandles = features.filter(
+  const rejectionCount = features.filter(
     (f) =>
       f.lowerWickRatio >= 0.35 &&
       f.closeLocation >= 0.55
   ).length;
 
   const rejectionRatio =
-    rejectionCandles / windowSize;
+    rejectionCount / windowSize;
 
   // -------------------------------------------------------
-  // SCORE
+  // ZONE SCORE — MAX 100
   // -------------------------------------------------------
 
   let score = 0;
 
-  // Previous decline: max 15
+  // Previous decline: 15
   score += clamp(
-    ((previous.declinePct - 8) / 42) * 15,
+    ((decline.declinePct - 8) / 42) * 15,
     0,
     15
   );
 
-  // Base compression: max 20
+  // Base compression: 20
   score += clamp(
-    ((22 - baseWidthPct) / 22) * 20,
+    ((22 - widthPct) / 22) * 20,
     0,
     20
   );
 
-  // Floor stability: max 20
-  if (floorStable) {
-    score += 12;
-  }
+  // Floor structure: 20
+  if (floorStable) score += 12;
+  if (higherLows) score += 8;
 
-  if (higherLows) {
-    score += 8;
-  }
-
-  // Volume behavior: max 15
+  // Volume behavior: 15
   if (volumeTrend < 0.85) {
     score += 8;
   } else if (volumeTrend < 1.1) {
@@ -640,16 +717,16 @@ function analyzeBase(candles, windowSize, ticker) {
     score += 4;
   }
 
-  // Volatility contraction: max 10
+  // Volatility: 10
   if (volatilityRatio < 0.65) {
     score += 10;
   } else if (volatilityRatio < 0.85) {
     score += 7;
-  } else if (volatilityRatio < 1.0) {
+  } else if (volatilityRatio < 1) {
     score += 4;
   }
 
-  // Rejection / wick evidence: max 10
+  // Rejection: 10
   if (rejectionRatio >= 0.25) {
     score += 6;
   } else if (rejectionRatio >= 0.15) {
@@ -660,7 +737,7 @@ function analyzeBase(candles, windowSize, ticker) {
     score += 4;
   }
 
-  // Price position: max 10
+  // Price strength: 10
   if (closePosition >= 0.75) {
     score += 6;
   } else if (closePosition >= 0.55) {
@@ -671,10 +748,12 @@ function analyzeBase(candles, windowSize, ticker) {
     score += 4;
   }
 
-  score = Math.round(clamp(score, 0, 100));
+  score = Math.round(
+    clamp(score, 0, 100)
+  );
 
   // -------------------------------------------------------
-  // HARD STRUCTURE FILTERS
+  // HARD FILTERS
   // -------------------------------------------------------
 
   if (!floorStable) return null;
@@ -692,7 +771,7 @@ function analyzeBase(candles, windowSize, ticker) {
   }
 
   // -------------------------------------------------------
-  // DEMAND BUILDING SCORE
+  // DEMAND SCORE
   // -------------------------------------------------------
 
   let demandScore = 0;
@@ -731,34 +810,44 @@ function analyzeBase(candles, windowSize, ticker) {
     clamp(demandScore, 0, 100)
   );
 
-  const demandBuilding =
-    demandScore >= CONFIG.MIN_DEMAND_SCORE;
+  // Demand must be supported by more than
+  // a high score alone.
+  const demandConditions =
+    higherLows &&
+    greenRedRatio >= 1.0 &&
+    closePosition >= 0.55 &&
+    (
+      recentVolumeExpansion >= 1.2 ||
+      greenRatio >= 0.65
+    );
 
-  const tickerTurnover = number(
-    ticker.volume_24h_quote ??
-    ticker.volume_24h_usd ??
-    ticker.volume_24h
-  );
+  const demandBuilding =
+    demandScore >= CONFIG.MIN_DEMAND_SCORE &&
+    demandConditions;
 
   return {
+    startIndex: baseStart,
+    endIndex: baseEnd - 1,
+
+    startTime: base[0].time,
+    endTime: base[base.length - 1].time,
+
     windowSize,
 
     score,
     demandScore,
+    demandBuilding,
 
-    stage: demandBuilding
-      ? "DEMAND_BUILDING"
-      : "ACCUMULATION_ZONE",
+    zoneHigh,
+    zoneLow,
+    zoneMid,
+    widthPct,
 
-    baseHigh,
-    baseLow,
-    baseMid,
-    baseWidthPct,
-
-    previousDeclinePct:
-      previous.declinePct,
+    declinePct: decline.declinePct,
 
     floorChangePct,
+    floorStable,
+    higherLows,
 
     greenRedRatio,
     volumeTrend,
@@ -766,98 +855,312 @@ function analyzeBase(candles, windowSize, ticker) {
     volatilityRatio,
 
     closePosition,
-    lastClose,
-
     recentVolumeExpansion,
 
-    lowerWickRatio,
     rejectionRatio,
+    lowerWickRatio,
 
     greenRatio,
 
-    turnover24h: tickerTurnover,
-
-    demandBuilding,
+    turnover24h: num(
+      ticker.volume_24h_quote ??
+      ticker.volume_24h_usd ??
+      ticker.volume_24h
+    ),
   };
 }
 
 // =========================================================
-// ANALYZE ONE MARKET
+// HISTORICAL ROLLING-WINDOW SCAN
+// =========================================================
+
+function scanAllHistoricalWindows(
+  candles,
+  ticker
+) {
+  const detections = [];
+
+  const minWindow = Math.min(
+    ...CONFIG.BASE_WINDOWS
+  );
+
+  const firstStart =
+    CONFIG.DECLINE_LOOKBACK + 12;
+
+  const lastStart =
+    candles.length - minWindow;
+
+  for (
+    let start = firstStart;
+    start <= lastStart;
+    start += CONFIG.SCAN_STEP
+  ) {
+    for (const windowSize of CONFIG.BASE_WINDOWS) {
+      if (start + windowSize > candles.length) {
+        continue;
+      }
+
+      const result = analyzeWindow(
+        candles,
+        ticker,
+        start,
+        windowSize
+      );
+
+      if (result) {
+        detections.push(result);
+      }
+    }
+  }
+
+  return detections;
+}
+
+// =========================================================
+// OVERLAPPING ZONE DEDUPLICATION
+// =========================================================
+
+function timeOverlapRatio(a, b) {
+  const intersection =
+    Math.max(
+      0,
+      Math.min(a.endIndex, b.endIndex) -
+      Math.max(a.startIndex, b.startIndex) + 1
+    );
+
+  const shorter = Math.min(
+    a.endIndex - a.startIndex + 1,
+    b.endIndex - b.startIndex + 1
+  );
+
+  return shorter > 0
+    ? intersection / shorter
+    : 0;
+}
+
+function priceOverlap(a, b) {
+  const intersection =
+    Math.max(
+      0,
+      Math.min(a.zoneHigh, b.zoneHigh) -
+      Math.max(a.zoneLow, b.zoneLow)
+    );
+
+  const shorter = Math.min(
+    a.zoneHigh - a.zoneLow,
+    b.zoneHigh - b.zoneLow
+  );
+
+  return shorter > 0
+    ? intersection / shorter
+    : 0;
+}
+
+function deduplicateZones(detections) {
+  const sorted = [...detections].sort(
+    (a, b) => a.startIndex - b.startIndex
+  );
+
+  const unique = [];
+
+  for (const candidate of sorted) {
+    let duplicateIndex = -1;
+
+    for (let i = 0; i < unique.length; i++) {
+      const existing = unique[i];
+
+      const timeOverlap =
+        timeOverlapRatio(candidate, existing);
+
+      const priceOverlapRatio =
+        priceOverlap(candidate, existing);
+
+      if (
+        timeOverlap >= CONFIG.MIN_TIME_OVERLAP &&
+        priceOverlapRatio >= 0.45
+      ) {
+        duplicateIndex = i;
+        break;
+      }
+    }
+
+    if (duplicateIndex === -1) {
+      unique.push(candidate);
+      continue;
+    }
+
+    const existing = unique[duplicateIndex];
+
+    // Keep the best score, with demand as a tie-breaker.
+    if (
+      candidate.score > existing.score ||
+      (
+        candidate.score === existing.score &&
+        candidate.demandScore > existing.demandScore
+      )
+    ) {
+      unique[duplicateIndex] = candidate;
+    }
+  }
+
+  return unique;
+}
+
+// =========================================================
+// CLASSIFY HISTORICAL ZONE
+// =========================================================
+
+function classifyZone(zone, candles) {
+  const lastIndex = candles.length - 1;
+
+  const age =
+    lastIndex - zone.endIndex;
+
+  const afterZone = candles.slice(
+    zone.endIndex + 1
+  );
+
+  let firstBreakoutIndex = -1;
+  let firstBreakdownIndex = -1;
+
+  const breakoutPrice =
+    zone.zoneHigh *
+    (1 + CONFIG.BREAKOUT_CONFIRM_PCT / 100);
+
+  const breakdownPrice =
+    zone.zoneLow *
+    (1 - CONFIG.BREAKDOWN_CONFIRM_PCT / 100);
+
+  for (let i = 0; i < afterZone.length; i++) {
+    const close = afterZone[i].close;
+
+    if (
+      firstBreakoutIndex === -1 &&
+      close > breakoutPrice
+    ) {
+      firstBreakoutIndex = i;
+    }
+
+    if (
+      firstBreakdownIndex === -1 &&
+      close < breakdownPrice
+    ) {
+      firstBreakdownIndex = i;
+    }
+  }
+
+  let status = "HISTORICAL";
+
+  if (
+    firstBreakoutIndex !== -1 &&
+    (
+      firstBreakdownIndex === -1 ||
+      firstBreakoutIndex < firstBreakdownIndex
+    )
+  ) {
+    status = "BREAKOUT";
+  } else if (
+    firstBreakdownIndex !== -1
+  ) {
+    status = "BREAKDOWN";
+  } else if (
+    age <= CONFIG.ACTIVE_ZONE_MAX_AGE
+  ) {
+    status = zone.demandBuilding
+      ? "DEMAND_BUILDING"
+      : "ACTIVE_ZONE";
+  }
+
+  const currentClose =
+    candles[lastIndex].close;
+
+  const breakoutReturnPct =
+    (
+      (currentClose - zone.zoneHigh) /
+      zone.zoneHigh
+    ) * 100;
+
+  const ageHours =
+    age * 4;
+
+  return {
+    ...zone,
+
+    status,
+
+    ageCandles: age,
+    ageHours,
+
+    currentClose,
+    breakoutReturnPct,
+
+    breakoutCandlesAfterZone:
+      firstBreakoutIndex >= 0
+        ? firstBreakoutIndex + 1
+        : null,
+  };
+}
+
+// =========================================================
+// ANALYZE MARKET
 // =========================================================
 
 async function analyzeMarket(contract, ticker) {
-  const candles = await getCandles(contract.name);
-
-  if (candles.length < CONFIG.MIN_CANDLES) {
-    stats.insufficient++;
-    return null;
-  }
-
-  const turnover24h = number(
+  const turnover24h = num(
     ticker.volume_24h_quote ??
     ticker.volume_24h_usd ??
     ticker.volume_24h
   );
 
-  if (
-    turnover24h < CONFIG.MIN_24H_TURNOVER
-  ) {
-    return null;
+  if (turnover24h < CONFIG.MIN_24H_TURNOVER) {
+    stats.lowTurnover++;
+    return [];
   }
 
-  const results = [];
+  const candles = await getCandles(contract.name);
 
-  for (const windowSize of CONFIG.BASE_WINDOWS) {
-    const result = analyzeBase(
-      candles,
-      windowSize,
-      ticker
-    );
-
-    if (result) {
-      results.push(result);
-    }
+  if (candles.length < CONFIG.MIN_CANDLES) {
+    stats.insufficient++;
+    return [];
   }
 
-  if (!results.length) return null;
+  const raw = scanAllHistoricalWindows(
+    candles,
+    ticker
+  );
 
-  // Select the strongest valid window.
-  // A longer window wins only when its score is better.
-  results.sort((a, b) => {
-    if (b.score !== a.score) {
-      return b.score - a.score;
-    }
+  stats.rawDetections += raw.length;
 
-    return b.windowSize - a.windowSize;
-  });
+  if (!raw.length) return [];
 
-  const best = results[0];
+  const unique = deduplicateZones(raw);
 
-  return {
+  return unique.map((zone) => ({
     contract: contract.name,
-    lastPrice: number(ticker.last),
-    change24h: number(ticker.change_percentage),
-    ...best,
-  };
+    lastPrice: candles[candles.length - 1].close,
+    turnover24h,
+    ...classifyZone(zone, candles),
+  }));
 }
 
 // =========================================================
-// CONCURRENCY WORKER
+// PROCESS ALL MARKETS
 // =========================================================
 
 async function processMarkets(contracts, tickerMap) {
   const results = [];
+
   let index = 0;
 
   async function worker() {
     while (true) {
-      const currentIndex = index++;
+      const current = index++;
 
-      if (currentIndex >= contracts.length) {
+      if (current >= contracts.length) {
         return;
       }
 
-      const contract = contracts[currentIndex];
+      const contract = contracts[current];
 
       try {
         const ticker = tickerMap.get(contract.name);
@@ -873,44 +1176,35 @@ async function processMarkets(contracts, tickerMap) {
           continue;
         }
 
-        const result = await analyzeMarket(
+        const zones = await analyzeMarket(
           contract,
           ticker
         );
 
+        results.push(...zones);
+
         stats.checked++;
-
-        if (result) {
-          results.push(result);
-
-          if (result.stage === "DEMAND_BUILDING") {
-            stats.demandBuilding++;
-          } else {
-            stats.accumulationZones++;
-          }
-        }
 
       } catch (error) {
         stats.failed++;
 
         stats.errors.push({
           contract: contract.name,
-          error: String(error.message || error).slice(0, 180),
+          error: safeError(error),
         });
       }
 
-      if (stats.checked % 100 === 0) {
+      if (stats.checked % 50 === 0) {
         console.log(
-          `Progress: ${stats.checked}/${contracts.length}`
+          `Progress: ${stats.checked}/${contracts.length} | ` +
+          `Zones: ${results.length} | Failed: ${stats.failed}`
         );
       }
     }
   }
 
   const workers = Array.from(
-    {
-      length: CONFIG.CONCURRENCY,
-    },
+    { length: CONFIG.CONCURRENCY },
     () => worker()
   );
 
@@ -920,35 +1214,228 @@ async function processMarkets(contracts, tickerMap) {
 }
 
 // =========================================================
-// TELEGRAM
+// STATUS LABELS
+// =========================================================
+
+function statusLabel(status) {
+  const labels = {
+    ACTIVE_ZONE: "🟡 ACTIVE ACCUMULATION ZONE",
+    DEMAND_BUILDING: "🟢 DEMAND BUILDING",
+    BREAKOUT: "🚀 BREAKOUT CONFIRMED",
+    BREAKDOWN: "🔴 ZONE BREAKDOWN",
+    HISTORICAL: "📚 HISTORICAL ZONE",
+  };
+
+  return labels[status] || status;
+}
+
+// =========================================================
+// RESULT FORMAT
+// =========================================================
+
+function formatZone(item, index) {
+  return [
+    `${index}. ${item.contract}`,
+    statusLabel(item.status),
+    `━━━━━━━━━━━━━━━━━━`,
+
+    `⭐ Zone Score: ${item.score}/100`,
+    `🔥 Demand Score: ${item.demandScore}/100`,
+
+    ``,
+
+    `💰 Current Price: ${formatPrice(item.lastPrice)}`,
+
+    `🔻 Zone Low: ${formatPrice(item.zoneLow)}`,
+    `🔺 Zone High: ${formatPrice(item.zoneHigh)}`,
+    `📍 Zone Mid: ${formatPrice(item.zoneMid)}`,
+
+    ``,
+
+    `📦 Base Width: ${pct(item.widthPct)}`,
+    `⏱ Base Duration: ${item.windowSize * 4} hours`,
+    `📉 Previous Decline: ${pct(item.declinePct)}`,
+
+    `🧱 Floor Change: ${pct(item.floorChangePct)}`,
+    `📊 Green/Red Volume: ${item.greenRedRatio.toFixed(2)}`,
+    `📉 Volume Trend: ${item.volumeTrend.toFixed(2)}`,
+    `📐 Volatility Ratio: ${item.volatilityRatio.toFixed(2)}`,
+    `📈 Recent Volume Expansion: ${item.recentVolumeExpansion.toFixed(2)}`,
+    `🕯 Rejection Ratio: ${pct(item.rejectionRatio * 100)}`,
+
+    ``,
+
+    `🕒 Zone Start: ${new Date(item.startTime * 1000).toISOString()}`,
+    `🕒 Zone End: ${new Date(item.endTime * 1000).toISOString()}`,
+
+    `⌛ Age: ${item.ageHours} hours`,
+    `💵 24H Turnover: ${formatMoney(item.turnover24h)} USDT`,
+
+    item.status === "BREAKOUT"
+      ? `🚀 Price vs Zone High: ${pct(item.breakoutReturnPct)}`
+      : "",
+
+    ``
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
+}
+
+// =========================================================
+// REPORT HEADER
+// =========================================================
+
+function buildHeader() {
+  return [
+    `🛰 GATE.IO | HISTORICAL ACCUMULATION RADAR V4`,
+    `━━━━━━━━━━━━━━━━━━`,
+    `⏱ Timeframe: 4H`,
+    `📚 History: Up to ${CONFIG.CANDLE_LIMIT} candles`,
+    `🕒 UTC: ${new Date().toISOString()}`,
+
+    ``,
+
+    `📊 MARKET SCAN`,
+    `Total Contracts: ${stats.totalContracts}`,
+    `Eligible: ${stats.eligibleContracts}`,
+    `Checked: ${stats.checked}`,
+    `Failed: ${stats.failed}`,
+    `Insufficient History: ${stats.insufficient}`,
+    `Low Turnover: ${stats.lowTurnover}`,
+
+    ``,
+
+    `🔎 HISTORICAL DETECTION`,
+    `Raw Window Detections: ${stats.rawDetections}`,
+    `Unique Zones: ${stats.uniqueZones}`,
+
+    ``,
+
+    `📌 ZONE STATUS`,
+    `🟡 Active Zones: ${stats.activeZones}`,
+    `🟢 Demand Building: ${stats.demandBuilding}`,
+    `🚀 Breakouts: ${stats.breakouts}`,
+    `🔴 Breakdowns: ${stats.breakdowns}`,
+    `📚 Historical: ${stats.historicalZones}`,
+
+    ``,
+
+    `⚠️ Scores are ranking scores, not probabilities.`,
+    `⚠️ Historical breakout does not mean a current entry.`,
+    `⚠️ This scanner does not issue trading orders.`,
+
+    `━━━━━━━━━━━━━━━━━━`,
+    ``
+  ].join("\n");
+}
+
+// =========================================================
+// TELEGRAM MESSAGE CHUNKING
+// =========================================================
+
+function makeTelegramMessages(results) {
+  const header = buildHeader();
+
+  const errors = stats.errors.length
+    ? [
+        ``,
+        `⚠️ ERROR SAMPLES`,
+        ...stats.errors.slice(0, 10).map(
+          (e) => `${e.contract}: ${e.error}`
+        ),
+      ].join("\n")
+    : "";
+
+  const ordered = [...results].sort((a, b) => {
+    const rank = {
+      DEMAND_BUILDING: 1,
+      ACTIVE_ZONE: 2,
+      BREAKOUT: 3,
+      HISTORICAL: 4,
+      BREAKDOWN: 5,
+    };
+
+    if (rank[a.status] !== rank[b.status]) {
+      return rank[a.status] - rank[b.status];
+    }
+
+    return b.score - a.score;
+  });
+
+  const blocks = ordered.map(
+    (item, index) => formatZone(item, index + 1)
+  );
+
+  const messages = [];
+
+  let current = header;
+
+  for (const block of blocks) {
+    if (
+      current.length + block.length + 5 >
+      CONFIG.TELEGRAM_MAX_LENGTH
+    ) {
+      messages.push(current);
+      current = "";
+    }
+
+    current += block + "\n";
+  }
+
+  if (current) {
+    messages.push(current);
+  }
+
+  if (errors) {
+    if (
+      messages.length &&
+      messages[messages.length - 1].length +
+      errors.length <
+      CONFIG.TELEGRAM_MAX_LENGTH
+    ) {
+      messages[messages.length - 1] += errors;
+    } else {
+      messages.push(errors);
+    }
+  }
+
+  if (!messages.length) {
+    messages.push(header + "No valid zones detected.");
+  }
+
+  return messages;
+}
+
+// =========================================================
+// TELEGRAM DELIVERY
 // =========================================================
 
 async function sendTelegram(message) {
   if (
-    !CONFIG.TELEGRAM_BOT_TOKEN ||
-    !CONFIG.TELEGRAM_CHAT_ID
+    !TELEGRAM_BOT_TOKEN ||
+    !TELEGRAM_CHAT_ID
   ) {
-    console.log(
-      "Telegram credentials missing. Report printed locally."
-    );
-
+    console.log("Telegram credentials missing.");
     console.log(message);
     return;
   }
 
   const url =
-    `https://api.telegram.org/bot${CONFIG.TELEGRAM_BOT_TOKEN}/sendMessage`;
+    `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
 
   const response = await fetch(url, {
     method: "POST",
+
     headers: {
       "Content-Type": "application/json",
     },
+
     body: JSON.stringify({
-      chat_id: CONFIG.TELEGRAM_CHAT_ID,
+      chat_id: TELEGRAM_CHAT_ID,
       text: message,
       disable_web_page_preview: true,
     }),
+
     signal: AbortSignal.timeout(20000),
   });
 
@@ -956,133 +1443,22 @@ async function sendTelegram(message) {
 
   if (!response.ok || !data.ok) {
     throw new Error(
-      `Telegram error: ${JSON.stringify(data).slice(0, 300)}`
+      `Telegram error: ${JSON.stringify(data).slice(0, 250)}`
     );
   }
 }
 
-function splitMessages(text, maxLength) {
-  const lines = text.split("\n");
-  const chunks = [];
+async function sendReports(messages) {
+  for (let i = 0; i < messages.length; i++) {
+    const prefix =
+      messages.length > 1
+        ? `📄 Report ${i + 1}/${messages.length}\n\n`
+        : "";
 
-  let current = "";
+    await sendTelegram(prefix + messages[i]);
 
-  for (const line of lines) {
-    if (
-      current.length + line.length + 1 >
-      maxLength
-    ) {
-      if (current) chunks.push(current);
-      current = line;
-    } else {
-      current += (current ? "\n" : "") + line;
-    }
+    await sleep(400);
   }
-
-  if (current) chunks.push(current);
-
-  return chunks;
-}
-
-// =========================================================
-// REPORT FORMAT
-// =========================================================
-
-function formatResult(item, index) {
-  const isDemand =
-    item.stage === "DEMAND_BUILDING";
-
-  const title = isDemand
-    ? "🟢 DEMAND BUILDING"
-    : "🟡 ACCUMULATION ZONE";
-
-  return [
-    `${index}. ${item.contract}`,
-    `${title}`,
-    `━━━━━━━━━━━━━━━━━━`,
-    `⭐ Zone Score: ${item.score}/100`,
-    `🔥 Demand Score: ${item.demandScore}/100`,
-    ``,
-    `💰 Price: ${price(item.lastPrice)}`,
-    `📉 Previous Decline: ${percent(item.previousDeclinePct)}`,
-    `📦 Base Width: ${percent(item.baseWidthPct)}`,
-    `📏 Base Window: ${item.windowSize} candles`,
-    ``,
-    `🔻 Zone Low: ${price(item.baseLow)}`,
-    `🔺 Zone High: ${price(item.baseHigh)}`,
-    `📍 Zone Mid: ${price(item.baseMid)}`,
-    ``,
-    `🧱 Floor Change: ${percent(item.floorChangePct)}`,
-    `📊 Green/Red Volume: ${item.greenRedRatio.toFixed(2)}`,
-    `📉 Volume Trend: ${item.volumeTrend.toFixed(2)}`,
-    `📐 Volatility Ratio: ${item.volatilityRatio.toFixed(2)}`,
-    `📈 Recent Volume Expansion: ${item.recentVolumeExpansion.toFixed(2)}`,
-    `🕯 Rejection Ratio: ${percent(item.rejectionRatio * 100)}`,
-    `💵 24H Turnover: ${formatMoney(item.turnover24h)} USDT`,
-    ``
-  ].join("\n");
-}
-
-function buildReport(results) {
-  const demand = results
-    .filter((r) => r.stage === "DEMAND_BUILDING")
-    .sort((a, b) => b.demandScore - a.demandScore);
-
-  const accumulation = results
-    .filter((r) => r.stage === "ACCUMULATION_ZONE")
-    .sort((a, b) => b.score - a.score);
-
-  const all = [...demand, ...accumulation];
-
-  const now = new Date().toISOString();
-
-  const header = [
-    `🛰 GATE.IO | ACCUMULATION RADAR V3`,
-    `━━━━━━━━━━━━━━━━━━`,
-    `⏱ Timeframe: ${CONFIG.INTERVAL}`,
-    `🕒 UTC: ${now}`,
-    ``,
-    `📊 MARKET SCAN`,
-    `Total Contracts: ${stats.totalContracts}`,
-    `Eligible Contracts: ${stats.eligibleContracts}`,
-    `Checked: ${stats.checked}`,
-    `Failed: ${stats.failed}`,
-    `Insufficient History: ${stats.insufficient}`,
-    ``,
-    `🎯 DETECTION RESULTS`,
-    `🟡 Accumulation Zones: ${accumulation.length}`,
-    `🟢 Demand Building: ${demand.length}`,
-    `📦 Total Candidates: ${all.length}`,
-    ``,
-    `⚠️ Scores are ranking scores, not probabilities.`,
-    `⚠️ These are monitoring alerts, not buy signals.`,
-    `━━━━━━━━━━━━━━━━━━`,
-    ``
-  ].join("\n");
-
-  let body = "";
-
-  all.forEach((item, index) => {
-    body += formatResult(item, index + 1);
-  });
-
-  if (!all.length) {
-    body = "No valid accumulation zones detected in this scan.\n";
-  }
-
-  let errorSection = "";
-
-  if (stats.errors.length) {
-    errorSection = [
-      ``,
-      `⚠️ ERROR SAMPLES`,
-      ...stats.errors.slice(0, 12).map(
-        (e) => `${e.contract}: ${e.error}`
-      ),
-    ].join("\n");
-  }
-
-  return header + body + errorSection;
 }
 
 // =========================================================
@@ -1090,17 +1466,19 @@ function buildReport(results) {
 // =========================================================
 
 async function main() {
-  console.log("Starting Accumulation Radar V3...");
+  console.log("====================================");
+  console.log("ACCUMULATION RADAR V4 STARTED");
+  console.log("====================================");
 
-  const [allContracts, tickers] =
+  const [contractsData, tickersData] =
     await Promise.all([
       getContracts(),
       getTickers(),
     ]);
 
-  stats.totalContracts = allContracts.length;
+  stats.totalContracts = contractsData.length;
 
-  const contracts = allContracts.filter((c) =>
+  const contracts = contractsData.filter((c) =>
     c &&
     c.type === "direct" &&
     c.status === "trading" &&
@@ -1112,7 +1490,10 @@ async function main() {
   stats.eligibleContracts = contracts.length;
 
   const tickerMap = new Map(
-    tickers.map((t) => [t.contract, t])
+    tickersData.map((ticker) => [
+      ticker.contract,
+      ticker,
+    ])
   );
 
   console.log(
@@ -1124,34 +1505,40 @@ async function main() {
     tickerMap
   );
 
-  const report = buildReport(results);
+  stats.uniqueZones = results.length;
 
-  const messages = splitMessages(
-    report,
-    CONFIG.TELEGRAM_MAX_LENGTH
-  );
-
-  for (let i = 0; i < messages.length; i++) {
-    const message =
-      messages.length > 1
-        ? `📄 Report ${i + 1}/${messages.length}\n\n${messages[i]}`
-        : messages[i];
-
-    await sendTelegram(message);
-
-    await sleep(350);
+  for (const result of results) {
+    if (result.status === "ACTIVE_ZONE") {
+      stats.activeZones++;
+    } else if (result.status === "DEMAND_BUILDING") {
+      stats.demandBuilding++;
+    } else if (result.status === "BREAKOUT") {
+      stats.breakouts++;
+    } else if (result.status === "BREAKDOWN") {
+      stats.breakdowns++;
+    } else if (result.status === "HISTORICAL") {
+      stats.historicalZones++;
+    }
   }
 
-  console.log("=================================");
+  const reports = makeTelegramMessages(results);
+
+  await sendReports(reports);
+
+  console.log("====================================");
   console.log("SCAN COMPLETED");
-  console.log(`Contracts: ${stats.totalContracts}`);
+  console.log(`Total: ${stats.totalContracts}`);
   console.log(`Eligible: ${stats.eligibleContracts}`);
   console.log(`Checked: ${stats.checked}`);
   console.log(`Failed: ${stats.failed}`);
-  console.log(`Candidates: ${results.length}`);
-  console.log(`Accumulation: ${stats.accumulationZones}`);
-  console.log(`Demand Building: ${stats.demandBuilding}`);
-  console.log("=================================");
+  console.log(`Raw detections: ${stats.rawDetections}`);
+  console.log(`Unique zones: ${stats.uniqueZones}`);
+  console.log(`Active: ${stats.activeZones}`);
+  console.log(`Demand: ${stats.demandBuilding}`);
+  console.log(`Breakouts: ${stats.breakouts}`);
+  console.log(`Breakdowns: ${stats.breakdowns}`);
+  console.log(`Historical: ${stats.historicalZones}`);
+  console.log("====================================");
 }
 
 main().catch(async (error) => {
@@ -1159,12 +1546,12 @@ main().catch(async (error) => {
 
   try {
     await sendTelegram(
-      `🚨 ACCUMULATION RADAR V3 FAILED\n\n${String(error.message || error)}`
+      `🚨 ACCUMULATION RADAR V4 FAILED\n\n${safeError(error)}`
     );
   } catch (telegramError) {
     console.error(
       "Telegram failure:",
-      telegramError.message
+      safeError(telegramError)
     );
   }
 
