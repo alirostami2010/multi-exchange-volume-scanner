@@ -39,7 +39,6 @@ const CONFIG = {
 
   MIN_SCORE: 58,
 
-  // سقف رشد برای جلوگیری از انتخاب حرکت‌های دیرهنگام
   MAX_RETURN_15M: 4,
   MAX_RETURN_1H: 6,
   MAX_RETURN_4H: 12,
@@ -450,7 +449,6 @@ function analyzeCoin(data) {
   const evidence = [];
   const warnings = [];
 
-  // ساختار صعودی یک‌ساعته
   if (tf1h.structure.higherHigh) {
     score += 10;
     evidence.push('سقف بالاتر 1H');
@@ -466,7 +464,6 @@ function analyzeCoin(data) {
     evidence.push('شکست سقف اخیر 1H');
   }
 
-  // شروع حرکت در ۱۵ دقیقه
   if (tf15.structure.higherLow) {
     score += 7;
     evidence.push('کف بالاتر 15M');
@@ -485,7 +482,6 @@ function analyzeCoin(data) {
     evidence.push('بسته‌شدن قدرتمند کندل 15M');
   }
 
-  // وضعیت چهار ساعته
   if (tf4h.emaBullish) {
     score += 7;
     evidence.push('وضعیت مثبت EMA در 4H');
@@ -496,7 +492,6 @@ function analyzeCoin(data) {
     evidence.push('حفظ کف بالاتر 4H');
   }
 
-  // EMA کوتاه‌مدت
   if (tf1h.emaBullish) {
     score += 7;
     evidence.push('EMA صعودی 1H');
@@ -512,7 +507,6 @@ function analyzeCoin(data) {
     evidence.push('EMA صعودی 15M');
   }
 
-  // افزایش حجم
   if (tf1h.volumeRatio >= 1.5) {
     score += 7;
     evidence.push(
@@ -534,7 +528,6 @@ function analyzeCoin(data) {
     score += 3;
   }
 
-  // قدرت کندل یک‌ساعته
   if (
     tf1h.strength.bullish &&
     tf1h.strength.closeLocation >= 0.70
@@ -543,12 +536,10 @@ function analyzeCoin(data) {
     evidence.push('قدرت خریداران در کندل 1H');
   }
 
-  // بازده درست هر بازه زمانی
   const return15m = tf15.returns.return1;
   const return1h = tf15.returns.return4;
   const return4h = tf1h.returns.return4;
 
-  // جریمه رشد بیش از حد
   if (return15m > CONFIG.MAX_RETURN_15M) {
     score -= 12;
     warnings.push('رشد بیش از حد 15M');
@@ -564,7 +555,6 @@ function analyzeCoin(data) {
     warnings.push('رشد بیش از حد 4H');
   }
 
-  // ساختار فعلی باید نشانه صعود داشته باشد
   const hasStructure =
     tf1h.structure.higherLow ||
     tf1h.structure.breakout ||
@@ -575,7 +565,6 @@ function analyzeCoin(data) {
     warnings.push('ساختار صعودی تأیید نشده');
   }
 
-  // حجم پایین در هر دو تایم‌فریم
   if (
     tf1h.volumeRatio < 0.8 &&
     tf15.volumeRatio < 0.8
@@ -816,7 +805,6 @@ function buildReport(candidates, stats, duration, rankChanges = null) {
   return lines.join('\n');
 }
 
-
 // ========================
 // MAIN SCANNER
 // ========================
@@ -927,18 +915,22 @@ async function main() {
   // MARKET DATA STORAGE
   // ========================
 
+  let rankChanges = null;
+
   try {
     const storageResult = await saveMarketSnapshot(candidates);
+
+    rankChanges = storageResult.rankChanges;
 
     console.log('💾 MARKET DATA SAVED');
     console.log(`Snapshots: ${storageResult.snapshotsSaved}`);
     console.log(`History records: ${storageResult.historyCount}`);
     console.log(`Coin summaries: ${storageResult.summaryCount}`);
+    console.log('📊 Rank changes calculated successfully.');
   } catch (storageError) {
     console.error('⚠️ MARKET STORAGE FAILED:', storageError);
   }
-  
-  
+
   const duration = Date.now() - startedAt;
 
   const stats = {
@@ -968,7 +960,13 @@ async function main() {
   console.log(`Duration: ${(duration / 1000).toFixed(1)}s`);
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
-  const report = buildReport(candidates, stats, duration);
+  const report = buildReport(
+    candidates,
+    stats,
+    duration,
+    rankChanges
+  );
+
   await sendReports(report);
 
   console.log('✅ Telegram report sent successfully.');
