@@ -52,9 +52,9 @@ jobs:
             echo "No market data changes to save."
           fi
 
-      - name: Wait 15 minutes
+      - name: Wait 12 minutes
         if: success()
-        run: sleep 910
+        run: sleep 720
 
       - name: Start next scan automatically
         if: success()
