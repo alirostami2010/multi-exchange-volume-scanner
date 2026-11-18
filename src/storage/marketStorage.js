@@ -1,38 +1,20 @@
 
 /**
- * MARKET STORAGE — RANKING + TRADE STATE
- * --------------------------------------
- * History retention: 15 days
- * Summary retention: 30 days
- *
- * Ranking:
- * Base score + 15m + 1h + 4h + Daily + Persistence
- *
- * Trade state:
- * Persistent entry / exit signal lifecycle
- *
+ * MARKET STORAGE — FOUR TIMEFRAME RANKING + TRADE STATE
+ * History: 15 days | Summary: 30 days
+ * Ranking weights are intentionally unchanged.
  * File: src/storage/marketStorage.js
  */
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-// ========================
-// CONFIG
-// ========================
-
 const DATA_DIR = path.resolve(process.cwd(), 'data');
 const DATA_FILE = path.join(DATA_DIR, 'market-state.json');
-
 const HISTORY_RETENTION_DAYS = 15;
 const SUMMARY_RETENTION_DAYS = 30;
-
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MOMENTUM_LOOKBACK_MS = 90 * 60 * 1000;
-
-// ========================
-// HELPERS
-// ========================
 
 const number = (value, fallback = 0) => {
   const n = Number(value);
@@ -42,18 +24,10 @@ const number = (value, fallback = 0) => {
 const clamp = (value, min, max) =>
   Math.max(min, Math.min(max, value));
 
-const pctChange = (current, previous) => {
-  if (!previous || previous <= 0) return 0;
-  return ((current - previous) / previous) * 100;
-};
-
-function isObject(value) {
-  return (
-    value !== null &&
-    typeof value === 'object' &&
-    !Array.isArray(value)
-  );
-}
+const pctChange = (current, previous) =>
+  !previous || previous <= 0
+    ? 0
+    : ((current - previous) / previous) * 100;
 
 // ========================
 // READ STATE
@@ -61,22 +35,26 @@ function isObject(value) {
 
 async function readState() {
   try {
-    const raw = await fs.readFile(DATA_FILE, 'utf8');
-    const data = JSON.parse(raw);
+    const data = JSON.parse(
+      await fs.readFile(DATA_FILE, 'utf8')
+    );
 
     return {
       history: Array.isArray(data.history)
         ? data.history
         : [],
 
-      summaries: isObject(data.summaries)
-        ? data.summaries
-        : {},
+      summaries:
+        data.summaries &&
+        typeof data.summaries === 'object'
+          ? data.summaries
+          : {},
 
-      // وضعیت چرخه سیگنال‌ها مستقل از تاریخچه است.
-      tradeStates: isObject(data.tradeStates)
-        ? data.tradeStates
-        : {},
+      tradeStates:
+        data.tradeStates &&
+        typeof data.tradeStates === 'object'
+          ? data.tradeStates
+          : {},
     };
   } catch (error) {
     if (error.code === 'ENOENT') {
@@ -91,186 +69,9 @@ async function readState() {
   }
 }
 
-// ========================
-// ATOMIC STATE WRITE
-// ========================
-
-async function writeState(state) {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-
-  const temporaryFile = `${DATA_FILE}.tmp`;
-
-  const payload = {
-    updatedAt: new Date().toISOString(),
-
-    history: Array.isArray(state.history)
-      ? state.history
-      : [],
-
-    summaries: isObject(state.summaries)
-      ? state.summaries
-      : {},
-
-    tradeStates: isObject(state.tradeStates)
-      ? state.tradeStates
-      : {},
-  };
-
-  await fs.writeFile(
-    temporaryFile,
-    JSON.stringify(payload, null, 2),
-    'utf8'
-  );
-
-  await fs.rename(temporaryFile, DATA_FILE);
-}
-
-// ========================
-// TRADE STATE ACCESS
-// ========================
-
-/**
- * دریافت وضعیت ذخیره‌شده تمام ارزها.
- *
- * خروجی:
- * {
- *   BTC_USDT: { ... },
- *   ETH_USDT: { ... }
- * }
- */
 export async function getTradeStates() {
   const state = await readState();
-
   return state.tradeStates;
-}
-
-/**
- * دریافت وضعیت یک ارز مشخص.
- */
-export async function getTradeState(symbol) {
-  if (!symbol) return null;
-
-  const state = await readState();
-
-  return state.tradeStates[symbol] || null;
-}
-
-/**
- * ثبت یا به‌روزرسانی وضعیت سیگنال‌ها.
- *
- * ورودی می‌تواند آرایه‌ای از وضعیت‌ها باشد:
- *
- * [
- *   {
- *     symbol: 'BTC_USDT',
- *     status: 'NEAR_ENTRY',
- *     ...
- *   }
- * ]
- *
- * یا یک آبجکت با کلید نمادها.
- *
- * اطلاعات قبلی با اطلاعات جدید ادغام می‌شوند.
- * فیلدهایی که ارسال نشده‌اند حذف نمی‌شوند.
- */
-export async function saveTradeStates(updates) {
-  if (!updates) {
-    const state = await readState();
-    return state.tradeStates;
-  }
-
-  const state = await readState();
-
-  const entries = Array.isArray(updates)
-    ? updates
-    : isObject(updates)
-      ? Object.entries(updates).map(([symbol, value]) => ({
-          symbol,
-          ...value,
-        }))
-      : [];
-
-  const now = new Date().toISOString();
-
-  for (const update of entries) {
-    if (!isObject(update) || !update.symbol) {
-      continue;
-    }
-
-    const symbol = update.symbol;
-
-    const previous = state.tradeStates[symbol] || {};
-
-    state.tradeStates[symbol] = {
-      ...previous,
-      ...update,
-
-      symbol,
-
-      createdAt:
-        previous.createdAt ||
-        update.createdAt ||
-        now,
-
-      updatedAt: now,
-    };
-  }
-
-  await writeState(state);
-
-  return state.tradeStates;
-}
-
-// ========================
-// TRADE STATE MERGE
-// ========================
-
-function mergeTradeStateUpdates(
-  previousStates,
-  updates,
-  now
-) {
-  const result = {
-    ...previousStates,
-  };
-
-  if (!updates) {
-    return result;
-  }
-
-  const entries = Array.isArray(updates)
-    ? updates
-    : isObject(updates)
-      ? Object.entries(updates).map(([symbol, value]) => ({
-          symbol,
-          ...value,
-        }))
-      : [];
-
-  for (const update of entries) {
-    if (!isObject(update) || !update.symbol) {
-      continue;
-    }
-
-    const symbol = update.symbol;
-    const previous = result[symbol] || {};
-
-    result[symbol] = {
-      ...previous,
-      ...update,
-
-      symbol,
-
-      createdAt:
-        previous.createdAt ||
-        update.createdAt ||
-        now,
-
-      updatedAt: now,
-    };
-  }
-
-  return result;
 }
 
 // ========================
@@ -280,9 +81,9 @@ function mergeTradeStateUpdates(
 function getObservationPrice(item) {
   const livePrice = number(item.livePrice);
 
-  if (livePrice > 0) return livePrice;
-
-  return number(item.price);
+  return livePrice > 0
+    ? livePrice
+    : number(item.price);
 }
 
 // ========================
@@ -305,8 +106,10 @@ function calculatePricePersistence(
         getObservationPrice(item) > 0
       );
     })
-    .sort((a, b) =>
-      Date.parse(a.timestamp) - Date.parse(b.timestamp)
+    .sort(
+      (a, b) =>
+        Date.parse(a.timestamp) -
+        Date.parse(b.timestamp)
     )
     .slice(-5);
 
@@ -377,8 +180,11 @@ function calculateVolumePersistence(
   const bucketTime = number(live?.bucketTime);
   const currentTurnover = number(live?.turnover);
 
-  if (!bucketTime || currentTurnover <= 0) {
-    const ratio = number(coin.volume?.['15m'], 1);
+  const fallback = () => {
+    const ratio = number(
+      coin.volume?.['15m'],
+      1
+    );
 
     return {
       score: Math.round(
@@ -388,6 +194,10 @@ function calculateVolumePersistence(
       positiveSteps: 0,
       sameBucket: false,
     };
+  };
+
+  if (!bucketTime || currentTurnover <= 0) {
+    return fallback();
   }
 
   const sameBucketRecords = previousRecords
@@ -397,26 +207,18 @@ function calculateVolumePersistence(
         number(item.live15m?.turnover) > 0
       );
     })
-    .sort((a, b) =>
-      Date.parse(a.timestamp) - Date.parse(b.timestamp)
+    .sort(
+      (a, b) =>
+        Date.parse(a.timestamp) -
+        Date.parse(b.timestamp)
     );
 
   if (!sameBucketRecords.length) {
-    const ratio = number(coin.volume?.['15m'], 1);
-
-    return {
-      score: Math.round(
-        clamp(50 + (ratio - 1) * 20, 35, 75)
-      ),
-      delta: null,
-      positiveSteps: 0,
-      sameBucket: false,
-    };
+    return fallback();
   }
 
-  const previous = sameBucketRecords[
-    sameBucketRecords.length - 1
-  ];
+  const previous =
+    sameBucketRecords[sameBucketRecords.length - 1];
 
   const previousTurnover = number(
     previous.live15m?.turnover
@@ -428,24 +230,21 @@ function calculateVolumePersistence(
     ? delta / previousTurnover
     : 0;
 
-  let positiveSteps = 0;
-
-  const turnoverSequence = [
+  const sequence = [
     ...sameBucketRecords.map((item) =>
       number(item.live15m?.turnover)
     ),
     currentTurnover,
   ];
 
+  let positiveSteps = 0;
+
   for (
-    let i = turnoverSequence.length - 1;
+    let i = sequence.length - 1;
     i > 0;
     i--
   ) {
-    if (
-      turnoverSequence[i] >
-      turnoverSequence[i - 1]
-    ) {
+    if (sequence[i] > sequence[i - 1]) {
       positiveSteps++;
     } else {
       break;
@@ -455,9 +254,10 @@ function calculateVolumePersistence(
   let score = 50;
 
   if (delta > 0) {
-    score += 12;
-    score += clamp(deltaRatio * 20, 0, 15);
-    score += Math.min(positiveSteps, 3) * 5;
+    score +=
+      12 +
+      clamp(deltaRatio * 20, 0, 15) +
+      Math.min(positiveSteps, 3) * 5;
   } else if (delta < 0) {
     score -= 12;
   }
@@ -539,14 +339,13 @@ function calculateMomentum(coin, history, nowMs) {
     100
   );
 
-  /*
-   * Base Score       20%
-   * 15m              20%
-   * 1h               15%
-   * 4h               10%
-   * Daily            20%
-   * Persistence      15%
-   */
+  // Approved weights:
+  // Base 20%
+  // 15m 20%
+  // 1h 15%
+  // 4h 10%
+  // Daily 20%
+  // Persistence 15%
 
   const rankScore =
     baseScore * 0.20 +
@@ -589,6 +388,7 @@ function calculateMomentum(coin, history, nowMs) {
 
       volumeRatio5: number(daily.volumeRatio5),
       volumeRatio10: number(daily.volumeRatio10),
+
       projectedVolumeRatio: number(
         daily.projectedVolumeRatio
       ),
@@ -646,7 +446,8 @@ function updateSummary(previous, coin, rank, now) {
 
   const gain = summary.firstDiscoveryPrice > 0
     ? (
-        (summary.highestPrice - summary.firstDiscoveryPrice) /
+        (summary.highestPrice -
+          summary.firstDiscoveryPrice) /
         summary.firstDiscoveryPrice
       ) * 100
     : 0;
@@ -665,29 +466,118 @@ function updateSummary(previous, coin, rank, now) {
   summary.lastPrice = price;
   summary.lastScore = coin.score;
   summary.lastStage = coin.stage;
-  summary.observations = number(summary.observations) + 1;
+  summary.observations =
+    number(summary.observations) + 1;
 
   return summary;
+}
+
+// ========================
+// OPPORTUNITY / STATUS ORDER
+// ========================
+
+const OPPORTUNITY_ORDER = {
+  SWING: 0,
+  'SHORT-TERM': 1,
+  SCALP: 2,
+};
+
+const STATUS_ORDER = {
+  ENTRY_CONFIRMED: 0,
+  NEAR_ENTRY: 1,
+  WAITING: 2,
+  NEAR_EXIT: 3,
+  EXIT_CONFIRMED: 4,
+  INVALIDATED: 5,
+  EXPIRED: 6,
+};
+
+function compareCandidates(a, b) {
+  const groupA =
+    OPPORTUNITY_ORDER[a.opportunityType] ?? 9;
+
+  const groupB =
+    OPPORTUNITY_ORDER[b.opportunityType] ?? 9;
+
+  if (groupA !== groupB) {
+    return groupA - groupB;
+  }
+
+  const statusA =
+    STATUS_ORDER[a.tradeStatus] ?? 9;
+
+  const statusB =
+    STATUS_ORDER[b.tradeStatus] ?? 9;
+
+  if (statusA !== statusB) {
+    return statusA - statusB;
+  }
+
+  if (number(b.rankScore) !== number(a.rankScore)) {
+    return number(b.rankScore) - number(a.rankScore);
+  }
+
+  if (
+    number(b.persistenceScore) !==
+    number(a.persistenceScore)
+  ) {
+    return (
+      number(b.persistenceScore) -
+      number(a.persistenceScore)
+    );
+  }
+
+  if (
+    number(b.volume?.['15m']) !==
+    number(a.volume?.['15m'])
+  ) {
+    return (
+      number(b.volume?.['15m']) -
+      number(a.volume?.['15m'])
+    );
+  }
+
+  return number(b.score) - number(a.score);
+}
+
+// ========================
+// TRADE STATE MERGE
+// ========================
+
+function mergeTradeStates(previous, incoming, now) {
+  const merged = { ...previous };
+
+  if (Array.isArray(incoming)) {
+    for (const item of incoming) {
+      if (item?.symbol) {
+        merged[item.symbol] = {
+          ...item,
+          updatedAt: now,
+        };
+      }
+    }
+  } else if (
+    incoming &&
+    typeof incoming === 'object'
+  ) {
+    for (const [symbol, item] of Object.entries(incoming)) {
+      if (item && typeof item === 'object') {
+        merged[symbol] = {
+          ...item,
+          symbol,
+          updatedAt: now,
+        };
+      }
+    }
+  }
+
+  return merged;
 }
 
 // ========================
 // SAVE AND RANK
 // ========================
 
-/**
- * سازگاری با فراخوانی قبلی:
- *
- * saveMarketSnapshot(candidates)
- *
- * فراخوانی جدید:
- *
- * saveMarketSnapshot(candidates, {
- *   tradeStates: signalUpdates
- * })
- *
- * در صورت عدم ارسال tradeStates،
- * وضعیت‌های ذخیره‌شده قبلی حفظ می‌شوند.
- */
 export async function saveMarketSnapshot(
   candidates,
   options = {}
@@ -697,10 +587,7 @@ export async function saveMarketSnapshot(
 
   const state = await readState();
 
-  // ------------------------
-  // RANKING
-  // ------------------------
-
+  // Ranking using previous history.
   const rankedCandidates = candidates
     .map((coin) => {
       const momentum = calculateMomentum(
@@ -714,47 +601,17 @@ export async function saveMarketSnapshot(
         ...momentum,
       };
     })
-    .sort((a, b) => {
-      if (b.rankScore !== a.rankScore) {
-        return b.rankScore - a.rankScore;
-      }
+    .sort(compareCandidates);
 
-      if (
-        b.persistenceScore !== a.persistenceScore
-      ) {
-        return b.persistenceScore - a.persistenceScore;
-      }
-
-      if (
-        number(b.volume?.['15m']) !==
-        number(a.volume?.['15m'])
-      ) {
-        return (
-          number(b.volume?.['15m']) -
-          number(a.volume?.['15m'])
-        );
-      }
-
-      return number(b.score) - number(a.score);
-    });
-
-  // ------------------------
-  // PREVIOUS RUN
-  // ------------------------
-
-  let previousRunTimestamp = null;
-
-  for (const item of state.history) {
-    if (
+  // Find previous recorded run.
+  const previousRunTimestamp = state.history.reduce(
+    (latest, item) =>
       item.timestamp &&
-      (
-        !previousRunTimestamp ||
-        item.timestamp > previousRunTimestamp
-      )
-    ) {
-      previousRunTimestamp = item.timestamp;
-    }
-  }
+      (!latest || item.timestamp > latest)
+        ? item.timestamp
+        : latest,
+    null
+  );
 
   const previousRanks = new Map();
 
@@ -766,10 +623,7 @@ export async function saveMarketSnapshot(
     }
   }
 
-  // ------------------------
-  // RANK CHANGES
-  // ------------------------
-
+  // Compare ranks.
   const rankChanges = {};
 
   rankedCandidates.forEach((coin, index) => {
@@ -783,30 +637,25 @@ export async function saveMarketSnapshot(
         currentRank,
         change: null,
       };
+    } else {
+      const change = previousRank - currentRank;
 
-      return;
+      rankChanges[coin.symbol] = {
+        status:
+          change > 0
+            ? 'UP'
+            : change < 0
+              ? 'DOWN'
+              : 'SAME',
+
+        previousRank,
+        currentRank,
+        change,
+      };
     }
-
-    const change = previousRank - currentRank;
-
-    rankChanges[coin.symbol] = {
-      status:
-        change > 0
-          ? 'UP'
-          : change < 0
-            ? 'DOWN'
-            : 'SAME',
-
-      previousRank,
-      currentRank,
-      change,
-    };
   });
 
-  // ------------------------
-  // CURRENT SNAPSHOTS
-  // ------------------------
-
+  // Build current snapshots.
   const currentSnapshots = rankedCandidates.map(
     (coin, index) => {
       const rank = index + 1;
@@ -834,6 +683,9 @@ export async function saveMarketSnapshot(
         live1d: coin.live1d || null,
 
         stage: coin.stage,
+        opportunityType: coin.opportunityType,
+        tradeStatus: coin.tradeStatus,
+
         returns: coin.returns,
         volume: coin.volume,
 
@@ -859,25 +711,7 @@ export async function saveMarketSnapshot(
 
   state.history.push(...currentSnapshots);
 
-  // ------------------------
-  // TRADE STATE UPDATES
-  // ------------------------
-
-  const tradeStateUpdates =
-    options?.tradeStates ??
-    options?.signals ??
-    null;
-
-  state.tradeStates = mergeTradeStateUpdates(
-    state.tradeStates,
-    tradeStateUpdates,
-    now
-  );
-
-  // ------------------------
-  // HISTORY CLEANUP
-  // ------------------------
-
+  // Keep detailed history for 15 days.
   const historyCutoff =
     nowMs - HISTORY_RETENTION_DAYS * DAY_MS;
 
@@ -890,10 +724,7 @@ export async function saveMarketSnapshot(
     );
   });
 
-  // ------------------------
-  // SUMMARY CLEANUP
-  // ------------------------
-
+  // Keep summaries for 30 days from last observation.
   const summaryCutoff =
     nowMs - SUMMARY_RETENTION_DAYS * DAY_MS;
 
@@ -910,11 +741,35 @@ export async function saveMarketSnapshot(
     }
   }
 
-  // ------------------------
-  // ATOMIC SAVE
-  // ------------------------
+  // Keep previous trade states even if a symbol
+  // temporarily drops out of candidates.
+  state.tradeStates = mergeTradeStates(
+    state.tradeStates,
+    options.tradeStates ?? options.signals,
+    now
+  );
 
-  await writeState(state);
+  // Atomic file save.
+  await fs.mkdir(DATA_DIR, { recursive: true });
+
+  const temporaryFile = `${DATA_FILE}.tmp`;
+
+  await fs.writeFile(
+    temporaryFile,
+    JSON.stringify(
+      {
+        updatedAt: now,
+        history: state.history,
+        summaries: state.summaries,
+        tradeStates: state.tradeStates,
+      },
+      null,
+      2
+    ),
+    'utf8'
+  );
+
+  await fs.rename(temporaryFile, DATA_FILE);
 
   return {
     rankedCandidates,
@@ -925,5 +780,6 @@ export async function saveMarketSnapshot(
     tradeStateCount: Object.keys(state.tradeStates).length,
 
     rankChanges,
+    tradeStates: state.tradeStates,
   };
 }
