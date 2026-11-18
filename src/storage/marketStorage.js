@@ -1,6 +1,21 @@
+/**
+ * MARKET STORAGE — FOUR TIMEFRAME RANKING
+ * ---------------------------------------
+ * History retention: 15 days
+ * Summary retention: 30 days
+ *
+ * Ranking:
+ * Base score + 15m + 1h + 4h + Daily + Persistence
+ *
+ * File: src/storage/marketStorage.js
+ */
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
+
+// ========================
+// CONFIG
+// ========================
 
 const DATA_DIR = path.resolve(process.cwd(), 'data');
 const DATA_FILE = path.join(DATA_DIR, 'market-state.json');
@@ -10,6 +25,10 @@ const SUMMARY_RETENTION_DAYS = 30;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MOMENTUM_LOOKBACK_MS = 90 * 60 * 1000;
+
+// ========================
+// HELPERS
+// ========================
 
 const number = (value, fallback = 0) => {
   const n = Number(value);
@@ -24,26 +43,41 @@ const pctChange = (current, previous) => {
   return ((current - previous) / previous) * 100;
 };
 
+// ========================
+// READ STATE
+// ========================
+
 async function readState() {
   try {
     const raw = await fs.readFile(DATA_FILE, 'utf8');
     const data = JSON.parse(raw);
 
     return {
-      history: Array.isArray(data.history) ? data.history : [],
+      history: Array.isArray(data.history)
+        ? data.history
+        : [],
+
       summaries:
-        data.summaries && typeof data.summaries === 'object'
+        data.summaries &&
+        typeof data.summaries === 'object'
           ? data.summaries
           : {},
     };
   } catch (error) {
     if (error.code === 'ENOENT') {
-      return { history: [], summaries: {} };
+      return {
+        history: [],
+        summaries: {},
+      };
     }
 
     throw error;
   }
 }
+
+// ========================
+// OBSERVATION PRICE
+// ========================
 
 function getObservationPrice(item) {
   const livePrice = number(item.livePrice);
@@ -57,7 +91,11 @@ function getObservationPrice(item) {
 // PRICE PERSISTENCE
 // ========================
 
-function calculatePricePersistence(coin, previousRecords, nowMs) {
+function calculatePricePersistence(
+  coin,
+  previousRecords,
+  nowMs
+) {
   const observations = previousRecords
     .filter((item) => {
       const timestamp = Date.parse(item.timestamp);
@@ -157,7 +195,6 @@ function calculateVolumePersistence(
   const sameBucketRecords = previousRecords
     .filter((item) => {
       return (
-        item.symbol === coin.symbol &&
         number(item.live15m?.bucketTime) === bucketTime &&
         number(item.live15m?.turnover) > 0
       );
@@ -207,7 +244,10 @@ function calculateVolumePersistence(
     i > 0;
     i--
   ) {
-    if (turnoverSequence[i] > turnoverSequence[i - 1]) {
+    if (
+      turnoverSequence[i] >
+      turnoverSequence[i - 1]
+    ) {
       positiveSteps++;
     } else {
       break;
@@ -233,7 +273,7 @@ function calculateVolumePersistence(
 }
 
 // ========================
-// COMBINED MOMENTUM SCORE
+// FOUR TIMEFRAME MOMENTUM
 // ========================
 
 function calculateMomentum(coin, history, nowMs) {
@@ -257,41 +297,71 @@ function calculateMomentum(coin, history, nowMs) {
     volume.score * 0.4
   );
 
-  const return15m = number(coin.returns?.['15m']);
-  const return1h = number(coin.returns?.['1h']);
-  const return4h = number(coin.returns?.['4h']);
+  const return15m = number(
+    coin.returns?.['15m']
+  );
 
+  const return1h = number(
+    coin.returns?.['1h']
+  );
+
+  const return4h = number(
+    coin.returns?.['4h']
+  );
+
+  const daily = coin.daily || {};
+
+  // 15 دقیقه
   const score15m = clamp(
     50 + (return15m / 2) * 50,
     0,
     100
   );
 
+  // یک ساعت
   const score1h = clamp(
     50 + (return1h / 3) * 50,
     0,
     100
   );
 
+  // چهار ساعت
   const score4h = clamp(
     50 + (return4h / 6) * 50,
     0,
     100
   );
 
-  // امتیاز پایه فعلی دست‌نخورده باقی می‌ماند.
+  // روزانه
+  const dailyScore = clamp(
+    number(daily.score, 50),
+    0,
+    100
+  );
+
   const baseScore = clamp(
     number(coin.score),
     0,
     100
   );
 
-  // رتبه‌بندی ترکیبی
+  /*
+   * وزن‌های رتبه‌بندی:
+   *
+   * Base Score       20%
+   * 15m              20%
+   * 1h               15%
+   * 4h               10%
+   * Daily            20%
+   * Persistence      15%
+   */
+
   const rankScore =
-    baseScore * 0.30 +
-    score15m * 0.25 +
-    score1h * 0.20 +
+    baseScore * 0.20 +
+    score15m * 0.20 +
+    score1h * 0.15 +
     score4h * 0.10 +
+    dailyScore * 0.20 +
     persistenceScore * 0.15;
 
   return {
@@ -310,13 +380,38 @@ function calculateMomentum(coin, history, nowMs) {
     ),
 
     volumeDelta15m: volume.delta,
-
     volumeSameBucket: volume.sameBucket,
+
+    dailyScore: Math.round(dailyScore),
 
     timeframeScores: {
       '15m': Math.round(score15m),
       '1h': Math.round(score1h),
       '4h': Math.round(score4h),
+      '1d': Math.round(dailyScore),
+    },
+
+    dailyMetrics: {
+      dailyReturn: number(daily.dailyReturn),
+      dailyOpenReturn: number(daily.dailyOpenReturn),
+
+      volumeRatio5: number(daily.volumeRatio5),
+      volumeRatio10: number(daily.volumeRatio10),
+      projectedVolumeRatio: number(
+        daily.projectedVolumeRatio
+      ),
+
+      emaBullish: Boolean(daily.emaBullish),
+      ema50Bullish: Boolean(daily.ema50Bullish),
+      emaSlope: Boolean(daily.emaSlope),
+
+      breakout20: Boolean(daily.breakout20),
+      breakout50: Boolean(daily.breakout50),
+
+      higherHigh: Boolean(daily.higherHigh),
+      higherLow: Boolean(daily.higherLow),
+
+      currentCandle: Boolean(daily.currentCandle),
     },
   };
 }
@@ -378,7 +473,7 @@ function updateSummary(previous, coin, rank, now) {
   summary.lastPrice = price;
   summary.lastScore = coin.score;
   summary.lastStage = coin.stage;
-  summary.observations += 1;
+  summary.observations = number(summary.observations) + 1;
 
   return summary;
 }
@@ -393,7 +488,7 @@ export async function saveMarketSnapshot(candidates) {
 
   const state = await readState();
 
-  // محاسبه امتیاز استمرار با استفاده از تاریخچه قبلی
+  // رتبه‌بندی با استفاده از تاریخچه قبلی
   const rankedCandidates = candidates
     .map((coin) => {
       const momentum = calculateMomentum(
@@ -418,27 +513,31 @@ export async function saveMarketSnapshot(candidates) {
         return b.persistenceScore - a.persistenceScore;
       }
 
-      if (b.volume['15m'] !== a.volume['15m']) {
+      if (
+        b.volume['15m'] !== a.volume['15m']
+      ) {
         return b.volume['15m'] - a.volume['15m'];
       }
 
       return b.score - a.score;
     });
 
-  // آخرین اجرای ثبت‌شده قبل از اجرای فعلی
+  // آخرین اجرای ثبت‌شده
   let previousRunTimestamp = null;
 
   for (const item of state.history) {
     if (
       item.timestamp &&
-      (!previousRunTimestamp ||
-        item.timestamp > previousRunTimestamp)
+      (
+        !previousRunTimestamp ||
+        item.timestamp > previousRunTimestamp
+      )
     ) {
       previousRunTimestamp = item.timestamp;
     }
   }
 
-  // استخراج رتبه‌های اجرای قبلی
+  // رتبه‌های اجرای قبلی
   const previousRanks = new Map();
 
   if (previousRunTimestamp) {
@@ -449,7 +548,7 @@ export async function saveMarketSnapshot(candidates) {
     }
   }
 
-  // مقایسه رتبه‌های فعلی با اجرای قبلی
+  // مقایسه رتبه‌ها
   const rankChanges = {};
 
   rankedCandidates.forEach((coin, index) => {
@@ -470,11 +569,13 @@ export async function saveMarketSnapshot(candidates) {
     const change = previousRank - currentRank;
 
     rankChanges[coin.symbol] = {
-      status: change > 0
-        ? 'UP'
-        : change < 0
-          ? 'DOWN'
-          : 'SAME',
+      status:
+        change > 0
+          ? 'UP'
+          : change < 0
+            ? 'DOWN'
+            : 'SAME',
+
       previousRank,
       currentRank,
       change,
@@ -506,10 +607,16 @@ export async function saveMarketSnapshot(candidates) {
         livePrice: coin.livePrice,
 
         live15m: coin.live15m || null,
+        live1d: coin.live1d || null,
 
         stage: coin.stage,
         returns: coin.returns,
         volume: coin.volume,
+
+        daily: coin.daily || null,
+        dailyScore: coin.dailyScore,
+        dailyMetrics: coin.dailyMetrics || null,
+        timeframeScores: coin.timeframeScores || null,
 
         pricePersistence: coin.pricePersistence,
         volumePersistence: coin.volumePersistence,
@@ -528,7 +635,7 @@ export async function saveMarketSnapshot(candidates) {
 
   state.history.push(...currentSnapshots);
 
-  // پاک‌سازی تاریخچه قدیمی‌تر از ۱۵ روز
+  // پاک‌سازی تاریخچه بیشتر از ۱۵ روز
   const historyCutoff =
     nowMs - HISTORY_RETENTION_DAYS * DAY_MS;
 
@@ -541,7 +648,7 @@ export async function saveMarketSnapshot(candidates) {
     );
   });
 
-  // نگهداری خلاصه عملکرد تا ۳۰ روز پس از آخرین مشاهده
+  // حفظ خلاصه عملکرد به مدت ۳۰ روز از آخرین مشاهده
   const summaryCutoff =
     nowMs - SUMMARY_RETENTION_DAYS * DAY_MS;
 
@@ -558,6 +665,7 @@ export async function saveMarketSnapshot(candidates) {
     }
   }
 
+  // ذخیره امن فایل
   await fs.mkdir(DATA_DIR, { recursive: true });
 
   const temporaryFile = `${DATA_FILE}.tmp`;
