@@ -714,6 +714,7 @@ function splitTelegramMessage(text, maxLength) {
 
   return messages;
 }
+
 async function sendReports(report) {
   // برای جلوگیری از عبور از محدودیت تلگرام،
   // فضای لازم برای شماره گزارش رزرو می‌شود.
@@ -745,88 +746,91 @@ async function sendReports(report) {
 // ========================
 
 function buildReport(candidates, stats, duration, rankChanges = null) {
-  const lines = [
-    '🚀 GATE.IO | EARLY BULLISH TREND RADAR',
-    '━━━━━━━━━━━━━━━━━━',
-    '🎯 هدف: شناسایی شروع روند صعودی',
-    '⏱ تایم‌فریم‌ها: 15M / 1H / 4H',
-    `📊 قراردادهای فعال: ${stats.active}`,
-    `💧 واجد شرایط نقدشوندگی: ${stats.liquid}`,
-    `🔍 بررسی موفق: ${stats.success}`,
-    `⚠️ خطاهای دریافت داده: ${stats.errors}`,
-    `🎯 کاندیدهای تأییدشده: ${candidates.length}`,
-    `🏆 ارسال به تلگرام: ${Math.min(candidates.length, CONFIG.TOP_COUNT)}`,
-    `⏱ زمان اسکن: ${(duration / 1000).toFixed(1)} ثانیه`,
-    '━━━━━━━━━━━━━━━━━━',
-    '',
-    '📊 راهنمای تغییر رتبه:',
-    '🟢 ↑ صعود | 🔴 ↓ نزول | ➖ بدون تغییر | 🆕 تازه‌وارد',
-    '━━━━━━━━━━━━━━━━━━',
-  ];
-
   const selected = candidates.slice(0, CONFIG.TOP_COUNT);
 
+  const blocks = [];
+
+  // ========================
+  // HEADER
+  // ========================
+
+  blocks.push([
+    '🚀 GATE.IO | EARLY BULLISH RADAR',
+    '━━━━━━━━━━━━━━━━━━',
+    '📌 راهنمای علائم:',
+    '🟢↑ بهبود رتبه | 🔴↓ افت رتبه | ➖ ثابت | 🆕 جدید',
+    '▲ بازده مثبت | ▼ بازده منفی | ⚡ حجم بالا',
+    '━━━━━━━━━━━━━━━━━━',
+    `🎯 کاندید: ${selected.length}/${candidates.length}`,
+    `📊 قرارداد: ${stats.active} | نقدشونده: ${stats.liquid}`,
+    `🔍 بررسی: ${stats.success} | خطا: ${stats.errors}`,
+    `⏱ زمان اسکن: ${(duration / 1000).toFixed(1)} ثانیه`,
+    '━━━━━━━━━━━━━━━━━━',
+  ].join('\n'));
+
+  // ========================
+  // COIN BLOCKS
+  // هر ارز دقیقاً سه خط
+  // ========================
+
   if (!selected.length) {
-    lines.push('❌ در این اسکن هیچ ارزی شرایط لازم را نداشت.');
-    return lines.join('\n');
+    blocks.push('❌ در این اسکن ارزی شرایط لازم را نداشت.');
   }
 
   selected.forEach((coin, index) => {
     const currentRank = index + 1;
     const movement = rankChanges?.[coin.symbol];
 
-    let rankText = 'رتبه قبلی نامشخص';
+    let rankText = '▫️';
 
     if (movement) {
       if (movement.status === 'NEW') {
-        rankText = '🆕 تازه‌وارد';
+        rankText = '🆕';
       } else if (movement.status === 'UP') {
-        rankText = `🟢 ↑ ${movement.change} رتبه صعود | قبلی: ${movement.previousRank}`;
+        rankText = `🟢↑${movement.change}`;
       } else if (movement.status === 'DOWN') {
-        rankText = `🔴 ↓ ${Math.abs(movement.change)} رتبه نزول | قبلی: ${movement.previousRank}`;
+        rankText = `🔴↓${Math.abs(movement.change)}`;
       } else {
-        rankText = `➖ بدون تغییر | قبلی: ${movement.previousRank}`;
+        rankText = '➖';
       }
     }
 
-    lines.push('');
-    lines.push(
-      `${currentRank}. ${coin.symbol} | امتیاز: ${coin.score}/100`
-    );
+    const formatReturn = (value) => {
+      const arrow = value >= 0 ? '▲' : '▼';
+      return `${arrow}${Math.abs(value).toFixed(2)}%`;
+    };
 
-    lines.push(`🏅 تغییر رتبه: ${rankText}`);
-    lines.push(`💰 قیمت: ${formatPrice(coin.price)}`);
-    lines.push(`🧭 وضعیت: ${coin.stage}`);
+    const volume15 = coin.volume['15m'];
+    const volume1h = coin.volume['1h'];
 
-    lines.push(
-      `📈 بازده اخیر: 15M ${coin.returns['15m'].toFixed(2)}% | ` +
-      `1H ${coin.returns['1h'].toFixed(2)}% | ` +
-      `4H ${coin.returns['4h'].toFixed(2)}%`
-    );
+    const volume15Text =
+      `${volume15.toFixed(2)}x${volume15 >= 1.5 ? '⚡' : ''}`;
 
-    lines.push(
-      `📊 حجم نسبی: 15M ${coin.volume['15m'].toFixed(2)}x | ` +
-      `1H ${coin.volume['1h'].toFixed(2)}x`
-    );
+    const volume1hText =
+      `${volume1h.toFixed(2)}x${volume1h >= 1.5 ? '⚡' : ''}`;
 
-    lines.push('🔎 شواهد:');
+    blocks.push([
+      `${currentRank}. ${coin.symbol} ${rankText} | امتیاز ${coin.score}`,
+      `💰 ${formatPrice(coin.price)} | 15M ${formatReturn(coin.returns['15m'])} | 1H ${formatReturn(coin.returns['1h'])} | 4H ${formatReturn(coin.returns['4h'])}`,
+      `📊 حجم 15M ${volume15Text} | 1H ${volume1hText}`,
+    ].join('\n'));
 
-    for (const item of coin.evidence.slice(0, 5)) {
-      lines.push(`  • ${item}`);
+    // جداکننده واضح بین ارزها
+    if (index < selected.length - 1) {
+      blocks.push('━━━━━━━━━━━━━━━━━━');
     }
-
-    if (coin.warnings.length) {
-      lines.push(`⚠️ ${coin.warnings.join('، ')}`);
-    }
-
-    lines.push('──────────────────');
   });
 
-  lines.push('');
-  lines.push('ℹ️ امتیاز و رتبه‌بندی فنی هستند و احتمال قطعی رشد نیستند.');
-  lines.push('ℹ️ این گزارش سیگنال ورود قطعی محسوب نمی‌شود.');
+  // ========================
+  // FOOTER
+  // ========================
 
-  return lines.join('\n');
+  blocks.push([
+    '━━━━━━━━━━━━━━━━━━',
+    'ℹ️ رتبه و امتیاز، تضمین رشد یا سیگنال ورود نیستند.',
+  ].join('\n'));
+
+  return blocks.join('\n\n');
 }
 
 // ========================
