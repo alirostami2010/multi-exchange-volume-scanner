@@ -1,21 +1,26 @@
+
 /**
  * GATE.IO USDT PERPETUAL — FOUR TIMEFRAME BULLISH RADAR
  * ----------------------------------------------------
- * Timeframes: 15m / 1h / 4h / 1d
+ * Timeframes: 5m / 15m / 1h / 4h / 1d
  *
- * هدف:
- * شناسایی ارزهای دارای قدرت صعودی، افزایش حجم،
- * شتاب قیمت و احتمال ادامه حرکت بزرگ.
- *
- * فیلتر اولیه و امتیاز پایه حفظ شده‌اند.
- * رتبه‌بندی نهایی با تحلیل چهار تایم‌فریم انجام می‌شود.
+ * Base scoring and initial filters are preserved.
+ * Added:
+ * - SWING / SHORT-TERM / SCALP classification
+ * - Entry zone and closed-candle confirmation
+ * - Structural SL and TP1 / TP2 / TP3
+ * - Persistent trade states
+ * - Entry / exit lifecycle management
  *
  * File: src/scanner/marketScanner.js
  * Node.js 20+
  */
 
 import 'dotenv/config';
-import { saveMarketSnapshot } from '../storage/marketStorage.js';
+import {
+  saveMarketSnapshot,
+  getTradeStates,
+} from '../storage/marketStorage.js';
 
 // ========================
 // CONFIG
@@ -25,6 +30,7 @@ const CONFIG = {
   API_BASE: 'https://api.gateio.ws/api/v4',
 
   TIMEFRAMES: {
+    '5m': { seconds: 300, limit: 100 },
     '15m': { seconds: 900, limit: 100 },
     '1h': { seconds: 3600, limit: 100 },
     '4h': { seconds: 14400, limit: 100 },
@@ -45,6 +51,20 @@ const CONFIG = {
   MAX_RETURN_15M: 4,
   MAX_RETURN_1H: 6,
   MAX_RETURN_4H: 12,
+
+  // Entry engine
+  ENTRY_NEAR_ATR: 0.45,
+  ENTRY_ZONE_ATR: 0.25,
+  STOP_BUFFER_ATR: 0.35,
+
+  // Signal expiration
+  ENTRY_EXPIRY_MINUTES: {
+    SWING: 1440,
+    'SHORT-TERM': 240,
+    SCALP: 60,
+  },
+
+  CONFIRMATION_VOLUME_RATIO: 1.10,
 };
 
 // ========================
@@ -110,7 +130,6 @@ async function fetchJSON(url) {
 
       if (!response.ok) {
         const body = await response.text();
-
         const error = new Error(
           `HTTP ${response.status}: ${body.slice(0, 200)}`
         );
@@ -195,9 +214,7 @@ async function getCandles(
     (c) => c.time < currentBucket
   );
 
-  if (!includeCurrent) {
-    return closedCandles;
-  }
+  if (!includeCurrent) return closedCandles;
 
   const currentCandle =
     candles.find((c) => c.time === currentBucket) || null;
@@ -273,6 +290,27 @@ function calculateEMA(values, period) {
   }
 
   return result;
+}
+
+function calculateATR(candles, period = 14) {
+  if (candles.length < period + 1) return 0;
+
+  const ranges = [];
+
+  for (let i = 1; i < candles.length; i++) {
+    const current = candles[i];
+    const previous = candles[i - 1];
+
+    ranges.push(
+      Math.max(
+        current.high - current.low,
+        Math.abs(current.high - previous.close),
+        Math.abs(current.low - previous.close)
+      )
+    );
+  }
+
+  return average(ranges.slice(-period));
 }
 
 function getVolumeRatio(candles) {
@@ -366,6 +404,8 @@ function analyzeStructure(candles) {
       breakout: false,
       bullishStructure: false,
       score: 0,
+      resistance: 0,
+      support: 0,
     };
   }
 
@@ -387,6 +427,10 @@ function analyzeStructure(candles) {
 
   const resistance = Math.max(
     ...previous.map((c) => c.high)
+  );
+
+  const support = Math.min(
+    ...previous.map((c) => c.low)
   );
 
   const last = candles[candles.length - 1];
@@ -412,7 +456,10 @@ function analyzeStructure(candles) {
     breakout,
     bullishStructure,
     resistance,
+    support,
     score,
+    swingHighs: highs,
+    swingLows: lows,
   };
 }
 
@@ -447,14 +494,18 @@ function analyzeTimeframe(candles) {
   const structure = analyzeStructure(candles);
   const volumeRatio = getVolumeRatio(candles);
   const strength = getCandleStrength(last);
+  const atr = calculateATR(candles);
 
   return {
     price: last.close,
+    ema9: currentEma9,
+    ema21: currentEma21,
     emaBullish,
     emaSlope,
     structure,
     volumeRatio,
     strength,
+    atr,
 
     returns: {
       return1: pctChange(last.close, previous.close),
@@ -542,15 +593,10 @@ function analyzeDaily(candles, currentCandle, livePrice) {
   const currentRange = currentHigh - currentLow;
 
   const currentCloseLocation = currentRange > 0
-    ? clamp(
-        (price - currentLow) / currentRange,
-        0,
-        1
-      )
+    ? clamp((price - currentLow) / currentRange, 0, 1)
     : 0.5;
 
   const dailyReturn = pctChange(price, last.close);
-
   const dailyOpenReturn = currentCandle
     ? pctChange(price, currentOpen)
     : 0;
@@ -575,16 +621,12 @@ function analyzeDaily(candles, currentCandle, livePrice) {
     ema21[ema21.length - 2];
 
   const breakout20 =
-    resistance20 > 0 &&
-    price > resistance20;
+    resistance20 > 0 && price > resistance20;
 
   const breakout50 =
-    resistance50 > 0 &&
-    price > resistance50;
+    resistance50 > 0 && price > resistance50;
 
-  // حجم روز جاری با توجه به زمان سپری‌شده
   const nowSeconds = Math.floor(Date.now() / 1000);
-
   const dayBucket =
     Math.floor(nowSeconds / 86400) * 86400;
 
@@ -645,25 +687,21 @@ function analyzeDaily(candles, currentCandle, livePrice) {
 
   return {
     score: Math.round(clamp(score, 0, 100)),
-
     price,
     dailyReturn,
     dailyOpenReturn,
-
     emaBullish,
     ema50Bullish,
     emaSlope,
-
     higherHigh: base.structure.higherHigh,
     higherLow: base.structure.higherLow,
-
     breakout20,
     breakout50,
-
+    resistance20,
+    resistance50,
     volumeRatio5,
     volumeRatio10,
     projectedVolumeRatio,
-
     currentCandle: Boolean(currentCandle),
   };
 }
@@ -681,6 +719,8 @@ function emptyDailyAnalysis(price = 0) {
     higherLow: false,
     breakout20: false,
     breakout50: false,
+    resistance20: 0,
+    resistance50: 0,
     volumeRatio5: 0,
     volumeRatio10: 0,
     projectedVolumeRatio: 0,
@@ -689,7 +729,7 @@ function emptyDailyAnalysis(price = 0) {
 }
 
 // ========================
-// EARLY BULLISH SCORING
+// ORIGINAL BULLISH SCORING
 // ========================
 
 function analyzeCoin(data) {
@@ -717,8 +757,6 @@ function analyzeCoin(data) {
 
   const evidence = [];
   const warnings = [];
-
-  // امتیاز پایه فعلی بدون تغییر
 
   if (tf1h.structure.higherHigh) {
     score += 10;
@@ -844,8 +882,6 @@ function analyzeCoin(data) {
     warnings.push('حجم معاملات ضعیف');
   }
 
-  // شروط پذیرش اولیه بدون تغییر
-
   const shortTermPositive =
     tf15.emaBullish ||
     tf15.structure.breakout ||
@@ -904,7 +940,6 @@ function analyzeCoin(data) {
     symbol,
     score,
     stage,
-
     price: tf1h.price,
 
     returns: {
@@ -921,10 +956,604 @@ function analyzeCoin(data) {
     },
 
     daily,
-
     evidence,
     warnings,
+
+    // Internal analysis for the entry engine
+    _analysis: {
+      tf15,
+      tf1h,
+      tf4h,
+      daily,
+    },
   };
+}
+
+// ========================
+// OPPORTUNITY CLASSIFICATION
+// ========================
+
+function classifyTradeType(candidate) {
+  const { tf4h, daily } = candidate._analysis;
+
+  const dailyStrength =
+    daily.score >= 68 &&
+    (
+      daily.emaBullish ||
+      daily.ema50Bullish ||
+      daily.breakout20 ||
+      daily.higherLow
+    );
+
+  const fourHourStrength =
+    tf4h.emaBullish ||
+    tf4h.structure.higherLow ||
+    tf4h.structure.breakout;
+
+  const strongSwingPotential =
+    dailyStrength &&
+    fourHourStrength &&
+    (
+      daily.breakout20 ||
+      daily.breakout50 ||
+      daily.volumeRatio5 >= 1.4 ||
+      daily.projectedVolumeRatio >= 1.5 ||
+      daily.higherHigh
+    );
+
+  if (strongSwingPotential) return 'SWING';
+
+  const shortTermPotential =
+    tf4h.emaBullish ||
+    tf4h.structure.higherLow ||
+    candidate.score >= 72;
+
+  if (shortTermPotential) return 'SHORT-TERM';
+
+  return 'SCALP';
+}
+
+// ========================
+// ENTRY ZONE / STOP / TARGETS
+// ========================
+
+function uniqueLevels(values, currentPrice, direction = 'above') {
+  const filtered = values
+    .filter((v) => Number.isFinite(v) && v > 0)
+    .filter((v) =>
+      direction === 'above'
+        ? v > currentPrice
+        : v < currentPrice
+    );
+
+  return [...new Set(filtered.map((v) => Number(v.toPrecision(10))))]
+    .sort((a, b) =>
+      direction === 'above' ? a - b : b - a
+    );
+}
+
+function calculateTradeLevels(candidate, candles15m, candles1h) {
+  const { tf15, tf1h, tf4h, daily } = candidate._analysis;
+
+  const price = number(candidate.livePrice, candidate.price);
+  const atr = Math.max(
+    tf15.atr,
+    price * 0.001
+  );
+
+  const recent15 = candles15m.slice(-20);
+  const recent1h = candles1h.slice(-20);
+
+  const swingLows = findSwingPoints(recent15, 2).lows;
+  const supportCandidates = [
+    tf15.ema21,
+    tf1h.ema21,
+    tf15.structure.support,
+    ...swingLows.slice(-3),
+    ...recent15.slice(-8).map((c) => c.low),
+  ].filter((v) => v > 0 && v < price);
+
+  // Support nearest to current price
+  const nearestSupport = supportCandidates.length
+    ? Math.max(...supportCandidates)
+    : price - atr;
+
+  // Avoid using a support that is too far away
+  const base = Math.max(
+    nearestSupport,
+    price - atr * 2.2
+  );
+
+  let zoneLow = base - atr * CONFIG.ENTRY_ZONE_ATR;
+  let zoneHigh = base + atr * CONFIG.ENTRY_ZONE_ATR;
+
+  // If the price is already close to the support area,
+  // the zone can include the current price.
+  if (price >= zoneLow && price <= zoneHigh) {
+    zoneHigh = Math.max(zoneHigh, price);
+  }
+
+  // Prevent an entry zone from being unrealistically far away.
+  if (price - zoneHigh > atr * 2.5) {
+    zoneLow = price - atr * 2.1;
+    zoneHigh = price - atr * 1.7;
+  }
+
+  const structuralLow = Math.min(
+    ...recent15.slice(-12).map((c) => c.low),
+    ...recent1h.slice(-6).map((c) => c.low),
+    zoneLow
+  );
+
+  const stopLoss =
+    structuralLow - atr * CONFIG.STOP_BUFFER_ATR;
+
+  const entryReference = (zoneLow + zoneHigh) / 2;
+  const risk = entryReference - stopLoss;
+
+  const resistanceCandidates = [
+    ...findSwingPoints(recent1h, 2).highs,
+    ...findSwingPoints(candles15m.slice(-35), 2).highs,
+    tf1h.structure.resistance,
+    tf4h.structure.resistance,
+    daily.resistance20,
+    daily.resistance50,
+  ];
+
+  const resistances = uniqueLevels(
+    resistanceCandidates,
+    entryReference,
+    'above'
+  );
+
+  const targets = [];
+  const minimumTargetDistance = Math.max(risk * 0.8, atr * 0.7);
+
+  for (const resistance of resistances) {
+    if (resistance - entryReference < minimumTargetDistance) {
+      continue;
+    }
+
+    if (
+      !targets.some(
+        (target) =>
+          Math.abs(target - resistance) / entryReference < 0.003
+      )
+    ) {
+      targets.push(resistance);
+    }
+
+    if (targets.length === 3) break;
+  }
+
+  const fallbackMultiples = [1.5, 2.5, 4];
+
+  for (let i = 0; targets.length < 3 && i < fallbackMultiples.length; i++) {
+    const target = entryReference + risk * fallbackMultiples[i];
+
+    if (
+      !targets.some(
+        (existing) =>
+          Math.abs(existing - target) / entryReference < 0.003
+      )
+    ) {
+      targets.push(target);
+    }
+  }
+
+  targets.sort((a, b) => a - b);
+
+  const rr = targets.map((target) =>
+    risk > 0 ? (target - entryReference) / risk : 0
+  );
+
+  return {
+    entryZone: {
+      low: zoneLow,
+      high: zoneHigh,
+      reference: entryReference,
+    },
+
+    stopLoss,
+
+    takeProfits: {
+      tp1: targets[0],
+      tp2: targets[1],
+      tp3: targets[2],
+    },
+
+    riskReward: {
+      tp1: rr[0],
+      tp2: rr[1],
+      tp3: rr[2],
+    },
+
+    atr,
+    nearestSupport,
+  };
+}
+
+// ========================
+// 5M ENTRY CONFIRMATION
+// ========================
+
+function analyzeEntryConfirmation(candles5m) {
+  if (!candles5m || candles5m.length < 30) {
+    return {
+      confirmed: false,
+      reason: 'کندل 5M کافی نیست',
+      volumeRatio: 0,
+    };
+  }
+
+  const last = candles5m[candles5m.length - 1];
+  const previous = candles5m[candles5m.length - 2];
+
+  const closes = candles5m.map((c) => c.close);
+  const ema9 = calculateEMA(closes, 9);
+  const ema21 = calculateEMA(closes, 21);
+
+  const currentEma9 = ema9.at(-1);
+  const currentEma21 = ema21.at(-1);
+
+  const strength = getCandleStrength(last);
+  const volumeRatio = getVolumeRatio(candles5m);
+
+  const breaksPreviousHigh =
+    last.close > previous.high;
+
+  const bullishCandle =
+    last.close > last.open &&
+    strength.closeLocation >= 0.65;
+
+  const emaConfirmed =
+    last.close > currentEma9 &&
+    currentEma9 >= currentEma21;
+
+  const volumeConfirmed =
+    volumeRatio >= CONFIG.CONFIRMATION_VOLUME_RATIO;
+
+  const confirmed =
+    bullishCandle &&
+    breaksPreviousHigh &&
+    emaConfirmed &&
+    volumeConfirmed;
+
+  const reasons = [];
+
+  if (bullishCandle) reasons.push('کندل صعودی قدرتمند');
+  if (breaksPreviousHigh) reasons.push('عبور از سقف کندل قبلی');
+  if (emaConfirmed) reasons.push('قرارگیری بالای EMA');
+  if (volumeConfirmed) reasons.push('تأیید حجم');
+
+  return {
+    confirmed,
+    bullishCandle,
+    breaksPreviousHigh,
+    emaConfirmed,
+    volumeConfirmed,
+    volumeRatio,
+    close: last.close,
+    candleTime: last.time,
+    reason: reasons.join(' + ') || 'تأیید کامل نشده',
+  };
+}
+
+// ========================
+// TRADE STATE MANAGEMENT
+// ========================
+
+function getPreviousState(allStates, symbol) {
+  if (!allStates) return null;
+
+  if (allStates[symbol]) return allStates[symbol];
+
+  // Supports a nested state shape if returned by storage.
+  if (allStates.tradeStates?.[symbol]) {
+    return allStates.tradeStates[symbol];
+  }
+
+  return null;
+}
+
+function getEntryExpirationMinutes(tradeType) {
+  return CONFIG.ENTRY_EXPIRY_MINUTES[tradeType] || 240;
+}
+
+function determineInitialStatus(
+  price,
+  levels,
+  confirmation,
+  atr
+) {
+  const { low, high } = levels.entryZone;
+
+  const insideZone =
+    price >= low && price <= high;
+
+  if (insideZone && confirmation.confirmed) {
+    return 'ENTRY_CONFIRMED';
+  }
+
+  const distanceToZone =
+    price > high
+      ? price - high
+      : price < low
+        ? low - price
+        : 0;
+
+  if (
+    distanceToZone <= atr * CONFIG.ENTRY_NEAR_ATR
+  ) {
+    return 'NEAR_ENTRY';
+  }
+
+  if (price < low) {
+    return 'WAITING';
+  }
+
+  return 'WAITING';
+}
+
+function manageTradeState({
+  candidate,
+  levels,
+  confirmation,
+  previousState,
+  currentPrice,
+  live5m,
+}) {
+  const now = Date.now();
+  const tradeType = classifyTradeType(candidate);
+
+  const expiryMinutes =
+    getEntryExpirationMinutes(tradeType);
+
+  const oldState = previousState || null;
+
+  const sameSetup =
+    oldState &&
+    oldState.tradeType === tradeType &&
+    oldState.entryZone &&
+    Math.abs(
+      oldState.entryZone.reference - levels.entryZone.reference
+    ) / Math.max(currentPrice, 0.00000001) < 0.025;
+
+  let status = determineInitialStatus(
+    currentPrice,
+    levels,
+    confirmation,
+    levels.atr
+  );
+
+  let firstSignalAt = now;
+  let entryExpiresAt = now + expiryMinutes * 60 * 1000;
+  let entryPrice = null;
+  let enteredAt = null;
+  let setupId = `${candidate.symbol}-${now}`;
+
+  if (sameSetup) {
+    firstSignalAt = oldState.firstSignalAt || now;
+    entryExpiresAt = oldState.entryExpiresAt || entryExpiresAt;
+    entryPrice = oldState.entryPrice ?? null;
+    enteredAt = oldState.enteredAt ?? null;
+    setupId = oldState.setupId || setupId;
+
+    const oldStatus = oldState.status;
+
+    // Do not revive a completed or invalidated setup automatically.
+    if (
+      oldStatus === 'EXIT_CONFIRMED' ||
+      oldStatus === 'INVALIDATED' ||
+      oldStatus === 'EXPIRED'
+    ) {
+      status = oldStatus;
+    } else if (oldStatus === 'ENTRY_CONFIRMED') {
+      status = 'ENTRY_CONFIRMED';
+    }
+
+    if (
+      oldStatus !== 'ENTRY_CONFIRMED' &&
+      oldStatus !== 'EXIT_CONFIRMED' &&
+      oldStatus !== 'INVALIDATED' &&
+      oldStatus !== 'EXPIRED' &&
+      now > entryExpiresAt
+    ) {
+      status = 'EXPIRED';
+    }
+  }
+
+  const stopLoss = sameSetup
+    ? number(oldState.stopLoss, levels.stopLoss)
+    : levels.stopLoss;
+
+  const takeProfits = sameSetup && oldState.takeProfits
+    ? oldState.takeProfits
+    : levels.takeProfits;
+
+  const entryZone = sameSetup && oldState.entryZone
+    ? oldState.entryZone
+    : levels.entryZone;
+
+  const reachedStop =
+    currentPrice <= stopLoss;
+
+  const reachedTP3 =
+    currentPrice >= number(takeProfits.tp3);
+
+  const reachedTP1 =
+    currentPrice >= number(takeProfits.tp1);
+
+  const distanceToTP1 =
+    Math.abs(currentPrice - number(takeProfits.tp1));
+
+  const nearTP1 =
+    distanceToTP1 <= levels.atr * 0.45;
+
+  const priceBelowEntryStructure =
+    currentPrice < entryZone.low - levels.atr * 0.5;
+
+  // Exit lifecycle for an already confirmed entry.
+  if (
+    status === 'ENTRY_CONFIRMED' ||
+    (sameSetup && oldState.status === 'ENTRY_CONFIRMED')
+  ) {
+    if (reachedStop || priceBelowEntryStructure) {
+      status = 'INVALIDATED';
+    } else if (reachedTP3) {
+      status = 'EXIT_CONFIRMED';
+    } else if (nearTP1 || reachedTP1) {
+      status = 'NEAR_EXIT';
+    } else {
+      status = 'ENTRY_CONFIRMED';
+    }
+  }
+
+  // If the 5m current candle is moving toward the entry zone,
+  // it may create proximity, but never entry confirmation.
+  if (
+    status === 'WAITING' &&
+    live5m &&
+    currentPrice >= entryZone.low &&
+    currentPrice <= entryZone.high &&
+    !confirmation.confirmed
+  ) {
+    status = 'NEAR_ENTRY';
+  }
+
+  if (
+    status === 'NEAR_ENTRY' &&
+    confirmation.confirmed &&
+    currentPrice >= entryZone.low &&
+    currentPrice <= entryZone.high
+  ) {
+    status = 'ENTRY_CONFIRMED';
+    entryPrice = currentPrice;
+    enteredAt = now;
+  }
+
+  if (
+    status === 'ENTRY_CONFIRMED' &&
+    !entryPrice
+  ) {
+    entryPrice = currentPrice;
+    enteredAt = now;
+  }
+
+  if (sameSetup && oldState.entryPrice && !entryPrice) {
+    entryPrice = oldState.entryPrice;
+  }
+
+  if (sameSetup && oldState.enteredAt && !enteredAt) {
+    enteredAt = oldState.enteredAt;
+  }
+
+  let confirmationCondition =
+    'قیمت وارد محدوده شود و کندل بسته‌شده 5M تأیید صعودی بدهد';
+
+  if (confirmation.confirmed) {
+    confirmationCondition =
+      `تأیید 5M: ${confirmation.reason}`;
+  }
+
+  return {
+    symbol: candidate.symbol,
+    setupId,
+    tradeType,
+    status,
+
+    firstSignalAt,
+    lastSignalAt: now,
+    lastSeenAt: now,
+    entryExpiresAt,
+
+    entryZone,
+    entryPrice,
+    enteredAt,
+
+    stopLoss,
+    takeProfits,
+    riskReward: sameSetup && oldState.riskReward
+      ? oldState.riskReward
+      : levels.riskReward,
+
+    currentPrice,
+
+    confirmation: {
+      confirmed: confirmation.confirmed,
+      condition: confirmationCondition,
+      volumeRatio: confirmation.volumeRatio,
+      candleTime: confirmation.candleTime || null,
+    },
+
+    exit: {
+      reachedTP1,
+      reachedTP3,
+      nearTP1,
+      reachedStop,
+    },
+
+    updatedAt: now,
+  };
+}
+
+// ========================
+// APPLY ENTRY ENGINE
+// ========================
+
+function enrichCandidateWithTradeSetup(
+  candidate,
+  candles5m,
+  candles15m,
+  candles1h,
+  previousStates,
+  live5m
+) {
+  const currentPrice = number(
+    candidate.livePrice,
+    candidate.price
+  );
+
+  const levels = calculateTradeLevels(
+    candidate,
+    candles15m,
+    candles1h
+  );
+
+  const confirmation =
+    analyzeEntryConfirmation(candles5m);
+
+  const previousState = getPreviousState(
+    previousStates,
+    candidate.symbol
+  );
+
+  const tradeState = manageTradeState({
+    candidate,
+    levels,
+    confirmation,
+    previousState,
+    currentPrice,
+    live5m,
+  });
+
+  candidate.tradeType = tradeState.tradeType;
+  candidate.entryStatus = tradeState.status;
+
+  candidate.tradeSetup = {
+    entryZone: tradeState.entryZone,
+    confirmation: tradeState.confirmation,
+    stopLoss: tradeState.stopLoss,
+    takeProfits: tradeState.takeProfits,
+    riskReward: tradeState.riskReward,
+    entryPrice: tradeState.entryPrice,
+    atr: levels.atr,
+    nearestSupport: levels.nearestSupport,
+  };
+
+  candidate.tradeState = tradeState;
+
+  return candidate;
 }
 
 // ========================
@@ -1042,6 +1671,7 @@ async function sendReports(report) {
 
 // ========================
 // REPORT
+// Original Telegram layout preserved
 // ========================
 
 function buildReport(
@@ -1051,7 +1681,6 @@ function buildReport(
   rankChanges = null
 ) {
   const selected = candidates.slice(0, CONFIG.TOP_COUNT);
-
   const blocks = [];
 
   blocks.push([
@@ -1135,22 +1764,60 @@ function buildReport(
 }
 
 // ========================
+// STORAGE HELPERS
+// ========================
+
+async function loadPreviousTradeStates() {
+  try {
+    const stored = await getTradeStates();
+
+    if (!stored || typeof stored !== 'object') {
+      return {};
+    }
+
+    return stored.tradeStates || stored;
+  } catch (error) {
+    console.error(
+      '⚠️ Could not load previous trade states:',
+      error.message
+    );
+
+    return {};
+  }
+}
+
+function collectTradeStateUpdates(candidates) {
+  const updates = {};
+
+  for (const candidate of candidates) {
+    if (candidate.tradeState) {
+      updates[candidate.symbol] = candidate.tradeState;
+    }
+  }
+
+  return updates;
+}
+
+// ========================
 // MAIN SCANNER
 // ========================
 
 async function main() {
   const startedAt = Date.now();
 
-  console.log('\n🚀 GATE.IO FOUR TIMEFRAME BULLISH RADAR');
+  console.log('\n🚀 GATE.IO FIVE TIMEFRAME BULLISH RADAR');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('🎯 Target: Strong bullish momentum and potential large moves');
-  console.log('⏱ Timeframes: 15m / 1h / 4h / 1d');
-  console.log('📈 Ranking: Base + Multi-Timeframe Momentum + Persistence\n');
+  console.log('⏱ Timeframes: 5m / 15m / 1h / 4h / 1d');
+  console.log('📈 Ranking: Base + Multi-Timeframe Momentum + Persistence');
+  console.log('🎯 Entry engine: 5m confirmation + structural levels\n');
 
-  const [contracts, tickers] = await Promise.all([
-    getContracts(),
-    getTickers(),
-  ]);
+  const [contracts, tickers, previousTradeStates] =
+    await Promise.all([
+      getContracts(),
+      getTickers(),
+      loadPreviousTradeStates(),
+    ]);
 
   if (!Array.isArray(contracts) || !Array.isArray(tickers)) {
     throw new Error('داده قراردادها یا تیکرهای Gate.io معتبر نیست.');
@@ -1198,11 +1865,18 @@ async function main() {
     CONFIG.CONCURRENCY,
     async (market) => {
       const [
+        candles5m,
         candles15mData,
         candles1h,
         candles4h,
         candles1dData,
       ] = await Promise.all([
+        getCandles(
+          market.symbol,
+          '5m',
+          CONFIG.TIMEFRAMES['5m'].limit
+        ),
+
         getCandles(
           market.symbol,
           '15m',
@@ -1234,11 +1908,12 @@ async function main() {
       const candles1d = candles1dData.closed;
 
       if (
+        candles5m.length < 30 ||
         candles15m.length < 30 ||
         candles1h.length < 30 ||
         candles4h.length < 30
       ) {
-        throw new Error('کندل کافی برای تایم‌فریم اصلی دریافت نشد.');
+        throw new Error('کندل کافی برای تایم‌فریم‌ها دریافت نشد.');
       }
 
       success++;
@@ -1259,14 +1934,20 @@ async function main() {
 
       if (!candidate) return null;
 
-      return {
-        ...candidate,
+      candidate.livePrice = market.lastPrice;
+      candidate.live15m = candles15mData.current;
+      candidate.live1d = candles1dData.current;
 
-        livePrice: market.lastPrice,
+      enrichCandidateWithTradeSetup(
+        candidate,
+        candles5m,
+        candles15m,
+        candles1h,
+        previousTradeStates,
+        null
+      );
 
-        live15m: candles15mData.current,
-        live1d: candles1dData.current,
-      };
+      return candidate;
     }
   );
 
@@ -1288,8 +1969,16 @@ async function main() {
   let rankChanges = null;
   let rankedCandidates = candidates;
 
+  const tradeStateUpdates =
+    collectTradeStateUpdates(candidates);
+
   try {
-    const storageResult = await saveMarketSnapshot(candidates);
+    const storageResult = await saveMarketSnapshot(
+      candidates,
+      {
+        tradeStates: tradeStateUpdates,
+      }
+    );
 
     rankChanges = storageResult.rankChanges;
     rankedCandidates = storageResult.rankedCandidates;
@@ -1298,6 +1987,9 @@ async function main() {
     console.log(`Snapshots: ${storageResult.snapshotsSaved}`);
     console.log(`History records: ${storageResult.historyCount}`);
     console.log(`Coin summaries: ${storageResult.summaryCount}`);
+    console.log(
+      `Trade states updated: ${Object.keys(tradeStateUpdates).length}`
+    );
     console.log('📊 Four-timeframe ranking calculated successfully.');
   } catch (storageError) {
     console.error(
@@ -1333,8 +2025,21 @@ async function main() {
         `Rank: ${coin.rankScore ?? '-'} | ` +
         `Persistence: ${coin.persistenceScore ?? '-'} | ` +
         `Daily: ${coin.dailyScore ?? '-'} | ` +
+        `Type: ${coin.tradeType ?? '-'} | ` +
+        `Entry: ${coin.entryStatus ?? '-'} | ` +
         `${coin.stage}`
       );
+
+      if (coin.tradeSetup) {
+        console.log(
+          `   Entry: ${formatPrice(coin.tradeSetup.entryZone.low)} - ` +
+          `${formatPrice(coin.tradeSetup.entryZone.high)} | ` +
+          `SL: ${formatPrice(coin.tradeSetup.stopLoss)} | ` +
+          `TP1: ${formatPrice(coin.tradeSetup.takeProfits.tp1)} | ` +
+          `TP2: ${formatPrice(coin.tradeSetup.takeProfits.tp2)} | ` +
+          `TP3: ${formatPrice(coin.tradeSetup.takeProfits.tp3)}`
+        );
+      }
     });
 
   console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
