@@ -7,6 +7,9 @@
  *
  * بدون منطق انباشت، جذب عرضه یا تحلیل چرخه تاریخی.
  *
+ * رتبه‌بندی جدید:
+ * قدرت امتیاز پایه + حرکت 15m/1h/4h + استمرار قیمت و حجم
+ *
  * File: src/scanner/marketScanner.js
  * Node.js 20+
  */
@@ -139,7 +142,17 @@ async function getTickers() {
   return fetchJSON(`${CONFIG.API_BASE}/futures/usdt/tickers`);
 }
 
-async function getCandles(contract, interval, limit) {
+/**
+ * در حالت عادی فقط کندل‌های بسته‌شده را برمی‌گرداند.
+ * اگر includeCurrent=true باشد، علاوه بر کندل‌های بسته،
+ * کندل در حال تشکیل همان تایم‌فریم را نیز برمی‌گرداند.
+ */
+async function getCandles(
+  contract,
+  interval,
+  limit,
+  includeCurrent = false
+) {
   const params = new URLSearchParams({
     contract,
     interval,
@@ -173,12 +186,34 @@ async function getCandles(contract, interval, limit) {
     )
     .sort((a, b) => a.time - b.time);
 
-  // فقط کندل‌های بسته‌شده
   const intervalSeconds = CONFIG.TIMEFRAMES[interval].seconds;
-  const currentBucket =
-    Math.floor(Date.now() / 1000 / intervalSeconds) * intervalSeconds;
 
-  return candles.filter((c) => c.time < currentBucket);
+  const currentBucket =
+    Math.floor(Date.now() / 1000 / intervalSeconds) *
+    intervalSeconds;
+
+  const closedCandles = candles.filter(
+    (c) => c.time < currentBucket
+  );
+
+  if (!includeCurrent) {
+    return closedCandles;
+  }
+
+  const currentCandle =
+    candles.find((c) => c.time === currentBucket) || null;
+
+  return {
+    closed: closedCandles,
+
+    current: currentCandle
+      ? {
+          bucketTime: currentBucket,
+          volume: currentCandle.volume,
+          turnover: currentCandle.turnover,
+        }
+      : null,
+  };
 }
 
 // ========================
@@ -689,13 +724,11 @@ function splitTelegramMessage(text, maxLength) {
       current = '';
     }
 
-    // بلوک‌های عادی (از جمله اطلاعات هر ارز) یکجا حفظ می‌شوند.
     if (block.length <= maxLength) {
       current = block;
       continue;
     }
 
-    // فقط برای بلوک‌های غیرعادی و طولانی
     const lines = block.split('\n');
 
     for (const line of lines) {
@@ -716,8 +749,6 @@ function splitTelegramMessage(text, maxLength) {
 }
 
 async function sendReports(report) {
-  // برای جلوگیری از عبور از محدودیت تلگرام،
-  // فضای لازم برای شماره گزارش رزرو می‌شود.
   const messages = splitTelegramMessage(
     report,
     CONFIG.TELEGRAM_MAX_LENGTH - 50
@@ -750,10 +781,6 @@ function buildReport(candidates, stats, duration, rankChanges = null) {
 
   const blocks = [];
 
-  // ========================
-  // HEADER
-  // ========================
-
   blocks.push([
     '🚀 GATE.IO | EARLY BULLISH RADAR',
     '━━━━━━━━━━━━━━━━━━',
@@ -767,11 +794,6 @@ function buildReport(candidates, stats, duration, rankChanges = null) {
     `⏱ زمان اسکن: ${(duration / 1000).toFixed(1)} ثانیه`,
     '━━━━━━━━━━━━━━━━━━',
   ].join('\n'));
-
-  // ========================
-  // COIN BLOCKS
-  // هر ارز دقیقاً سه خط
-  // ========================
 
   if (!selected.length) {
     blocks.push('❌ در این اسکن ارزی شرایط لازم را نداشت.');
@@ -809,21 +831,22 @@ function buildReport(candidates, stats, duration, rankChanges = null) {
     const volume1hText =
       `${volume1h.toFixed(2)}x${volume1h >= 1.5 ? '⚡' : ''}`;
 
+    // قیمت زنده برای نمایش؛ در صورت نبود، قیمت کندل بسته‌شده
+    const displayPrice =
+      number(coin.livePrice) > 0
+        ? number(coin.livePrice)
+        : coin.price;
+
     blocks.push([
       `${currentRank}. ${coin.symbol} ${rankText} | امتیاز ${coin.score}`,
-      `💰 ${formatPrice(coin.price)} | 15M ${formatReturn(coin.returns['15m'])} | 1H ${formatReturn(coin.returns['1h'])} | 4H ${formatReturn(coin.returns['4h'])}`,
+      `💰 ${formatPrice(displayPrice)} | 15M ${formatReturn(coin.returns['15m'])} | 1H ${formatReturn(coin.returns['1h'])} | 4H ${formatReturn(coin.returns['4h'])}`,
       `📊 حجم 15M ${volume15Text} | 1H ${volume1hText}`,
     ].join('\n'));
 
-    // جداکننده واضح بین ارزها
     if (index < selected.length - 1) {
       blocks.push('━━━━━━━━━━━━━━━━━━');
     }
   });
-
-  // ========================
-  // FOOTER
-  // ========================
 
   blocks.push([
     '━━━━━━━━━━━━━━━━━━',
@@ -843,7 +866,8 @@ async function main() {
   console.log('\n🚀 GATE.IO EARLY BULLISH TREND SCANNER');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('🎯 Target: Beginning of bullish trend');
-  console.log('⏱ Timeframes: 15m / 1h / 4h\n');
+  console.log('⏱ Timeframes: 15m / 1h / 4h');
+  console.log('📈 Ranking: Momentum + Price/Volume Persistence\n');
 
   const [contracts, tickers] = await Promise.all([
     getContracts(),
@@ -895,12 +919,32 @@ async function main() {
     liquidMarkets,
     CONFIG.CONCURRENCY,
     async (market) => {
-      const [candles15m, candles1h, candles4h] =
-        await Promise.all([
-          getCandles(market.symbol, '15m', CONFIG.TIMEFRAMES['15m'].limit),
-          getCandles(market.symbol, '1h', CONFIG.TIMEFRAMES['1h'].limit),
-          getCandles(market.symbol, '4h', CONFIG.TIMEFRAMES['4h'].limit),
-        ]);
+      const [
+        candles15mData,
+        candles1h,
+        candles4h,
+      ] = await Promise.all([
+        getCandles(
+          market.symbol,
+          '15m',
+          CONFIG.TIMEFRAMES['15m'].limit,
+          true
+        ),
+
+        getCandles(
+          market.symbol,
+          '1h',
+          CONFIG.TIMEFRAMES['1h'].limit
+        ),
+
+        getCandles(
+          market.symbol,
+          '4h',
+          CONFIG.TIMEFRAMES['4h'].limit
+        ),
+      ]);
+
+      const candles15m = candles15mData.closed;
 
       if (
         candles15m.length < 30 ||
@@ -912,14 +956,27 @@ async function main() {
 
       success++;
 
-      return analyzeCoin({
+      const candidate = analyzeCoin({
         symbol: market.symbol,
+
         candles: {
           '15m': candles15m,
           '1h': candles1h,
           '4h': candles4h,
         },
       });
+
+      if (!candidate) return null;
+
+      return {
+        ...candidate,
+
+        // قیمت لحظه‌ای از تیکر
+        livePrice: market.lastPrice,
+
+        // اطلاعات کندل 15 دقیقه‌ای در حال تشکیل
+        live15m: candles15mData.current,
+      };
     }
   );
 
@@ -934,29 +991,38 @@ async function main() {
     if (result) candidates.push(result);
   }
 
-  candidates.sort((a, b) => {
-    if (b.score !== a.score) return b.score - a.score;
-    return b.volume['1h'] - a.volume['1h'];
-  });
-
   // ========================
   // MARKET DATA STORAGE
   // ========================
 
   let rankChanges = null;
+  let rankedCandidates = candidates;
 
   try {
     const storageResult = await saveMarketSnapshot(candidates);
 
     rankChanges = storageResult.rankChanges;
 
-    console.log('💾 MARKET DATA SAVED');
+    // ترتیب نهایی از امتیاز استمرار و قدرت حرکت می‌آید.
+    rankedCandidates = storageResult.rankedCandidates;
+
+    console.log('\n💾 MARKET DATA SAVED');
     console.log(`Snapshots: ${storageResult.snapshotsSaved}`);
     console.log(`History records: ${storageResult.historyCount}`);
     console.log(`Coin summaries: ${storageResult.summaryCount}`);
-    console.log('📊 Rank changes calculated successfully.');
+    console.log('📊 Persistence ranking calculated successfully.');
   } catch (storageError) {
-    console.error('⚠️ MARKET STORAGE FAILED:', storageError);
+    console.error(
+      '⚠️ MARKET STORAGE FAILED:',
+      storageError
+    );
+
+    // در صورت خرابی Storage، اسکنر همچنان گزارش می‌فرستد.
+    // ترتیب جایگزین همان ترتیب امتیاز پایه است.
+    rankedCandidates = [...candidates].sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return b.volume['1h'] - a.volume['1h'];
+    });
   }
 
   const duration = Date.now() - startedAt;
@@ -972,24 +1038,27 @@ async function main() {
   console.log('🏆 TOP EARLY BULLISH CANDIDATES');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
-  candidates.slice(0, CONFIG.TOP_COUNT).forEach((coin, index) => {
-    console.log(
-      `${index + 1}. ${coin.symbol} | ` +
-      `Score: ${coin.score} | ` +
-      `${coin.stage} | ` +
-      `1H Volume: ${coin.volume['1h'].toFixed(2)}x`
-    );
-  });
+  rankedCandidates
+    .slice(0, CONFIG.TOP_COUNT)
+    .forEach((coin, index) => {
+      console.log(
+        `${index + 1}. ${coin.symbol} | ` +
+        `Base: ${coin.score} | ` +
+        `Rank: ${coin.rankScore ?? '-'} | ` +
+        `Persistence: ${coin.persistenceScore ?? '-'} | ` +
+        `${coin.stage}`
+      );
+    });
 
   console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log(`Candidates: ${candidates.length}`);
+  console.log(`Candidates: ${rankedCandidates.length}`);
   console.log(`Successful analyses: ${success}`);
   console.log(`Errors: ${errors}`);
   console.log(`Duration: ${(duration / 1000).toFixed(1)}s`);
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
   const report = buildReport(
-    candidates,
+    rankedCandidates,
     stats,
     duration,
     rankChanges
