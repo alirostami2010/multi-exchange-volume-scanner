@@ -731,7 +731,7 @@ async function sendReports(report) {
 // REPORT
 // ========================
 
-function buildReport(candidates, stats, duration) {
+function buildReport(candidates, stats, duration, rankChanges = null) {
   const lines = [
     '🚀 GATE.IO | EARLY BULLISH TREND RADAR',
     '━━━━━━━━━━━━━━━━━━',
@@ -745,6 +745,10 @@ function buildReport(candidates, stats, duration) {
     `🏆 ارسال به تلگرام: ${Math.min(candidates.length, CONFIG.TOP_COUNT)}`,
     `⏱ زمان اسکن: ${(duration / 1000).toFixed(1)} ثانیه`,
     '━━━━━━━━━━━━━━━━━━',
+    '',
+    '📊 راهنمای تغییر رتبه:',
+    '🟢 ↑ صعود | 🔴 ↓ نزول | ➖ بدون تغییر | 🆕 تازه‌وارد',
+    '━━━━━━━━━━━━━━━━━━',
   ];
 
   const selected = candidates.slice(0, CONFIG.TOP_COUNT);
@@ -755,10 +759,29 @@ function buildReport(candidates, stats, duration) {
   }
 
   selected.forEach((coin, index) => {
+    const currentRank = index + 1;
+    const movement = rankChanges?.[coin.symbol];
+
+    let rankText = 'رتبه قبلی نامشخص';
+
+    if (movement) {
+      if (movement.status === 'NEW') {
+        rankText = '🆕 تازه‌وارد';
+      } else if (movement.status === 'UP') {
+        rankText = `🟢 ↑ ${movement.change} رتبه صعود | قبلی: ${movement.previousRank}`;
+      } else if (movement.status === 'DOWN') {
+        rankText = `🔴 ↓ ${Math.abs(movement.change)} رتبه نزول | قبلی: ${movement.previousRank}`;
+      } else {
+        rankText = `➖ بدون تغییر | قبلی: ${movement.previousRank}`;
+      }
+    }
+
     lines.push('');
     lines.push(
-      `${index + 1}. ${coin.symbol} | امتیاز: ${coin.score}/100`
+      `${currentRank}. ${coin.symbol} | امتیاز: ${coin.score}/100`
     );
+
+    lines.push(`🏅 تغییر رتبه: ${rankText}`);
     lines.push(`💰 قیمت: ${formatPrice(coin.price)}`);
     lines.push(`🧭 وضعیت: ${coin.stage}`);
 
@@ -787,11 +810,12 @@ function buildReport(candidates, stats, duration) {
   });
 
   lines.push('');
-  lines.push('ℹ️ امتیاز، رتبه‌بندی فنی است و احتمال قطعی رشد نیست.');
+  lines.push('ℹ️ امتیاز و رتبه‌بندی فنی هستند و احتمال قطعی رشد نیستند.');
   lines.push('ℹ️ این گزارش سیگنال ورود قطعی محسوب نمی‌شود.');
 
   return lines.join('\n');
 }
+
 
 // ========================
 // MAIN SCANNER
