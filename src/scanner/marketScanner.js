@@ -899,6 +899,22 @@ async function main() {
     return b.volume['1h'] - a.volume['1h'];
   });
 
+  // ========================
+  // MARKET DATA STORAGE
+  // ========================
+
+  try {
+    const storageResult = await saveMarketSnapshot(candidates);
+
+    console.log('💾 MARKET DATA SAVED');
+    console.log(`Snapshots: ${storageResult.snapshotsSaved}`);
+    console.log(`History records: ${storageResult.historyCount}`);
+    console.log(`Coin summaries: ${storageResult.summaryCount}`);
+  } catch (storageError) {
+    console.error('⚠️ MARKET STORAGE FAILED:', storageError);
+  }
+  
+  
   const duration = Date.now() - startedAt;
 
   const stats = {
