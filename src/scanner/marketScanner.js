@@ -1561,12 +1561,14 @@ const GROUPS = [
 // ========================
 
     
+
 function buildReport(
   candidates,
   stats,
   duration,
   rankChanges = null
 ) {
+  // حفظ گروه‌بندی و ترتیب رتبه‌بندی فعلی
   const selected = GROUPS.flatMap((group) =>
     candidates
       .filter(
@@ -1576,15 +1578,12 @@ function buildReport(
   );
 
   const blocks = [[
-    '🚀 GATE.IO | FOUR TIMEFRAME BULLISH RADAR',
+    '🚀 GATE.IO | BULLISH RADAR',
     '━━━━━━━━━━━━━━━━━━',
-    '🎯 هدف: شکار زودهنگام روندهای صعودی و تشخیص نقطه ورود',
     '🟢↑ بهبود رتبه | 🔴↓ افت رتبه | ➖ ثابت | 🆕 جدید',
-    '✅ تأیید ورود 5M',
-    `📌 کاندید: ${selected.length}/${candidates.length}`,
-    `📊 قرارداد: ${stats.active} | نقدشونده: ${stats.liquid}`,
-    `🔍 بررسی موفق: ${stats.success} | خطا: ${stats.errors}`,
-    `⏱ زمان اسکن: ${(duration / 1000).toFixed(1)} ثانیه`,
+    '✅ تأیید واقعی ورود 5M | 🟡 نزدیک ورود | ⏳ انتظار تأیید',
+    `📌 کاندید: ${selected.length}/${candidates.length} | قرارداد: ${stats.active} | نقدشونده: ${stats.liquid}`,
+    `🔍 موفق: ${stats.success} | خطا: ${stats.errors} | ⏱ ${(duration / 1000).toFixed(1)} ثانیه`,
     '━━━━━━━━━━━━━━━━━━',
   ].join('\n')];
 
@@ -1602,13 +1601,15 @@ function buildReport(
     );
 
     blocks.push(
-      `${group.title}\n━━━━━━━━━━━━━━━━━━\nتعداد: ${coins.length}`
+      `${group.title}\nتعداد: ${coins.length}\n━━━━━━━━━━━━━━━━━━`
     );
 
     if (!coins.length) {
       blocks.push('— موردی در این گروه نیست.');
       continue;
     }
+
+    const coinBlocks = [];
 
     for (const coin of coins) {
       printed++;
@@ -1629,90 +1630,59 @@ function buildReport(
 
       const setup = coin.tradeSetup;
 
-      // فقط تأیید واقعی کندل 5 دقیقه‌ای
+      // فقط تأیید واقعی کندل بسته‌شده 5 دقیقه‌ای
       const entryConfirmed =
         setup?.confirmationMet === true;
 
-      const entryMark = entryConfirmed
-        ? '✅'
-        : '';
+      let entryMark = '⏳';
+      let statusText = 'در انتظار تأیید 5M';
 
-      const statusText =
-        coin.tradeStatusLabel ||
-        coin.tradeStatus ||
-        'نامشخص';
-
-      const ret = (value) =>
-        `${value >= 0 ? '▲' : '▼'}${Math.abs(number(value)).toFixed(2)}%`;
-
-      const lines = [
-        `${printed}. ${coin.symbol} ${entryMark} ${rankText} | پایه ${coin.score} | رتبه ${coin.rankScore ?? '-'}`,
-
-        `🏷 وضعیت: ${statusText} | مرحله: ${coin.stage}`,
-
-        `💰 قیمت: ${formatPrice(number(coin.livePrice, coin.price))}`,
-
-        `📈 بازده: 15M ${ret(coin.returns['15m'])} | 1H ${ret(coin.returns['1h'])} | 4H ${ret(coin.returns['4h'])} | 1D ${ret(coin.returns['1d'])}`,
-
-        `📊 حجم: 15M ${number(coin.volume['15m']).toFixed(2)}x | 1H ${number(coin.volume['1h']).toFixed(2)}x | 1D ${number(coin.volume['1d']).toFixed(2)}x | روزانه ${coin.daily?.score ?? 50}/100`,
-      ];
-
-      if (setup) {
-        lines.push(
-          `🎯 محدوده ورود: ${formatPrice(setup.entryLow)} تا ${formatPrice(setup.entryHigh)}`
-        );
-
-        lines.push(
-          `🧭 تأیید: ${entryConfirmed ? '✅ تأیید 5m دریافت شد' : '⏳ هنوز تأیید نشده'}`
-        );
-
-        lines.push(
-          `🛑 حد ضرر ساختاری: ${formatPrice(setup.stopLoss)}`
-        );
-
-        lines.push(
-          `🏁 اهداف: TP1 ${formatPrice(setup.tp1)} | TP2 ${formatPrice(setup.tp2)} | TP3 ${formatPrice(setup.tp3)}`
-        );
-
-        lines.push(
-          `⚖️ نسبت ریسک به بازده تا TP1: ${setup.riskReward}R`
-        );
+      if (entryConfirmed) {
+        entryMark = '✅';
+        statusText = '';
+      } else if (coin.tradeStatus === 'NEAR_ENTRY') {
+        entryMark = '🟡';
+        statusText = 'نزدیک ورود';
+      } else if (
+        [
+          'INVALIDATED',
+          'EXPIRED',
+          'EXIT_CONFIRMED',
+          'NEAR_EXIT',
+        ].includes(coin.tradeStatus)
+      ) {
+        entryMark = '⚠️';
+        statusText =
+          coin.tradeStatusLabel || 'وضعیت غیرورودی';
       }
 
-      if (coin.tradeState?.enteredAt) {
-        lines.push(
-          `✅ زمان ورود: ${coin.tradeState.enteredAt} | قیمت ورود: ${formatPrice(coin.tradeState.entryPrice)}`
-        );
+      const firstLine =
+        `${printed}. ${coin.symbol} ${rankText} ${entryMark} | پایه ${coin.score} | رتبه ${coin.rankScore ?? '-'}`;
+
+      const lines = [firstLine];
+
+      // ورود تأییدشده فقط تیک دارد و متن اضافه نمی‌گیرد
+      if (statusText) {
+        lines.push(`   ${statusText}`);
       }
 
-      if (coin.tradeState?.exitReason) {
-        lines.push(
-          `⚠️ ${coin.tradeState.exitReason}`
-        );
-      }
-
-      if (coin.evidence?.length) {
-        lines.push(
-          `✔️ شواهد: ${coin.evidence.slice(0, 4).join('، ')}`
-        );
-      }
-
-      if (coin.warnings?.length) {
-        lines.push(
-          `⚠️ هشدار: ${coin.warnings.join('، ')}`
-        );
-      }
-
-      blocks.push(lines.join('\n'));
+      coinBlocks.push(lines.join('\n'));
     }
+
+    // جداکننده بین ارزها؛ بدون جابه‌جایی یا حذف از گروه
+    blocks.push(
+      coinBlocks.join('\n──────────────────')
+    );
   }
 
   blocks.push(
-    '━━━━━━━━━━━━━━━━━━\nℹ️ این رتبه‌بندی و سطوح، تضمین سود نیستند. ورود فقط پس از تأیید کندل بسته‌شده ۵ دقیقه‌ای معتبر است.'
+    '━━━━━━━━━━━━━━━━━━\nℹ️ ورود فقط با تأیید واقعی کندل بسته‌شده ۵ دقیقه‌ای معتبر است. این سیگنال‌ها تضمین سود نیستند.'
   );
 
   return blocks.join('\n\n');
 }
+
+      
 
       
 
