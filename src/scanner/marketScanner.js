@@ -1671,7 +1671,7 @@ function buildReport(
 
     // جداکننده بین ارزها؛ بدون جابه‌جایی یا حذف از گروه
     blocks.push(
-      coinBlocks.join('\n────────────○○○○──')
+      coinBlocks.join('\n--------------------\n')
     );
   }
 
