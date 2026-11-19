@@ -3,6 +3,7 @@
  * GATE.IO USDT PERPETUAL — FOUR TIMEFRAME BULLISH RADAR
  * Timeframes: 5m confirmation + 15m / 1h / 4h / 1d analysis
  * Base scoring and four-timeframe ranking weights are preserved.
+ * HTML dashboard + Telegram document delivery added.
  * File: src/scanner/marketScanner.js | Node.js 20+
  */
 
@@ -29,11 +30,8 @@ const CONFIG = {
   },
 
   TOP_COUNT: 20,
-
   MIN_QUOTE_VOLUME_24H: 100000,
-
   CONCURRENCY: 8,
-
   REQUEST_TIMEOUT: 15000,
   RETRIES: 3,
 
@@ -121,9 +119,7 @@ async function fetchJSON(url) {
         headers: {
           Accept: 'application/json',
         },
-        signal: AbortSignal.timeout(
-          CONFIG.REQUEST_TIMEOUT
-        ),
+        signal: AbortSignal.timeout(CONFIG.REQUEST_TIMEOUT),
       });
 
       if (!response.ok) {
@@ -753,8 +749,6 @@ function emptyDailyAnalysis(price = 0) {
 // EARLY BULLISH SCORING
 // ========================
 
-// Existing base-score logic and admission thresholds are retained.
-
 function analyzeCoin(data) {
   const {
     symbol,
@@ -1376,48 +1370,10 @@ function updateTradeState(
 }
 
 // ========================
-// ATTACH TRADE LIFECYCLE
-// ========================
-
-function attachTradeLifecycle(
-  coin,
-  candles15m,
-  candles5m,
-  previousStates,
-  nowMs
-) {
-  coin.opportunityType = classifyOpportunity(coin);
-
-  coin._candles5m = candles5m;
-
-  const setup = buildTradeSetup(
-    coin,
-    candles15m
-  );
-
-  const tradeState = updateTradeState(
-    coin,
-    setup,
-    previousStates[coin.symbol],
-    nowMs
-  );
-
-  coin.tradeStatus = tradeState.status;
-  coin.tradeStatusLabel = tradeState.statusLabel;
-  coin.tradeSetup = tradeState.setup;
-  coin.tradeState = tradeState;
-
-  delete coin._candles5m;
-  delete coin._analysis;
-
-  return coin;
-}
-
-// ========================
 // TELEGRAM
 // ========================
 
-async function sendTelegram(message) {
+function getTelegramCredentials() {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = process.env.TELEGRAM_CHAT_ID;
 
@@ -1426,6 +1382,12 @@ async function sendTelegram(message) {
       'TELEGRAM_BOT_TOKEN یا TELEGRAM_CHAT_ID تنظیم نشده است.'
     );
   }
+
+  return { token, chatId };
+}
+
+async function sendTelegram(message) {
+  const { token, chatId } = getTelegramCredentials();
 
   const response = await fetch(
     `https://api.telegram.org/bot${token}/sendMessage`,
@@ -1459,6 +1421,52 @@ async function sendTelegram(message) {
 
     throw error;
   }
+}
+
+// ارسال فایل HTML به تلگرام
+async function sendTelegramDocument(
+  html,
+  filename = 'gateio-bullish-radar.html'
+) {
+  const { token, chatId } = getTelegramCredentials();
+
+  const form = new FormData();
+
+  form.append('chat_id', chatId);
+
+  form.append(
+    'document',
+    new Blob(
+      [html],
+      { type: 'text/html; charset=utf-8' }
+    ),
+    filename
+  );
+
+  form.append(
+    'caption',
+    '📊 داشبورد کامل تحلیل Gate.io Futures'
+  );
+
+  const response = await fetch(
+    `https://api.telegram.org/bot${token}/sendDocument`,
+    {
+      method: 'POST',
+      body: form,
+      signal: AbortSignal.timeout(30000),
+    }
+  );
+
+  const result = await response.json();
+
+  if (!response.ok || !result.ok) {
+    throw new Error(
+      result.description ||
+        `Telegram document HTTP ${response.status}`
+    );
+  }
+
+  return result;
 }
 
 function splitTelegramMessage(text, maxLength) {
@@ -1557,10 +1565,8 @@ const GROUPS = [
 ];
 
 // ========================
-// BUILD REPORT
+// BUILD TELEGRAM REPORT
 // ========================
-
-    
 
 function buildReport(
   candidates,
@@ -1568,7 +1574,6 @@ function buildReport(
   duration,
   rankChanges = null
 ) {
-  // حفظ گروه‌بندی و ترتیب رتبه‌بندی فعلی
   const selected = GROUPS.flatMap((group) =>
     candidates
       .filter(
@@ -1630,7 +1635,6 @@ function buildReport(
 
       const setup = coin.tradeSetup;
 
-      // فقط تأیید واقعی کندل بسته‌شده 5 دقیقه‌ای
       const entryConfirmed =
         setup?.confirmationMet === true;
 
@@ -1661,7 +1665,6 @@ function buildReport(
 
       const lines = [firstLine];
 
-      // ورود تأییدشده فقط تیک دارد و متن اضافه نمی‌گیرد
       if (statusText) {
         lines.push(`   ${statusText}`);
       }
@@ -1669,7 +1672,6 @@ function buildReport(
       coinBlocks.push(lines.join('\n'));
     }
 
-    // جداکننده بین ارزها؛ بدون جابه‌جایی یا حذف از گروه
     blocks.push(
       coinBlocks.join('\n--------------------\n')
     );
@@ -1682,9 +1684,974 @@ function buildReport(
   return blocks.join('\n\n');
 }
 
-      
+// ========================
+// HTML HELPERS
+// ========================
 
-      
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
+function htmlPrice(value) {
+  const n = Number(value);
+
+  if (!Number.isFinite(n) || n <= 0) return '-';
+
+  return escapeHtml(formatPrice(n));
+}
+
+function htmlPercent(value) {
+  const n = Number(value);
+
+  if (!Number.isFinite(n)) return '-';
+
+  const sign = n > 0 ? '+' : '';
+
+  return `${sign}${n.toFixed(2)}%`;
+}
+
+function getHtmlStatus(coin) {
+  const status = coin.tradeStatus;
+
+  const statuses = {
+    ENTRY_CONFIRMED: {
+      label: 'ورود تأیید شده',
+      className: 'confirmed',
+      icon: '✅',
+    },
+
+    NEAR_ENTRY: {
+      label: 'نزدیک ورود',
+      className: 'near',
+      icon: '🟡',
+    },
+
+    WAITING: {
+      label: 'در انتظار تأیید',
+      className: 'waiting',
+      icon: '⏳',
+    },
+
+    NEAR_EXIT: {
+      label: 'نزدیک خروج',
+      className: 'warning',
+      icon: '⚠️',
+    },
+
+    EXIT_CONFIRMED: {
+      label: 'خروج قطعی',
+      className: 'danger',
+      icon: '🔴',
+    },
+
+    INVALIDATED: {
+      label: 'ابطال موقعیت',
+      className: 'danger',
+      icon: '❌',
+    },
+
+    EXPIRED: {
+      label: 'منقضی شده',
+      className: 'muted',
+      icon: '⌛',
+    },
+  };
+
+  return statuses[status] || statuses.WAITING;
+}
+
+function getRankMovement(coin, rankChanges) {
+  const movement = rankChanges?.[coin.symbol];
+
+  if (!movement) {
+    return {
+      text: 'بدون تغییر',
+      className: 'neutral',
+    };
+  }
+
+  if (movement.status === 'NEW') {
+    return {
+      text: 'جدید',
+      className: 'new',
+    };
+  }
+
+  if (movement.status === 'UP') {
+    return {
+      text: `▲ ${Math.abs(number(movement.change))}`,
+      className: 'up',
+    };
+  }
+
+  if (movement.status === 'DOWN') {
+    return {
+      text: `▼ ${Math.abs(number(movement.change))}`,
+      className: 'down',
+    };
+  }
+
+  return {
+    text: 'بدون تغییر',
+    className: 'neutral',
+  };
+}
+
+// ========================
+// BUILD HTML DASHBOARD
+// ========================
+
+function buildHtmlReport(
+  candidates,
+  stats,
+  duration,
+  rankChanges = null
+) {
+  const selected = GROUPS.flatMap((group) =>
+    candidates
+      .filter(
+        (coin) => coin.opportunityType === group.key
+      )
+      .slice(0, CONFIG.TOP_COUNT)
+  );
+
+  const statusCounts = {
+    ENTRY_CONFIRMED: 0,
+    NEAR_ENTRY: 0,
+    WAITING: 0,
+    OTHER: 0,
+  };
+
+  for (const coin of selected) {
+    if (coin.tradeStatus === 'ENTRY_CONFIRMED') {
+      statusCounts.ENTRY_CONFIRMED++;
+    } else if (coin.tradeStatus === 'NEAR_ENTRY') {
+      statusCounts.NEAR_ENTRY++;
+    } else if (coin.tradeStatus === 'WAITING') {
+      statusCounts.WAITING++;
+    } else {
+      statusCounts.OTHER++;
+    }
+  }
+
+  const groupCards = GROUPS.map((group) => {
+    const coins = selected.filter(
+      (coin) => coin.opportunityType === group.key
+    );
+
+    const cards = coins.map((coin) => {
+      const setup = coin.tradeSetup || {};
+      const status = getHtmlStatus(coin);
+      const movement = getRankMovement(
+        coin,
+        rankChanges
+      );
+
+      const rank = number(coin.rankScore);
+      const baseScore = number(coin.score);
+      const price = number(
+        coin.livePrice,
+        coin.price
+      );
+
+      const return15m = number(coin.returns?.['15m']);
+      const return1h = number(coin.returns?.['1h']);
+      const return4h = number(coin.returns?.['4h']);
+      const return1d = number(coin.returns?.['1d']);
+
+      const volume15m = number(coin.volume?.['15m']);
+      const volume1h = number(coin.volume?.['1h']);
+
+      const evidence = Array.isArray(coin.evidence)
+        ? coin.evidence
+        : [];
+
+      const warnings = Array.isArray(coin.warnings)
+        ? coin.warnings
+        : [];
+
+      const evidenceHtml = evidence.length
+        ? evidence.map((item) =>
+            `<li>${escapeHtml(item)}</li>`
+          ).join('')
+        : '<li>موردی ثبت نشده است</li>';
+
+      const warningsHtml = warnings.length
+        ? warnings.map((item) =>
+            `<li>${escapeHtml(item)}</li>`
+          ).join('')
+        : '<li>هشدار خاصی ثبت نشده است</li>';
+
+      const confirmation = setup.confirmationMet
+        ? '<span class="confirmation yes">تأیید واقعی 5M</span>'
+        : '<span class="confirmation no">تأیید 5M انجام نشده</span>';
+
+      return `
+        <article
+          class="coin-card"
+          data-symbol="${escapeHtml(coin.symbol).toLowerCase()}"
+          data-group="${escapeHtml(coin.opportunityType)}"
+          data-status="${escapeHtml(coin.tradeStatus || 'WAITING')}"
+        >
+          <div class="coin-top">
+            <div class="coin-name">
+              <h3>${escapeHtml(coin.symbol)}</h3>
+              <span>${escapeHtml(coin.stage || '')}</span>
+            </div>
+
+            <div class="coin-tags">
+              <span class="status ${status.className}">
+                ${status.icon} ${status.label}
+              </span>
+              <span class="rank-change ${movement.className}">
+                ${movement.text}
+              </span>
+            </div>
+          </div>
+
+          <div class="score-row">
+            <div class="score-box">
+              <span>امتیاز پایه</span>
+              <strong>${baseScore}</strong>
+            </div>
+
+            <div class="score-box">
+              <span>رتبه نهایی</span>
+              <strong>${rank || '-'}</strong>
+            </div>
+
+            <div class="score-box">
+              <span>قیمت لحظه‌ای</span>
+              <strong>${htmlPrice(price)}</strong>
+            </div>
+          </div>
+
+          <div class="section-title">نقشه معامله</div>
+
+          <div class="trade-grid">
+            <div>
+              <span>محدوده ورود</span>
+              <strong>
+                ${htmlPrice(setup.entryLow)}
+                تا
+                ${htmlPrice(setup.entryHigh)}
+              </strong>
+            </div>
+
+            <div>
+              <span>حد ضرر</span>
+              <strong class="negative">
+                ${htmlPrice(setup.stopLoss)}
+              </strong>
+            </div>
+
+            <div>
+              <span>هدف اول</span>
+              <strong class="positive">
+                ${htmlPrice(setup.tp1)}
+              </strong>
+            </div>
+
+            <div>
+              <span>هدف دوم</span>
+              <strong class="positive">
+                ${htmlPrice(setup.tp2)}
+              </strong>
+            </div>
+
+            <div>
+              <span>هدف سوم</span>
+              <strong class="positive">
+                ${htmlPrice(setup.tp3)}
+              </strong>
+            </div>
+
+            <div>
+              <span>ریسک به بازده</span>
+              <strong>
+                ${number(setup.riskReward).toFixed(2)}R
+              </strong>
+            </div>
+          </div>
+
+          <div class="confirmation-row">
+            ${confirmation}
+            <span class="muted-text">
+              وضعیت: ${escapeHtml(coin.tradeStatusLabel || status.label)}
+            </span>
+          </div>
+
+          <div class="section-title">بازده تایم‌فریم‌ها</div>
+
+          <div class="returns-grid">
+            <div>
+              <span>15M</span>
+              <strong class="${return15m >= 0 ? 'positive' : 'negative'}">
+                ${htmlPercent(return15m)}
+              </strong>
+            </div>
+
+            <div>
+              <span>1H</span>
+              <strong class="${return1h >= 0 ? 'positive' : 'negative'}">
+                ${htmlPercent(return1h)}
+              </strong>
+            </div>
+
+            <div>
+              <span>4H</span>
+              <strong class="${return4h >= 0 ? 'positive' : 'negative'}">
+                ${htmlPercent(return4h)}
+              </strong>
+            </div>
+
+            <div>
+              <span>1D</span>
+              <strong class="${return1d >= 0 ? 'positive' : 'negative'}">
+                ${htmlPercent(return1d)}
+              </strong>
+            </div>
+          </div>
+
+          <div class="volume-row">
+            <span>نسبت حجم 15M: <b>${volume15m.toFixed(2)}x</b></span>
+            <span>نسبت حجم 1H: <b>${volume1h.toFixed(2)}x</b></span>
+            <span>حجم روزانه: <b>${number(coin.daily?.volumeRatio5).toFixed(2)}x</b></span>
+          </div>
+
+          <details>
+            <summary>شواهد صعودی (${evidence.length})</summary>
+            <ul class="evidence-list">${evidenceHtml}</ul>
+          </details>
+
+          <details>
+            <summary>هشدارها (${warnings.length})</summary>
+            <ul class="warning-list">${warningsHtml}</ul>
+          </details>
+        </article>
+      `;
+    }).join('');
+
+    return `
+      <section class="group-section" data-group-section="${group.key}">
+        <div class="group-heading">
+          <h2>${group.title}</h2>
+          <span>${coins.length} ارز</span>
+        </div>
+
+        ${
+          cards ||
+          '<div class="empty-group">در این گروه ارزی وجود ندارد.</div>'
+        }
+      </section>
+    `;
+  }).join('');
+
+  const generatedAt = new Date().toLocaleString('fa-IR', {
+    dateStyle: 'long',
+    timeStyle: 'short',
+  });
+
+  return `<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark">
+<title>Gate.io Bullish Radar</title>
+
+<style>
+:root {
+  --bg: #0b1020;
+  --panel: #131b2e;
+  --panel2: #18243a;
+  --border: #273650;
+  --text: #edf3ff;
+  --muted: #91a0b8;
+  --green: #28d69b;
+  --red: #ff6578;
+  --yellow: #f4c75e;
+  --blue: #65a9ff;
+  --purple: #b69aff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 22px;
+  background:
+    radial-gradient(circle at top right, #17294a 0, transparent 35%),
+    var(--bg);
+  color: var(--text);
+  font-family: Tahoma, Arial, sans-serif;
+  line-height: 1.8;
+}
+
+.container {
+  max-width: 1150px;
+  margin: auto;
+}
+
+.header {
+  background: linear-gradient(135deg, #192a49, #111a2b);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 24px;
+  margin-bottom: 18px;
+}
+
+.header h1 {
+  margin: 0 0 8px;
+  font-size: 24px;
+}
+
+.header p {
+  margin: 5px 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.header-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 15px;
+}
+
+.meta-pill {
+  background: #243654;
+  border: 1px solid #344b6d;
+  border-radius: 30px;
+  padding: 5px 12px;
+  font-size: 12px;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.summary-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 15px;
+}
+
+.summary-card span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.summary-card strong {
+  display: block;
+  margin-top: 5px;
+  font-size: 24px;
+}
+
+.controls {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 20px 0;
+}
+
+.controls input,
+.controls select {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 12px;
+  min-height: 44px;
+  font: inherit;
+  flex: 1;
+  min-width: 180px;
+}
+
+.group-section {
+  margin-top: 26px;
+}
+
+.group-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.group-heading h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.group-heading span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.coin-card {
+  background: linear-gradient(145deg, var(--panel), #10192a);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 18px;
+  margin-bottom: 14px;
+  box-shadow: 0 8px 24px #0002;
+}
+
+.coin-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.coin-name h3 {
+  margin: 0;
+  font-size: 19px;
+  direction: ltr;
+  text-align: right;
+}
+
+.coin-name span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.coin-tags {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.status,
+.rank-change {
+  border-radius: 30px;
+  padding: 4px 10px;
+  font-size: 11px;
+  border: 1px solid transparent;
+}
+
+.confirmed {
+  background: #123d35;
+  color: var(--green);
+  border-color: #226d59;
+}
+
+.near {
+  background: #473a1e;
+  color: var(--yellow);
+  border-color: #79602a;
+}
+
+.waiting {
+  background: #1c3451;
+  color: var(--blue);
+  border-color: #345d89;
+}
+
+.warning {
+  background: #473a1e;
+  color: var(--yellow);
+}
+
+.danger {
+  background: #4a2530;
+  color: var(--red);
+}
+
+.muted {
+  background: #293244;
+  color: #aab5c8;
+}
+
+.rank-change.up,
+.positive {
+  color: var(--green);
+}
+
+.rank-change.down,
+.negative {
+  color: var(--red);
+}
+
+.rank-change.new {
+  color: var(--blue);
+}
+
+.rank-change.neutral {
+  color: var(--muted);
+}
+
+.score-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 9px;
+  margin: 16px 0;
+}
+
+.score-box {
+  background: var(--panel2);
+  border-radius: 10px;
+  padding: 10px;
+  min-width: 0;
+}
+
+.score-box span,
+.trade-grid span,
+.returns-grid span {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.score-box strong {
+  display: block;
+  font-size: 17px;
+  overflow-wrap: anywhere;
+}
+
+.section-title {
+  font-size: 13px;
+  font-weight: bold;
+  margin: 18px 0 9px;
+  color: #cbd9f1;
+}
+
+.trade-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.trade-grid > div,
+.returns-grid > div {
+  background: var(--panel2);
+  border-radius: 9px;
+  padding: 10px;
+  min-width: 0;
+}
+
+.trade-grid strong {
+  display: block;
+  direction: ltr;
+  text-align: right;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.confirmation-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.confirmation {
+  border-radius: 8px;
+  padding: 4px 9px;
+  font-size: 11px;
+}
+
+.confirmation.yes {
+  color: var(--green);
+  background: #123d35;
+}
+
+.confirmation.no {
+  color: var(--yellow);
+  background: #473a1e;
+}
+
+.muted-text {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.returns-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.returns-grid strong {
+  display: block;
+  direction: ltr;
+  text-align: right;
+  font-size: 14px;
+}
+
+.volume-row {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.volume-row b {
+  color: var(--text);
+  direction: ltr;
+}
+
+details {
+  border-top: 1px solid var(--border);
+  padding: 10px 0;
+  font-size: 12px;
+}
+
+summary {
+  cursor: pointer;
+  color: #cbd9f1;
+}
+
+.evidence-list,
+.warning-list {
+  margin: 8px 0 0;
+  padding-right: 20px;
+  color: var(--muted);
+}
+
+.warning-list li {
+  color: var(--yellow);
+}
+
+.empty-group {
+  padding: 18px;
+  text-align: center;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--muted);
+}
+
+.footer {
+  text-align: center;
+  color: var(--muted);
+  font-size: 11px;
+  padding: 24px 10px;
+}
+
+.no-results {
+  display: none;
+  padding: 20px;
+  text-align: center;
+  color: var(--muted);
+}
+
+@media (max-width: 700px) {
+  body {
+    padding: 12px;
+  }
+
+  .header {
+    padding: 17px;
+  }
+
+  .header h1 {
+    font-size: 19px;
+  }
+
+  .summary-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .trade-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .score-row {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .score-box {
+    padding: 8px;
+  }
+
+  .score-box strong {
+    font-size: 14px;
+  }
+
+  .coin-card {
+    padding: 13px;
+  }
+}
+</style>
+</head>
+
+<body>
+<div class="container">
+
+  <header class="header">
+    <h1>🚀 GATE.IO | BULLISH RADAR</h1>
+    <p>داشبورد تحلیل قراردادهای دائمی USDT</p>
+    <p>تحلیل چندتایم‌فریمی: 5M / 15M / 1H / 4H / 1D</p>
+
+    <div class="header-meta">
+      <span class="meta-pill">📅 ${escapeHtml(generatedAt)}</span>
+      <span class="meta-pill">⏱ ${(duration / 1000).toFixed(1)} ثانیه</span>
+      <span class="meta-pill">📊 رتبه‌بندی چندتایم‌فریمی</span>
+    </div>
+  </header>
+
+  <section class="summary-grid">
+    <div class="summary-card">
+      <span>کل کاندیدها</span>
+      <strong>${selected.length}</strong>
+    </div>
+
+    <div class="summary-card">
+      <span>ورود تأیید شده</span>
+      <strong class="positive">${statusCounts.ENTRY_CONFIRMED}</strong>
+    </div>
+
+    <div class="summary-card">
+      <span>نزدیک ورود</span>
+      <strong>${statusCounts.NEAR_ENTRY}</strong>
+    </div>
+
+    <div class="summary-card">
+      <span>در انتظار تأیید</span>
+      <strong>${statusCounts.WAITING}</strong>
+    </div>
+
+    <div class="summary-card">
+      <span>قراردادهای فعال</span>
+      <strong>${number(stats.active)}</strong>
+    </div>
+
+    <div class="summary-card">
+      <span>بازارهای نقدشونده</span>
+      <strong>${number(stats.liquid)}</strong>
+    </div>
+
+    <div class="summary-card">
+      <span>تحلیل موفق</span>
+      <strong>${number(stats.success)}</strong>
+    </div>
+
+    <div class="summary-card">
+      <span>خطاها</span>
+      <strong>${number(stats.errors)}</strong>
+    </div>
+  </section>
+
+  <div class="controls">
+    <input
+      id="searchInput"
+      type="search"
+      placeholder="جست‌وجوی نماد ارز..."
+      autocomplete="off"
+    >
+
+    <select id="groupFilter">
+      <option value="ALL">همه گروه‌ها</option>
+      <option value="SWING">SWING</option>
+      <option value="SHORT-TERM">SHORT-TERM</option>
+      <option value="SCALP">SCALP</option>
+    </select>
+
+    <select id="statusFilter">
+      <option value="ALL">همه وضعیت‌ها</option>
+      <option value="ENTRY_CONFIRMED">ورود تأیید شده</option>
+      <option value="NEAR_ENTRY">نزدیک ورود</option>
+      <option value="WAITING">در انتظار</option>
+      <option value="NEAR_EXIT">نزدیک خروج</option>
+      <option value="EXIT_CONFIRMED">خروج قطعی</option>
+      <option value="INVALIDATED">ابطال</option>
+      <option value="EXPIRED">منقضی شده</option>
+    </select>
+  </div>
+
+  <div id="noResults" class="no-results">
+    ارزی با این فیلترها پیدا نشد.
+  </div>
+
+  ${groupCards}
+
+  <footer class="footer">
+    این داشبورد صرفاً ابزار تحلیل و نمایش داده است.
+    تأیید ورود بر اساس کندل بسته‌شده ۵ دقیقه‌ای انجام می‌شود.
+    هیچ سیگنالی تضمین سود نیست.
+  </footer>
+
+</div>
+
+<script>
+(function () {
+  const searchInput = document.getElementById('searchInput');
+  const groupFilter = document.getElementById('groupFilter');
+  const statusFilter = document.getElementById('statusFilter');
+  const noResults = document.getElementById('noResults');
+
+  function applyFilters() {
+    const search = searchInput.value.trim().toLowerCase();
+    const group = groupFilter.value;
+    const status = statusFilter.value;
+
+    const cards = document.querySelectorAll('.coin-card');
+
+    let visible = 0;
+
+    cards.forEach(function (card) {
+      const symbol = card.getAttribute('data-symbol') || '';
+      const cardGroup = card.getAttribute('data-group') || '';
+      const cardStatus = card.getAttribute('data-status') || '';
+
+      const matchSearch = !search || symbol.includes(search);
+      const matchGroup = group === 'ALL' || cardGroup === group;
+      const matchStatus = status === 'ALL' || cardStatus === status;
+
+      const show = matchSearch && matchGroup && matchStatus;
+
+      card.style.display = show ? '' : 'none';
+
+      if (show) visible++;
+    });
+
+    document.querySelectorAll('.group-section').forEach(function (section) {
+      const cardsInSection = section.querySelectorAll('.coin-card');
+      let sectionVisible = false;
+
+      cardsInSection.forEach(function (card) {
+        if (card.style.display !== 'none') {
+          sectionVisible = true;
+        }
+      });
+
+      section.style.display = sectionVisible ? '' : 'none';
+    });
+
+    noResults.style.display = visible === 0 ? 'block' : 'none';
+  }
+
+  searchInput.addEventListener('input', applyFilters);
+  groupFilter.addEventListener('change', applyFilters);
+  statusFilter.addEventListener('change', applyFilters);
+})();
+</script>
+
+</body>
+</html>`;
+}
 
 // ========================
 // MAIN SCANNER
@@ -2082,7 +3049,7 @@ async function main() {
   );
 
   // ========================
-  // TELEGRAM REPORT
+  // TELEGRAM SUMMARY REPORT
   // ========================
 
   const report = buildReport(
@@ -2095,9 +3062,40 @@ async function main() {
   await sendReports(report);
 
   console.log(
-    '✅ Telegram report sent successfully.'
+    '✅ Telegram summary report sent successfully.'
   );
+
+  // ========================
+  // HTML DASHBOARD REPORT
+  // ========================
+
+  try {
+    const htmlReport = buildHtmlReport(
+      rankedCandidates,
+      stats,
+      duration,
+      rankChanges
+    );
+
+    await sendTelegramDocument(
+      htmlReport,
+      'gateio-bullish-radar.html'
+    );
+
+    console.log(
+      '✅ HTML dashboard sent successfully.'
+    );
+  } catch (htmlError) {
+    console.error(
+      '⚠️ HTML dashboard delivery failed:',
+      htmlError.message
+    );
+  }
 }
+
+// ========================
+// START
+// ========================
 
 main().catch((error) => {
   console.error(
