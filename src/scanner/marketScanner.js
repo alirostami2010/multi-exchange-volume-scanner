@@ -1560,6 +1560,7 @@ const GROUPS = [
 // BUILD REPORT
 // ========================
 
+    
 function buildReport(
   candidates,
   stats,
@@ -1579,6 +1580,7 @@ function buildReport(
     '━━━━━━━━━━━━━━━━━━',
     '🎯 هدف: شکار زودهنگام روندهای صعودی و تشخیص نقطه ورود',
     '🟢↑ بهبود رتبه | 🔴↓ افت رتبه | ➖ ثابت | 🆕 جدید',
+    '✅ تأیید ورود 5M',
     `📌 کاندید: ${selected.length}/${candidates.length}`,
     `📊 قرارداد: ${stats.active} | نقدشونده: ${stats.liquid}`,
     `🔍 بررسی موفق: ${stats.success} | خطا: ${stats.errors}`,
@@ -1627,6 +1629,14 @@ function buildReport(
 
       const setup = coin.tradeSetup;
 
+      // فقط تأیید واقعی کندل 5 دقیقه‌ای
+      const entryConfirmed =
+        setup?.confirmationMet === true;
+
+      const entryMark = entryConfirmed
+        ? '✅'
+        : '';
+
       const statusText =
         coin.tradeStatusLabel ||
         coin.tradeStatus ||
@@ -1636,7 +1646,7 @@ function buildReport(
         `${value >= 0 ? '▲' : '▼'}${Math.abs(number(value)).toFixed(2)}%`;
 
       const lines = [
-        `${printed}. ${coin.symbol} ${rankText} | پایه ${coin.score} | رتبه ${coin.rankScore ?? '-'}`,
+        `${printed}. ${coin.symbol} ${entryMark} ${rankText} | پایه ${coin.score} | رتبه ${coin.rankScore ?? '-'}`,
 
         `🏷 وضعیت: ${statusText} | مرحله: ${coin.stage}`,
 
@@ -1653,7 +1663,7 @@ function buildReport(
         );
 
         lines.push(
-          `🧭 تأیید: ${setup.confirmationMet ? 'تأیید 5m دریافت شد' : 'هنوز تأیید نشده'}`
+          `🧭 تأیید: ${entryConfirmed ? '✅ تأیید 5m دریافت شد' : '⏳ هنوز تأیید نشده'}`
         );
 
         lines.push(
@@ -1703,6 +1713,8 @@ function buildReport(
 
   return blocks.join('\n\n');
 }
+
+      
 
 // ========================
 // MAIN SCANNER
