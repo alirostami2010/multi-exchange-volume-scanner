@@ -1,8 +1,7 @@
-
 /**
- * MARKET STORAGE — FOUR TIMEFRAME RANKING + TRADE STATE
+ * MARKET STORAGE — OPPORTUNITY RANKING + ENTRY SCORE + TRADE STATE
  * History: 15 days | Summary: 30 days
- * Ranking weights are intentionally unchanged.
+ * Opportunity ranking is independent of entry timing and trade status.
  * File: src/storage/marketStorage.js
  */
 
@@ -11,6 +10,7 @@ import path from 'node:path';
 
 const DATA_DIR = path.resolve(process.cwd(), 'data');
 const DATA_FILE = path.join(DATA_DIR, 'market-state.json');
+
 const HISTORY_RETENTION_DAYS = 15;
 const SUMMARY_RETENTION_DAYS = 30;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -201,12 +201,10 @@ function calculateVolumePersistence(
   }
 
   const sameBucketRecords = previousRecords
-    .filter((item) => {
-      return (
-        number(item.live15m?.bucketTime) === bucketTime &&
-        number(item.live15m?.turnover) > 0
-      );
-    })
+    .filter((item) => (
+      number(item.live15m?.bucketTime) === bucketTime &&
+      number(item.live15m?.turnover) > 0
+    ))
     .sort(
       (a, b) =>
         Date.parse(a.timestamp) -
@@ -239,11 +237,7 @@ function calculateVolumePersistence(
 
   let positiveSteps = 0;
 
-  for (
-    let i = sequence.length - 1;
-    i > 0;
-    i--
-  ) {
+  for (let i = sequence.length - 1; i > 0; i--) {
     if (sequence[i] > sequence[i - 1]) {
       positiveSteps++;
     } else {
@@ -271,7 +265,7 @@ function calculateVolumePersistence(
 }
 
 // ========================
-// FOUR TIMEFRAME MOMENTUM
+// OPPORTUNITY MOMENTUM
 // ========================
 
 function calculateMomentum(coin, history, nowMs) {
@@ -295,25 +289,8 @@ function calculateMomentum(coin, history, nowMs) {
     volume.score * 0.4
   );
 
-  const return15m = number(
-    coin.returns?.['15m']
-  );
-
-  const return1h = number(
-    coin.returns?.['1h']
-  );
-
-  const return4h = number(
-    coin.returns?.['4h']
-  );
-
-  const daily = coin.daily || {};
-
-  const score15m = clamp(
-    50 + (return15m / 2) * 50,
-    0,
-    100
-  );
+  const return1h = number(coin.returns?.['1h']);
+  const return4h = number(coin.returns?.['4h']);
 
   const score1h = clamp(
     50 + (return1h / 3) * 50,
@@ -327,6 +304,8 @@ function calculateMomentum(coin, history, nowMs) {
     100
   );
 
+  const daily = coin.daily || {};
+
   const dailyScore = clamp(
     number(daily.score, 50),
     0,
@@ -339,24 +318,41 @@ function calculateMomentum(coin, history, nowMs) {
     100
   );
 
-  // Approved weights:
-  // Base 20%
-  // 15m 20%
-  // 1h 15%
-  // 4h 10%
-  // Daily 20%
-  // Persistence 15%
+  /*
+   * Opportunity Score:
+   * Base structural score: 30%
+   * 1H momentum:           15%
+   * 4H momentum:           15%
+   * Daily context:         20%
+   * Persistence:           20%
+   *
+   * 15m and 5m are deliberately excluded.
+   * This avoids double-counting short-term entry signals.
+   * Trade status and opportunity group never affect this score.
+   */
 
-  const rankScore =
-    baseScore * 0.20 +
-    score15m * 0.20 +
+  const opportunityScore =
+    baseScore * 0.30 +
     score1h * 0.15 +
-    score4h * 0.10 +
+    score4h * 0.15 +
     dailyScore * 0.20 +
-    persistenceScore * 0.15;
+    persistenceScore * 0.20;
+
+  /*
+   * Entry Score is informational only.
+   * It does not change Opportunity Score or ranking.
+   */
+
+  const entryScore = clamp(
+    number(coin.entryScore, 50),
+    0,
+    100
+  );
 
   return {
-    rankScore: Number(rankScore.toFixed(2)),
+    rankScore: Number(opportunityScore.toFixed(2)),
+    opportunityScore: Number(opportunityScore.toFixed(2)),
+    entryScore: Math.round(entryScore),
 
     persistenceScore,
 
@@ -376,10 +372,16 @@ function calculateMomentum(coin, history, nowMs) {
     dailyScore: Math.round(dailyScore),
 
     timeframeScores: {
-      '15m': Math.round(score15m),
       '1h': Math.round(score1h),
       '4h': Math.round(score4h),
       '1d': Math.round(dailyScore),
+      '15m': Math.round(
+        clamp(
+          50 + (number(coin.returns?.['15m']) / 2) * 50,
+          0,
+          100
+        )
+      ),
     },
 
     dailyMetrics: {
@@ -430,6 +432,8 @@ function updateSummary(previous, coin, rank, now) {
     lastSeenAt: now,
     lastPrice: price,
     lastScore: coin.score,
+    lastOpportunityScore: coin.opportunityScore,
+    lastEntryScore: coin.entryScore,
     lastStage: coin.stage,
     observations: 0,
   };
@@ -465,6 +469,8 @@ function updateSummary(previous, coin, rank, now) {
   summary.lastSeenAt = now;
   summary.lastPrice = price;
   summary.lastScore = coin.score;
+  summary.lastOpportunityScore = coin.opportunityScore;
+  summary.lastEntryScore = coin.entryScore;
   summary.lastStage = coin.stage;
   summary.observations =
     number(summary.observations) + 1;
@@ -473,68 +479,40 @@ function updateSummary(previous, coin, rank, now) {
 }
 
 // ========================
-// OPPORTUNITY / STATUS ORDER
+// RANKING
 // ========================
 
-const OPPORTUNITY_ORDER = {
-  SWING: 0,
-  'SHORT-TERM': 1,
-  SCALP: 2,
-};
-
-const STATUS_ORDER = {
-  ENTRY_CONFIRMED: 0,
-  NEAR_ENTRY: 1,
-  WAITING: 2,
-  NEAR_EXIT: 3,
-  EXIT_CONFIRMED: 4,
-  INVALIDATED: 5,
-  EXPIRED: 6,
-};
-
 function compareCandidates(a, b) {
-  const groupA =
-    OPPORTUNITY_ORDER[a.opportunityType] ?? 9;
+  const opportunityDifference =
+    number(b.opportunityScore, b.rankScore) -
+    number(a.opportunityScore, a.rankScore);
 
-  const groupB =
-    OPPORTUNITY_ORDER[b.opportunityType] ?? 9;
-
-  if (groupA !== groupB) {
-    return groupA - groupB;
+  if (opportunityDifference !== 0) {
+    return opportunityDifference;
   }
 
-  const statusA =
-    STATUS_ORDER[a.tradeStatus] ?? 9;
+  const persistenceDifference =
+    number(b.persistenceScore) -
+    number(a.persistenceScore);
 
-  const statusB =
-    STATUS_ORDER[b.tradeStatus] ?? 9;
-
-  if (statusA !== statusB) {
-    return statusA - statusB;
+  if (persistenceDifference !== 0) {
+    return persistenceDifference;
   }
 
-  if (number(b.rankScore) !== number(a.rankScore)) {
-    return number(b.rankScore) - number(a.rankScore);
+  const fourHourDifference =
+    number(b.timeframeScores?.['4h']) -
+    number(a.timeframeScores?.['4h']);
+
+  if (fourHourDifference !== 0) {
+    return fourHourDifference;
   }
 
-  if (
-    number(b.persistenceScore) !==
-    number(a.persistenceScore)
-  ) {
-    return (
-      number(b.persistenceScore) -
-      number(a.persistenceScore)
-    );
-  }
+  const dailyDifference =
+    number(b.dailyScore) -
+    number(a.dailyScore);
 
-  if (
-    number(b.volume?.['15m']) !==
-    number(a.volume?.['15m'])
-  ) {
-    return (
-      number(b.volume?.['15m']) -
-      number(a.volume?.['15m'])
-    );
+  if (dailyDifference !== 0) {
+    return dailyDifference;
   }
 
   return number(b.score) - number(a.score);
@@ -587,7 +565,6 @@ export async function saveMarketSnapshot(
 
   const state = await readState();
 
-  // Ranking using previous history.
   const rankedCandidates = candidates
     .map((coin) => {
       const momentum = calculateMomentum(
@@ -603,7 +580,6 @@ export async function saveMarketSnapshot(
     })
     .sort(compareCandidates);
 
-  // Find previous recorded run.
   const previousRunTimestamp = state.history.reduce(
     (latest, item) =>
       item.timestamp &&
@@ -623,7 +599,6 @@ export async function saveMarketSnapshot(
     }
   }
 
-  // Compare ranks.
   const rankChanges = {};
 
   rankedCandidates.forEach((coin, index) => {
@@ -655,7 +630,6 @@ export async function saveMarketSnapshot(
     }
   });
 
-  // Build current snapshots.
   const currentSnapshots = rankedCandidates.map(
     (coin, index) => {
       const rank = index + 1;
@@ -674,6 +648,9 @@ export async function saveMarketSnapshot(
 
         score: coin.score,
         rankScore: coin.rankScore,
+        opportunityScore: coin.opportunityScore,
+        entryScore: coin.entryScore,
+
         persistenceScore: coin.persistenceScore,
 
         price: coin.price,
@@ -711,7 +688,6 @@ export async function saveMarketSnapshot(
 
   state.history.push(...currentSnapshots);
 
-  // Keep detailed history for 15 days.
   const historyCutoff =
     nowMs - HISTORY_RETENTION_DAYS * DAY_MS;
 
@@ -724,7 +700,6 @@ export async function saveMarketSnapshot(
     );
   });
 
-  // Keep summaries for 30 days from last observation.
   const summaryCutoff =
     nowMs - SUMMARY_RETENTION_DAYS * DAY_MS;
 
@@ -741,15 +716,12 @@ export async function saveMarketSnapshot(
     }
   }
 
-  // Keep previous trade states even if a symbol
-  // temporarily drops out of candidates.
   state.tradeStates = mergeTradeStates(
     state.tradeStates,
     options.tradeStates ?? options.signals,
     now
   );
 
-  // Atomic file save.
   await fs.mkdir(DATA_DIR, { recursive: true });
 
   const temporaryFile = `${DATA_FILE}.tmp`;
@@ -782,4 +754,4 @@ export async function saveMarketSnapshot(
     rankChanges,
     tradeStates: state.tradeStates,
   };
-}
+    }
