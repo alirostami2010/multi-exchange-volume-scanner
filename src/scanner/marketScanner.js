@@ -9,7 +9,9 @@
  * 1h  = Trend confirmation
  * 4h  = Overhead resistance / room-to-grow filter
  *
- * Diagnostic counters added.
+ * Diagnostics:
+ * - Breakout volume details
+ * - API rate-limit protection
  *
  * File: src/scanner/marketScanner.js
  */
@@ -33,7 +35,9 @@ const CONFIG = {
   TOP_COUNT: 30,
   MIN_QUOTE_VOLUME_24H: 100000,
 
-  CONCURRENCY: 8,
+  // API protection
+  CONCURRENCY: 3,
+  REQUEST_INTERVAL_MS: 150,
   REQUEST_TIMEOUT: 15000,
   RETRIES: 3,
 
@@ -108,10 +112,56 @@ const formatPrice = value => {
   return value.toPrecision(5);
 };
 
+const formatTurnover = value =>
+  new Intl.NumberFormat('en-US', {
+    notation: 'compact',
+    maximumFractionDigits: 2
+  }).format(number(value));
+
 const getContractMultiplier = contract => {
   const multiplier = number(contract?.quanto_multiplier, 1);
   return multiplier > 0 ? multiplier : 1;
 };
+
+// ============================================================
+// API REQUEST PACING
+// ============================================================
+
+let nextRequestAt = 0;
+
+async function waitForRequestSlot() {
+  const now = Date.now();
+  const scheduledAt = Math.max(now, nextRequestAt);
+
+  nextRequestAt =
+    scheduledAt + CONFIG.REQUEST_INTERVAL_MS;
+
+  const wait = scheduledAt - now;
+
+  if (wait > 0) {
+    await sleep(wait);
+  }
+}
+
+function getRetryAfterMs(response) {
+  const value = response?.headers?.get('retry-after');
+
+  if (!value) return 0;
+
+  const seconds = Number(value);
+
+  if (Number.isFinite(seconds) && seconds > 0) {
+    return seconds * 1000;
+  }
+
+  const date = Date.parse(value);
+
+  if (Number.isFinite(date)) {
+    return Math.max(0, date - Date.now());
+  }
+
+  return 0;
+}
 
 // ============================================================
 // DIAGNOSTICS
@@ -125,12 +175,15 @@ function createDiagnostics() {
     volume: 0,
     trend: 0,
     room: 0,
-    score: 0
+    score: 0,
+
+    // Detailed volume information for valid breakouts
+    volumeSamples: []
   };
 }
 
 function formatDiagnostics(d) {
-  return [
+  const lines = [
     '🔬 مراحل عبور ارزها:',
     `1️⃣ داده معتبر: ${d.validData}`,
     `2️⃣ تشکیل تراکم: ${d.consolidation}`,
@@ -138,8 +191,44 @@ function formatDiagnostics(d) {
     `4️⃣ تأیید حجم: ${d.volume}`,
     `5️⃣ تأیید روند 1H: ${d.trend}`,
     `6️⃣ فضای رشد 4H: ${d.room}`,
-    `7️⃣ امتیاز نهایی: ${d.score}`
-  ].join('\n');
+    `7️⃣ امتیاز نهایی: ${d.score}`,
+    '',
+    '📊 بررسی حجم شکست‌های معتبر:'
+  ];
+
+  const samples = [...d.volumeSamples]
+    .sort((a, b) => b.volumeRatio - a.volumeRatio)
+    .slice(0, 8);
+
+  if (!samples.length) {
+    lines.push('در این اسکن شکست معتبری برای بررسی حجم ثبت نشد.');
+    return lines.join('\n');
+  }
+
+  for (const sample of samples) {
+    const status =
+      sample.volumeRatio >= CONFIG.MIN_VOLUME_RATIO
+        ? '✅'
+        : '❌';
+
+    lines.push(
+      `${status} ${sample.symbol} | نسبت حجم: ${sample.volumeRatio.toFixed(2)}x`
+    );
+
+    lines.push(
+      `   گردش جاری: ${formatTurnover(sample.currentTurnover)} | مبنا: ${formatTurnover(sample.baselineTurnover)}`
+    );
+
+    lines.push(
+      `   حجم موردانتظار: ${formatTurnover(sample.expectedTurnover)} | زمان کندل: ${sample.elapsedSeconds}s`
+    );
+  }
+
+  lines.push(
+    `📌 حداقل نسبت حجم موردنیاز: ${CONFIG.MIN_VOLUME_RATIO.toFixed(2)}x`
+  );
+
+  return lines.join('\n');
 }
 
 // ============================================================
@@ -170,14 +259,23 @@ const getMin = (candles, field) =>
 async function fetchJSON(url) {
   let lastError;
 
-  for (let attempt = 1; attempt <= CONFIG.RETRIES; attempt++) {
+  for (
+    let attempt = 1;
+    attempt <= CONFIG.RETRIES;
+    attempt++
+  ) {
     try {
+      await waitForRequestSlot();
+
       const response = await fetch(url, {
         headers: { Accept: 'application/json' },
         signal: AbortSignal.timeout(CONFIG.REQUEST_TIMEOUT)
       });
 
       if (!response.ok) {
+        const retryAfterMs =
+          getRetryAfterMs(response);
+
         const body = await response.text();
 
         const error = new Error(
@@ -185,6 +283,8 @@ async function fetchJSON(url) {
         );
 
         error.status = response.status;
+        error.retryAfterMs = retryAfterMs;
+
         throw error;
       }
 
@@ -194,11 +294,26 @@ async function fetchJSON(url) {
       lastError = error;
 
       if (attempt < CONFIG.RETRIES) {
-        await sleep(
-          error.status === 429
-            ? 2500 * attempt
-            : 700 * attempt
+        const exponentialBackoff =
+          1500 * Math.pow(2, attempt - 1);
+
+        const jitter = Math.floor(
+          Math.random() * 500
         );
+
+        const retryDelay =
+          error.status === 429
+            ? Math.max(
+                error.retryAfterMs || 0,
+                exponentialBackoff + jitter
+              )
+            : 700 * attempt + jitter;
+
+        console.warn(
+          `⚠️ API retry ${attempt}/${CONFIG.RETRIES} | ${error.status || 'NETWORK'} | wait ${Math.ceil(retryDelay / 1000)}s`
+        );
+
+        await sleep(retryDelay);
       }
     }
   }
@@ -459,21 +574,21 @@ function analyzeBreakout(
 }
 
 // ============================================================
-// VOLUME CONFIRMATION
+// VOLUME CONFIRMATION + DIAGNOSTICS
 // ============================================================
 
-function getCurrentVolumeRatio(
+function getCurrentVolumeDetails(
   closedCandles,
   currentCandle,
   multiplier
 ) {
-  if (!currentCandle) return 0;
+  if (!currentCandle) return null;
 
   if (
     closedCandles.length <
     CONFIG.VOLUME_BASELINE_CANDLES
   ) {
-    return 0;
+    return null;
   }
 
   const baselineCandles = closedCandles.slice(
@@ -486,7 +601,7 @@ function getCurrentVolumeRatio(
     )
   );
 
-  if (baseline <= 0) return 0;
+  if (baseline <= 0) return null;
 
   const nowSeconds = Date.now() / 1000;
 
@@ -503,12 +618,21 @@ function getCurrentVolumeRatio(
       CONFIG.TIMEFRAMES['15m'].seconds
     );
 
-  if (expectedTurnover <= 0) return 0;
+  if (expectedTurnover <= 0) return null;
 
-  return (
-    candleValue(currentCandle, multiplier) /
-    expectedTurnover
-  );
+  const currentTurnover =
+    candleValue(currentCandle, multiplier);
+
+  const volumeRatio =
+    currentTurnover / expectedTurnover;
+
+  return {
+    volumeRatio,
+    currentTurnover,
+    baselineTurnover: baseline,
+    expectedTurnover,
+    elapsedSeconds
+  };
 }
 
 // ============================================================
@@ -710,12 +834,33 @@ function analyzeCoin(data, diagnostics) {
 
   if (!breakout) return null;
 
-  // 2. Volume confirmation
-  const volumeRatio = getCurrentVolumeRatio(
+  // 2. Calculate volume details
+  const volumeDetails = getCurrentVolumeDetails(
     candles15m,
     current15m,
     multiplier
   );
+
+  if (!volumeDetails) return null;
+
+  const {
+    volumeRatio,
+    currentTurnover,
+    baselineTurnover,
+    expectedTurnover,
+    elapsedSeconds
+  } = volumeDetails;
+
+  // Save diagnostic sample BEFORE volume filtering.
+  // This includes breakouts that fail the 1.35x threshold.
+  diagnostics.volumeSamples.push({
+    symbol,
+    volumeRatio,
+    currentTurnover,
+    baselineTurnover,
+    expectedTurnover,
+    elapsedSeconds
+  });
 
   if (volumeRatio < CONFIG.MIN_VOLUME_RATIO) {
     return null;
@@ -1006,6 +1151,9 @@ async function main() {
   console.log('⏱ Analysis: 15m / 1h / 4h');
   console.log('🎯 Strategy: Consolidation Breakout + Volume');
   console.log('🔄 Scan schedule does not affect score');
+  console.log(
+    `🛡 API protection: Concurrency ${CONFIG.CONCURRENCY} | Interval ${CONFIG.REQUEST_INTERVAL_MS}ms`
+  );
 
   const [contracts, tickers] = await Promise.all([
     getContracts(),
@@ -1129,7 +1277,7 @@ async function main() {
       errors++;
 
       console.error(
-        `⚠️ ${result.item?.name || 'UNKNOWN'}: ${result.error}`
+        `⚠️ ${result.item?.symbol || 'UNKNOWN'}: ${result.error}`
       );
 
       continue;
