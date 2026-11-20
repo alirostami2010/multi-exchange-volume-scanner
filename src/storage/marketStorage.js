@@ -9,6 +9,9 @@
  * Coin summaries: 30 days
  * Rank memory: 15 days
  *
+ * Rank changes compare ONLY with the immediately
+ * previous valid scan.
+ *
  * Scan frequency does not contribute to score.
  *
  * File: src/storage/marketStorage.js
@@ -27,6 +30,8 @@ const DATA_FILE = path.join(DATA_DIR, 'market-state.json');
 const HISTORY_RETENTION_DAYS = 15;
 const SUMMARY_RETENTION_DAYS = 30;
 const RANK_MEMORY_RETENTION_DAYS = 15;
+
+const MAX_RANK_COMPARISON_AGE_MS = 10 * 60 * 1000;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -85,7 +90,13 @@ async function readState() {
         data.events &&
         typeof data.events === 'object'
           ? data.events
-          : {}
+          : {},
+
+      scanMeta:
+        data.scanMeta &&
+        typeof data.scanMeta === 'object'
+          ? data.scanMeta
+          : null
     };
 
   } catch (error) {
@@ -95,7 +106,8 @@ async function readState() {
         summaries: {},
         rankMemory: {},
         tradeStates: {},
-        events: {}
+        events: {},
+        scanMeta: null
       };
     }
 
@@ -199,21 +211,55 @@ function updateSummary(previous, coin, now) {
 }
 
 // ============================================================
+// PREVIOUS SCAN VALIDATION
+// ============================================================
+
+function getPreviousScanRanks(scanMeta, nowMs) {
+  if (
+    !scanMeta ||
+    !scanMeta.timestamp ||
+    !scanMeta.ranks ||
+    typeof scanMeta.ranks !== 'object'
+  ) {
+    return null;
+  }
+
+  const previousTime = Date.parse(scanMeta.timestamp);
+
+  if (!Number.isFinite(previousTime)) {
+    return null;
+  }
+
+  const age = nowMs - previousTime;
+
+  if (
+    age < 0 ||
+    age > MAX_RANK_COMPARISON_AGE_MS
+  ) {
+    return null;
+  }
+
+  return scanMeta.ranks;
+}
+
+// ============================================================
 // RANK CHANGE
 // ============================================================
 
-function buildRankChanges(rankedCandidates, previousMemory) {
+function buildRankChanges(
+  rankedCandidates,
+  previousScanRanks
+) {
   const result = {};
 
   for (const coin of rankedCandidates) {
-    const previous = previousMemory[coin.symbol];
-
-    // Only use the previous unified rank.
-    // Never read legacy growth.rank or move.rank.
     const previousRank =
-      Number.isFinite(Number(previous?.rank)) &&
-      Number(previous.rank) > 0
-        ? Number(previous.rank)
+      previousScanRanks &&
+      Number.isFinite(
+        Number(previousScanRanks[coin.symbol])
+      ) &&
+      Number(previousScanRanks[coin.symbol]) > 0
+        ? Number(previousScanRanks[coin.symbol])
         : null;
 
     const change =
@@ -260,6 +306,47 @@ function compareCandidates(a, b) {
 }
 
 // ============================================================
+// SNAPSHOT BUILDER
+// ============================================================
+
+function buildSnapshot(coin, timestamp) {
+  return {
+    timestamp,
+
+    symbol: coin.symbol,
+
+    price: number(coin.price),
+
+    livePrice: number(coin.livePrice),
+
+    score: number(coin.score),
+
+    scoreRaw: number(coin.scoreRaw),
+
+    rank: number(coin.rank),
+
+    strength: coin.strength || null,
+
+    // Estimated pressure, not verified taker flow.
+    pressureScore: number(coin.pressureScore),
+
+    pressureQuality: coin.pressureQuality || 'UNKNOWN',
+
+    closeLocation: number(coin.closeLocation),
+
+    momentum: coin.momentum || {},
+
+    volume: coin.volume || {},
+
+    components: coin.components || {},
+
+    confirmations: Array.isArray(coin.confirmations)
+      ? coin.confirmations
+      : []
+  };
+}
+
+// ============================================================
 // SAVE SNAPSHOT
 // ============================================================
 
@@ -269,35 +356,59 @@ export async function saveMarketSnapshot(candidates = []) {
 
   const state = await readState();
 
-  const previousMemory = state.rankMemory;
+  // ----------------------------------------------------------
+  // PREVIOUS SCAN
+  // ----------------------------------------------------------
+
+  const previousScanRanks = getPreviousScanRanks(
+    state.scanMeta,
+    nowMs
+  );
 
   // ----------------------------------------------------------
   // PREPARE CURRENT RAW SCORES
   // ----------------------------------------------------------
 
-  const rankedCandidates = candidates
-    .filter(coin =>
-      coin &&
-      typeof coin.symbol === 'string' &&
-      coin.symbol.length > 0
-    )
-    .map(coin => {
-      const rawScore = clamp(
-        number(coin.score),
-        0,
-        100
-      );
+  const uniqueCandidates = new Map();
 
-      return {
-        ...coin,
+  for (const coin of candidates) {
+    if (
+      !coin ||
+      typeof coin.symbol !== 'string' ||
+      coin.symbol.length === 0
+    ) {
+      continue;
+    }
 
-        scoreRaw: rawScore,
+    const rawScore = clamp(
+      number(coin.score),
+      0,
+      100
+    );
 
-        // No old-score smoothing.
-        // Current valid market conditions determine ranking.
-        score: rawScore
-      };
-    });
+    const normalized = {
+      ...coin,
+
+      scoreRaw: rawScore,
+
+      // No old-score smoothing.
+      // Current valid market conditions determine ranking.
+      score: rawScore
+    };
+
+    const existing = uniqueCandidates.get(coin.symbol);
+
+    if (
+      !existing ||
+      normalized.score > existing.score
+    ) {
+      uniqueCandidates.set(coin.symbol, normalized);
+    }
+  }
+
+  const rankedCandidates = [
+    ...uniqueCandidates.values()
+  ];
 
   // ----------------------------------------------------------
   // SINGLE RANKING
@@ -309,13 +420,17 @@ export async function saveMarketSnapshot(candidates = []) {
     coin.rank = index + 1;
   });
 
+  // ----------------------------------------------------------
+  // RANK CHANGES
+  // ----------------------------------------------------------
+
   const rankChanges = buildRankChanges(
     rankedCandidates,
-    previousMemory
+    previousScanRanks
   );
 
   // ----------------------------------------------------------
-  // UPDATE SUMMARIES AND MEMORY
+  // UPDATE SUMMARIES AND RANK MEMORY
   // ----------------------------------------------------------
 
   for (const coin of rankedCandidates) {
@@ -336,43 +451,9 @@ export async function saveMarketSnapshot(candidates = []) {
   // SNAPSHOTS
   // ----------------------------------------------------------
 
-  const currentSnapshots = rankedCandidates.map(coin => ({
-    timestamp: now,
-
-    symbol: coin.symbol,
-
-    price: coin.price,
-
-    livePrice: coin.livePrice,
-
-    score: coin.score,
-
-    scoreRaw: coin.scoreRaw,
-
-    rank: coin.rank,
-
-    strength: coin.strength,
-
-    buyRatio: coin.buyRatio,
-
-    buyVolume: coin.buyVolume,
-
-    sellVolume: coin.sellVolume,
-
-    tradeCount: coin.tradeCount,
-
-    flowQuality: coin.flowQuality,
-
-    flowCoverageSeconds: coin.flowCoverageSeconds,
-
-    momentum: coin.momentum,
-
-    volume: coin.volume,
-
-    components: coin.components,
-
-    confirmations: coin.confirmations
-  }));
+  const currentSnapshots = rankedCandidates.map(
+    coin => buildSnapshot(coin, now)
+  );
 
   state.history.push(...currentSnapshots);
 
@@ -399,7 +480,9 @@ export async function saveMarketSnapshot(candidates = []) {
   const summaryCutoff =
     nowMs - SUMMARY_RETENTION_DAYS * DAY_MS;
 
-  for (const [symbol, summary] of Object.entries(state.summaries)) {
+  for (const [symbol, summary] of Object.entries(
+    state.summaries
+  )) {
     const lastSeen = Date.parse(summary.lastSeenAt);
 
     if (
@@ -417,7 +500,9 @@ export async function saveMarketSnapshot(candidates = []) {
   const memoryCutoff =
     nowMs - RANK_MEMORY_RETENTION_DAYS * DAY_MS;
 
-  for (const [symbol, memory] of Object.entries(state.rankMemory)) {
+  for (const [symbol, memory] of Object.entries(
+    state.rankMemory
+  )) {
     const updated = Date.parse(memory.updatedAt);
 
     if (
@@ -427,6 +512,26 @@ export async function saveMarketSnapshot(candidates = []) {
       delete state.rankMemory[symbol];
     }
   }
+
+  // ----------------------------------------------------------
+  // SAVE IMMEDIATELY PREVIOUS SCAN
+  // ----------------------------------------------------------
+
+  // Even an empty scan is saved.
+  // This prevents a coin from being compared against
+  // an old rank after disappearing from the latest scan.
+
+  const currentScanRanks = {};
+
+  for (const coin of rankedCandidates) {
+    currentScanRanks[coin.symbol] = coin.rank;
+  }
+
+  state.scanMeta = {
+    timestamp: now,
+    candidateCount: rankedCandidates.length,
+    ranks: currentScanRanks
+  };
 
   // ----------------------------------------------------------
   // WRITE ATOMICALLY
@@ -449,7 +554,9 @@ export async function saveMarketSnapshot(candidates = []) {
 
       tradeStates: state.tradeStates,
 
-      events: state.events
+      events: state.events,
+
+      scanMeta: state.scanMeta
 
     }, null, 2),
     'utf8'
