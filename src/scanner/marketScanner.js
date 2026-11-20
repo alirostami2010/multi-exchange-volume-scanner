@@ -1,23 +1,21 @@
 
 /**
- * GATE.IO USDT PERPETUAL — LONG BUY PRESSURE RADAR
- * ------------------------------------------------
+ * GATE.IO USDT PERPETUAL — EARLY LONG BREAKOUT RADAR
+ * --------------------------------------------------
  * LONG ONLY
  *
- * Analysis timeframes:
- * 15m = Early detection
- * 1h  = Momentum confirmation
- * 4h  = Trend confirmation
+ * Strategy:
+ * 15m = Fresh consolidation breakout detection
+ * 1h  = Trend confirmation
+ * 4h  = Overhead resistance / room-to-grow filter
  *
- * Scan interval is external (every 5 minutes).
- * Scan interval NEVER contributes to score.
+ * Main objective:
+ * Detect early bullish breakouts with volume confirmation.
  *
- * No 5m analysis.
- * No entry / stop loss / targets.
  * No short signals.
- *
- * Buy pressure is estimated from candle price behavior.
- * Public trade size sign is NOT treated as verified taker side.
+ * No entry / stop loss / targets.
+ * No 5m analysis.
+ * No public trade size-sign assumptions.
  *
  * File: src/scanner/marketScanner.js
  */
@@ -43,26 +41,37 @@ const CONFIG = {
   MIN_QUOTE_VOLUME_24H: 100000,
 
   CONCURRENCY: 8,
-
   REQUEST_TIMEOUT: 15000,
-
   RETRIES: 3,
 
   TELEGRAM_MAX_LENGTH: 3500,
-
   TELEGRAM_DELAY: 400,
 
-  MIN_PRICE_CHANGE_15M: 0.12,
+  // Consolidation detection
+  CONSOLIDATION_CANDLES: 12,
+  MAX_CONSOLIDATION_RANGE: 5.0,
 
-  MIN_PRESSURE_SCORE: 54,
+  // Breakout conditions
+  MIN_BREAKOUT_PERCENT: 0.10,
+  MAX_BREAKOUT_EXTENSION: 1.25,
+  MIN_CANDLE_RETURN: 0.15,
+  MIN_CLOSE_LOCATION: 0.65,
 
-  MIN_VOLUME_RATIO_15M: 1.15,
-
-  MIN_SCORE: 48,
-
+  // Volume
   VOLUME_BASELINE_CANDLES: 20,
+  MIN_VOLUME_RATIO: 1.35,
+  MIN_CANDLE_ELAPSED_SECONDS: 180,
 
-  MIN_CANDLE_ELAPSED_SECONDS: 90
+  // Trend
+  EMA_PERIOD: 20,
+  EMA_SLOPE_LOOKBACK: 5,
+
+  // 4h resistance
+  RESISTANCE_CANDLES_4H: 10,
+  MIN_RESISTANCE_ROOM: 0.80,
+
+  // Ranking
+  MIN_SCORE: 55
 };
 
 // ============================================================
@@ -108,7 +117,6 @@ const formatPrice = value => {
 
 const getContractMultiplier = contract => {
   const multiplier = number(contract?.quanto_multiplier, 1);
-
   return multiplier > 0 ? multiplier : 1;
 };
 
@@ -116,25 +124,22 @@ const getContractMultiplier = contract => {
 // CANDLE TURNOVER
 // ============================================================
 
-// Gate futures candles:
-// sum = quote-currency turnover.
-// v   = contract volume.
-//
-// Prefer sum. Only use the approximate fallback when sum
-// is unavailable.
-
 const candleValue = (candle, multiplier = 1) => {
   const turnover = number(candle?.turnover);
 
-  if (turnover > 0) {
-    return turnover;
-  }
+  if (turnover > 0) return turnover;
 
   const volume = Math.max(0, number(candle?.volume));
   const close = Math.max(0, number(candle?.close));
 
   return volume * close * multiplier;
 };
+
+const getMax = (candles, field) =>
+  Math.max(...candles.map(c => number(c[field])));
+
+const getMin = (candles, field) =>
+  Math.min(...candles.map(c => number(c[field])));
 
 // ============================================================
 // HTTP
@@ -287,159 +292,151 @@ async function mapLimit(items, limit, worker) {
 }
 
 // ============================================================
-// PRICE MOMENTUM
+// EMA
 // ============================================================
 
-function analyzeMomentum(
-  candles1h,
-  candles4h,
-  current15m,
-  livePrice
-) {
-  const last1h = candles1h.at(-1);
-  const previous1h = candles1h.at(-2);
+function calculateEMA(values, period) {
+  if (values.length < period) return [];
 
-  const last4h = candles4h.at(-1);
-  const previous4h = candles4h.at(-2);
+  const multiplier = 2 / (period + 1);
 
-  const price = number(livePrice);
+  let ema = values
+    .slice(0, period)
+    .reduce((sum, value) => sum + value, 0) / period;
+
+  const result = [ema];
+
+  for (let i = period; i < values.length; i++) {
+    ema =
+      (values[i] - ema) * multiplier + ema;
+
+    result.push(ema);
+  }
+
+  return result;
+}
+
+// ============================================================
+// 15M CONSOLIDATION
+// ============================================================
+
+function analyzeConsolidation(candles) {
+  const count = CONFIG.CONSOLIDATION_CANDLES;
+
+  if (candles.length < count) return null;
+
+  const rangeCandles = candles.slice(-count);
+
+  const resistance = getMax(rangeCandles, 'high');
+  const support = getMin(rangeCandles, 'low');
+
+  if (resistance <= 0 || support <= 0) return null;
+
+  const midpoint = (resistance + support) / 2;
+
+  const rangePercent =
+    ((resistance - support) / midpoint) * 100;
 
   if (
-    !current15m ||
-    !last1h ||
-    !previous1h ||
-    !last4h ||
-    !previous4h ||
-    !price
+    !Number.isFinite(rangePercent) ||
+    rangePercent > CONFIG.MAX_CONSOLIDATION_RANGE
   ) {
     return null;
   }
 
-  // Current 15m candle: live price versus candle open.
-  const return15m = pctChange(
-    price,
+  return {
+    resistance,
+    support,
+    rangePercent
+  };
+}
+
+// ============================================================
+// BREAKOUT DETECTION
+// ============================================================
+
+function analyzeBreakout(
+  closed15m,
+  current15m,
+  livePrice
+) {
+  if (!current15m || !livePrice) return null;
+
+  const consolidation = analyzeConsolidation(
+    closed15m
+  );
+
+  if (!consolidation) return null;
+
+  const {
+    resistance,
+    support,
+    rangePercent
+  } = consolidation;
+
+  const breakoutPercent = pctChange(
+    livePrice,
+    resistance
+  );
+
+  // Price must actually cross the previous range ceiling.
+  if (
+    breakoutPercent < CONFIG.MIN_BREAKOUT_PERCENT ||
+    breakoutPercent > CONFIG.MAX_BREAKOUT_EXTENSION
+  ) {
+    return null;
+  }
+
+  const candleReturn = pctChange(
+    livePrice,
     current15m.open
   );
 
-  // One-hour momentum: latest closed 1h candle versus
-  // the immediately preceding closed 1h candle.
-  const return1h = pctChange(
-    last1h.close,
-    previous1h.close
-  );
-
-  // Four-hour momentum: latest closed 4h candle versus
-  // the immediately preceding closed 4h candle.
-  const return4h = pctChange(
-    last4h.close,
-    previous4h.close
-  );
+  if (candleReturn < CONFIG.MIN_CANDLE_RETURN) {
+    return null;
+  }
 
   const currentHigh = Math.max(
     current15m.high,
-    price
+    livePrice
   );
 
   const currentLow = Math.min(
     current15m.low,
-    price
+    livePrice
   );
 
   const currentRange = currentHigh - currentLow;
 
-  const closeLocation =
-    currentRange > 0
-      ? clamp(
-          (price - currentLow) / currentRange,
-          0,
-          1
-        )
-      : 0.5;
+  if (currentRange <= 0) return null;
 
-  const bullish15m = return15m > 0;
-  const bullish1h = return1h > 0;
-  const bullish4h = return4h > 0;
-
-  return {
-    return15m,
-    return1h,
-    return4h,
-
-    closeLocation,
-
-    bullish15m,
-    bullish1h,
-    bullish4h
-  };
-}
-
-// ============================================================
-// ESTIMATED BUY PRESSURE
-// ============================================================
-
-// IMPORTANT:
-// This is a price-action pressure estimate.
-// It is NOT verified aggressive taker-buy volume.
-
-function analyzeBuyPressure(momentum) {
-  const locationScore =
-    momentum.closeLocation * 100;
-
-  const bodyStrength = clamp(
-    momentum.return15m / 0.50,
-    -1,
+  const closeLocation = clamp(
+    (livePrice - currentLow) / currentRange,
+    0,
     1
   );
 
-  const bodyScore =
-    50 + bodyStrength * 50;
-
-  const pressureScore = clamp(
-    locationScore * 0.65 +
-    bodyScore * 0.35,
-    0,
-    100
-  );
+  if (
+    closeLocation < CONFIG.MIN_CLOSE_LOCATION
+  ) {
+    return null;
+  }
 
   return {
-    score: pressureScore,
-    closeLocation: momentum.closeLocation,
-    quality: 'ESTIMATED'
+    resistance,
+    support,
+    rangePercent,
+    breakoutPercent,
+    candleReturn,
+    closeLocation
   };
 }
 
 // ============================================================
-// VOLUME EXPANSION
+// VOLUME CONFIRMATION
 // ============================================================
 
-function getClosedVolumeExpansion(
-  candles,
-  multiplier
-) {
-  if (candles.length < CONFIG.VOLUME_BASELINE_CANDLES + 1) {
-    return 0;
-  }
-
-  const recent = candles.at(-1);
-
-  const baselineCandles = candles.slice(
-    -(CONFIG.VOLUME_BASELINE_CANDLES + 1),
-    -1
-  );
-
-  const baseline = median(
-    baselineCandles.map(c =>
-      candleValue(c, multiplier)
-    )
-  );
-
-  if (!recent || baseline <= 0) return 0;
-
-  // Keep the real ratio. Do not cap it at 12x.
-  return candleValue(recent, multiplier) / baseline;
-}
-
-function getCurrent15mVolumeExpansion(
+function getCurrentVolumeRatio(
   closedCandles,
   currentCandle,
   multiplier
@@ -473,97 +470,194 @@ function getCurrent15mVolumeExpansion(
     CONFIG.TIMEFRAMES['15m'].seconds
   );
 
-  // Estimate the expected turnover proportionally
-  // to elapsed time in the current 15m candle.
-  const expectedVolume =
+  // Estimated expected turnover for elapsed candle time.
+  const expectedTurnover =
     baseline *
     (
       elapsedSeconds /
       CONFIG.TIMEFRAMES['15m'].seconds
     );
 
-  if (expectedVolume <= 0) return 0;
+  if (expectedTurnover <= 0) return 0;
 
-  // Keep actual expansion ratio without artificial cap.
   return (
     candleValue(currentCandle, multiplier) /
-    expectedVolume
+    expectedTurnover
   );
 }
 
 // ============================================================
-// SCORING
+// 1H TREND CONFIRMATION
 // ============================================================
 
-function calculatePressureScore(pressure) {
-  return clamp(
-    pressure.score,
-    0,
-    100
-  );
-}
+function analyze1hTrend(candles, livePrice) {
+  if (candles.length < CONFIG.EMA_PERIOD + 6) {
+    return null;
+  }
 
-function calculatePriceScore(momentum) {
-  const score15 = clamp(
-    50 + momentum.return15m * 25,
-    0,
-    100
+  const closes = candles.map(c => c.close);
+
+  const emaValues = calculateEMA(
+    closes,
+    CONFIG.EMA_PERIOD
   );
 
-  const score1h = clamp(
-    50 + momentum.return1h * 8,
-    0,
-    100
+  if (
+    emaValues.length <
+    CONFIG.EMA_SLOPE_LOOKBACK + 1
+  ) {
+    return null;
+  }
+
+  const currentEMA = emaValues.at(-1);
+
+  const previousEMA = emaValues[
+    -(CONFIG.EMA_SLOPE_LOOKBACK + 1)
+  ];
+
+  const emaSlope = pctChange(
+    currentEMA,
+    previousEMA
   );
 
-  const score4h = clamp(
-    50 + momentum.return4h * 4,
-    0,
-    100
-  );
+  const lastClose = closes.at(-1);
 
-  return (
-    score15 * 0.50 +
-    score1h * 0.30 +
-    score4h * 0.20
-  );
-}
+  // Trend should not be below its main average.
+  const aboveEMA =
+    lastClose > currentEMA &&
+    livePrice > currentEMA;
 
-function calculateVolumeScore(
-  ratio15,
-  ratio1h,
-  ratio4h
-) {
-  // Logarithmic scoring preserves the difference between
-  // high-volume coins without allowing volume alone
-  // to dominate the complete ranking.
-  const score = ratio => {
-    if (!Number.isFinite(ratio) || ratio <= 0) {
-      return 0;
-    }
+  // Avoid falling EMA trends.
+  const positiveSlope = emaSlope > 0;
 
-    return clamp(
-      Math.log2(Math.max(0.01, ratio)) * 35 + 50,
-      0,
-      100
-    );
+  if (!aboveEMA || !positiveSlope) {
+    return null;
+  }
+
+  return {
+    ema: currentEMA,
+    emaSlope,
+    aboveEMA,
+    positiveSlope
   };
-
-  return (
-    score(ratio15) * 0.50 +
-    score(ratio1h) * 0.30 +
-    score(ratio4h) * 0.20
-  );
 }
 
-function calculateAlignmentScore(momentum) {
-  let score = 0;
+// ============================================================
+// 4H RESISTANCE / ROOM TO GROW
+// ============================================================
 
-  if (momentum.bullish15m) score += 40;
-  if (momentum.bullish1h) score += 35;
-  if (momentum.bullish4h) score += 25;
+function analyze4hRoom(candles, livePrice) {
+  const count = CONFIG.RESISTANCE_CANDLES_4H;
 
-  return score;
+  if (candles.length < count) return null;
+
+  const recent = candles.slice(-count);
+
+  const resistance = getMax(recent, 'high');
+
+  if (resistance <= 0) return null;
+
+  // If price has already moved above the recent high,
+  // there is no overhead resistance in this window.
+  if (livePrice >= resistance) {
+    return {
+      resistance,
+      roomPercent: 100,
+      hasOverheadResistance: false
+    };
+  }
+
+  const roomPercent = pctChange(
+    resistance,
+    livePrice
+  );
+
+  // Avoid a breakout directly underneath 4h resistance.
+  if (
+    roomPercent < CONFIG.MIN_RESISTANCE_ROOM
+  ) {
+    return null;
+  }
+
+  return {
+    resistance,
+    roomPercent,
+    hasOverheadResistance: true
+  };
+}
+
+// ============================================================
+// RANKING
+// ============================================================
+
+function calculateBreakoutScore({
+  breakout,
+  volumeRatio,
+  trend,
+  room
+}) {
+  // Breakout strength: prefer a real break,
+  // but penalize excessive extension.
+  const breakoutScore = clamp(
+    65 + breakout.breakoutPercent * 15,
+    0,
+    100
+  );
+
+  // Volume: meaningful expansion is important.
+  const volumeScore = clamp(
+    50 + Math.log2(Math.max(0.01, volumeRatio)) * 30,
+    0,
+    100
+  );
+
+  // Narrower consolidation receives a higher score.
+  const compressionScore = clamp(
+    100 - breakout.rangePercent * 12,
+    0,
+    100
+  );
+
+  // Rising 1h EMA confirms the broader direction.
+  const trendScore = clamp(
+    65 + trend.emaSlope * 20,
+    0,
+    100
+  );
+
+  // More available room before 4h resistance is better.
+  const roomScore = room.roomPercent >= 100
+    ? 100
+    : clamp(
+        room.roomPercent * 20,
+        0,
+        100
+      );
+
+  // Price near the candle high indicates a stronger close.
+  const candleScore =
+    breakout.closeLocation * 100;
+
+  const score = Math.round(
+    breakoutScore * 0.25 +
+    volumeScore * 0.25 +
+    compressionScore * 0.10 +
+    trendScore * 0.20 +
+    roomScore * 0.10 +
+    candleScore * 0.10
+  );
+
+  return {
+    score,
+    components: {
+      breakout: Math.round(breakoutScore),
+      volume: Math.round(volumeScore),
+      compression: Math.round(compressionScore),
+      trend: Math.round(trendScore),
+      room: Math.round(roomScore),
+      candle: Math.round(candleScore)
+    }
+  };
 }
 
 // ============================================================
@@ -583,112 +677,79 @@ function analyzeCoin(data) {
 
   if (
     candles15m.length < 25 ||
-    candles1h.length < 25 ||
-    candles4h.length < 25 ||
-    !current15m
+    candles1h.length < 30 ||
+    candles4h.length < 15 ||
+    !current15m ||
+    !livePrice
   ) {
     return null;
   }
 
   const multiplier = getContractMultiplier(contract);
 
-  const momentum = analyzeMomentum(
-    candles1h,
-    candles4h,
+  // 1. Detect a fresh breakout from consolidation.
+  const breakout = analyzeBreakout(
+    candles15m,
     current15m,
     livePrice
   );
 
-  if (!momentum) return null;
+  if (!breakout) return null;
 
-  const pressure = analyzeBuyPressure(momentum);
-
-  const volume15m = getCurrent15mVolumeExpansion(
+  // 2. Confirm volume expansion.
+  const volumeRatio = getCurrentVolumeRatio(
     candles15m,
     current15m,
     multiplier
   );
 
-  const volume1h = getClosedVolumeExpansion(
+  if (volumeRatio < CONFIG.MIN_VOLUME_RATIO) {
+    return null;
+  }
+
+  // 3. Confirm 1h trend.
+  const trend = analyze1hTrend(
     candles1h,
-    multiplier
+    livePrice
   );
 
-  const volume4h = getClosedVolumeExpansion(
+  if (!trend) return null;
+
+  // 4. Check available room on 4h.
+  const room = analyze4hRoom(
     candles4h,
-    multiplier
+    livePrice
   );
 
-  // ----------------------------------------------------------
-  // HARD FILTERS
-  // ----------------------------------------------------------
+  if (!room) return null;
 
-  if (
-    pressure.score <
-    CONFIG.MIN_PRESSURE_SCORE
-  ) {
+  // 5. Rank the opportunity.
+  const ranking = calculateBreakoutScore({
+    breakout,
+    volumeRatio,
+    trend,
+    room
+  });
+
+  if (ranking.score < CONFIG.MIN_SCORE) {
     return null;
   }
-
-  if (
-    momentum.return15m <
-    CONFIG.MIN_PRICE_CHANGE_15M
-  ) {
-    return null;
-  }
-
-  if (
-    volume15m <
-    CONFIG.MIN_VOLUME_RATIO_15M
-  ) {
-    return null;
-  }
-
-  // ----------------------------------------------------------
-  // SINGLE SCORE
-  // ----------------------------------------------------------
-
-  const flowScore = calculatePressureScore(
-    pressure
-  );
-
-  const priceScore = calculatePriceScore(
-    momentum
-  );
-
-  const volumeScore = calculateVolumeScore(
-    volume15m,
-    volume1h,
-    volume4h
-  );
-
-  const alignmentScore = calculateAlignmentScore(
-    momentum
-  );
-
-  const score = Math.round(
-    flowScore * 0.35 +
-    priceScore * 0.25 +
-    volumeScore * 0.25 +
-    alignmentScore * 0.15
-  );
-
-  if (score < CONFIG.MIN_SCORE) return null;
 
   const strength =
-    score >= 85
-      ? 'فشار صعودی بسیار قوی'
-      : score >= 70
-        ? 'فشار صعودی قوی'
-        : score >= 55
-          ? 'فشار صعودی'
-          : 'شروع اولیه';
+    ranking.score >= 85
+      ? 'شکست صعودی بسیار قوی'
+      : ranking.score >= 75
+        ? 'شکست صعودی قوی'
+        : ranking.score >= 65
+          ? 'شکست صعودی معتبر'
+          : 'شروع شکست صعودی';
 
-  const confirmations = [
-    momentum.bullish15m ? '15m' : null,
-    momentum.bullish1h ? '1h' : null,
-    momentum.bullish4h ? '4h' : null
-  ].filter(Boolean);
+  const stage =
+    breakout.breakoutPercent <= 0.50
+      ? 'شروع حرکت'
+      : breakout.breakoutPercent <= 0.90
+        ? 'شتاب حرکت'
+        : 'شکست در حال گسترش';
 
   return {
     symbol,
@@ -696,33 +757,57 @@ function analyzeCoin(data) {
     price: livePrice,
     livePrice,
 
-    score,
+    score: ranking.score,
     strength,
+    stage,
 
-    pressureScore: pressure.score,
-    pressureQuality: pressure.quality,
-    closeLocation: pressure.closeLocation,
+    // Compatibility fields for existing storage.
+    pressureScore: breakout.closeLocation * 100,
+    pressureQuality: 'BREAKOUT_PRICE_ACTION',
+    closeLocation: breakout.closeLocation,
 
     momentum: {
-      '15m': momentum.return15m,
-      '1h': momentum.return1h,
-      '4h': momentum.return4h
+      '15m': breakout.candleReturn,
+      '1h': trend.emaSlope,
+      '4h': pctChange(
+        candles4h.at(-1).close,
+        candles4h.at(-2).close
+      )
     },
 
     volume: {
-      '15m': volume15m,
-      '1h': volume1h,
-      '4h': volume4h
+      '15m': volumeRatio,
+      '1h': 0,
+      '4h': 0
     },
 
-    components: {
-      flow: Math.round(flowScore),
-      price: Math.round(priceScore),
-      volume: Math.round(volumeScore),
-      alignment: Math.round(alignmentScore)
+    components: ranking.components,
+
+    breakout: {
+      resistance: breakout.resistance,
+      support: breakout.support,
+      extension: breakout.breakoutPercent,
+      consolidationRange: breakout.rangePercent
     },
 
-    confirmations,
+    trend: {
+      ema: trend.ema,
+      emaSlope: trend.emaSlope
+    },
+
+    room: {
+      resistance: room.resistance,
+      percent: room.roomPercent,
+      hasOverheadResistance: room.hasOverheadResistance
+    },
+
+    confirmations: [
+      '15m_BREAKOUT',
+      '15m_VOLUME',
+      '1h_TREND',
+      '4h_ROOM'
+    ],
+
     contract
   };
 }
@@ -822,22 +907,27 @@ async function sendReports(report) {
 // REPORT
 // ============================================================
 
-function buildReport(candidates, stats, duration, rankChanges) {
+function buildReport(
+  candidates,
+  stats,
+  duration,
+  rankChanges
+) {
   const lines = [
-    '🚀 GATE.IO | LONG BUY PRESSURE RADAR',
+    '🚀 GATE.IO | EARLY LONG BREAKOUT RADAR',
     '━━━━━━━━━━━━━━━━━━',
-    '🎯 افزایش قیمت + افزایش گردش مالی + فشار صعودی قیمت',
+    '🎯 شکست تازه محدوده تراکم + تأیید حجم',
     '⏱ تحلیل: 15M | 1H | 4H',
     '🔄 اجرای اسکن هر ۵ دقیقه؛ بدون دخالت در امتیاز',
     `📊 بازار: ${stats.active} | نقدشونده: ${stats.liquid}`,
-    `✅ موفق: ${stats.success} | خطا: ${stats.errors}`,
+    `✅ دریافت موفق: ${stats.success} | خطا: ${stats.errors}`,
     `⏱ زمان اسکن: ${(duration / 1000).toFixed(1)} ثانیه`,
     '━━━━━━━━━━━━━━━━━━'
   ];
 
   if (!candidates.length) {
     lines.push(
-      'در حال حاضر ارز واجد شرایط پیدا نشد.'
+      '🔎 در این اسکن شکست صعودی واجد شرایط پیدا نشد.'
     );
 
     return lines.join('\n');
@@ -856,11 +946,15 @@ function buildReport(candidates, stats, duration, rankChanges) {
             : '➖';
 
     lines.push(
-      `${index + 1}. ${coin.symbol} ${rankIcon} | قدرت ${coin.score}/100`
+      `${index + 1}. ${coin.symbol} ${rankIcon} | ⭐ ${coin.score}/100`
     );
 
     lines.push(
-      `🟢 ${coin.strength} | 15m +${coin.momentum['15m'].toFixed(2)}% | حجم ${coin.volume['15m'].toFixed(2)}x | فشار ${coin.pressureScore.toFixed(1)}/100`
+      `🚀 ${coin.stage} | رشد 15m: +${coin.momentum['15m'].toFixed(2)}%`
+    );
+
+    lines.push(
+      `📊 حجم: ${coin.volume['15m'].toFixed(2)}x | شکست: +${coin.breakout.extension.toFixed(2)}% | محدوده: ${coin.breakout.consolidationRange.toFixed(2)}%`
     );
 
     lines.push('');
@@ -868,7 +962,7 @@ function buildReport(candidates, stats, duration, rankChanges) {
 
   lines.push(
     '━━━━━━━━━━━━━━━━━━',
-    'ℹ️ فشار خرید، تخمین مبتنی بر رفتار قیمت است؛ نه داده قطعی معاملات تهاجمی.'
+    'ℹ️ این گزارش کاندیدای شکست است؛ نه تضمین ادامه رشد یا دستور ورود.'
   );
 
   return lines.join('\n');
@@ -881,10 +975,11 @@ function buildReport(candidates, stats, duration, rankChanges) {
 async function main() {
   const startedAt = Date.now();
 
-  console.log('\n🚀 GATE.IO LONG BUY PRESSURE RADAR');
+  console.log('\n🚀 GATE.IO EARLY LONG BREAKOUT RADAR');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━');
 
   console.log('⏱ Analysis: 15m / 1h / 4h');
+  console.log('🎯 Strategy: Consolidation Breakout + Volume');
   console.log('🔄 Scan schedule does not affect score');
 
   const [contracts, tickers] = await Promise.all([
@@ -896,7 +991,9 @@ async function main() {
     !Array.isArray(contracts) ||
     !Array.isArray(tickers)
   ) {
-    throw new Error('داده قراردادها یا تیکرها معتبر نیست.');
+    throw new Error(
+      'داده قراردادها یا تیکرها معتبر نیست.'
+    );
   }
 
   const tickerMap = new Map(
@@ -968,8 +1065,8 @@ async function main() {
 
       if (
         candles15Data.closed.length < 25 ||
-        candles1h.length < 25 ||
-        candles4h.length < 25 ||
+        candles1h.length < 30 ||
+        candles4h.length < 15 ||
         !candles15Data.current
       ) {
         throw new Error(
@@ -1014,7 +1111,7 @@ async function main() {
   }
 
   // ----------------------------------------------------------
-  // STORAGE + SINGLE RANKING
+  // STORAGE + RANKING
   // ----------------------------------------------------------
 
   const storageResult = await saveMarketSnapshot(candidates);
@@ -1038,13 +1135,13 @@ async function main() {
   // ----------------------------------------------------------
 
   console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log('🏆 TOP LONG CANDIDATES');
+  console.log('🏆 TOP LONG BREAKOUT CANDIDATES');
 
   rankedCandidates
     .slice(0, CONFIG.TOP_COUNT)
-    .forEach(coin => {
+    .forEach((coin, index) => {
       console.log(
-        `${coin.rank}. ${coin.symbol} | ${coin.score}/100 | Pressure ${coin.pressureScore.toFixed(1)} | Volume ${coin.volume['15m'].toFixed(2)}x`
+        `${index + 1}. ${coin.symbol} | ${coin.score}/100 | Volume ${coin.volume['15m'].toFixed(2)}x | Breakout ${coin.breakout?.extension?.toFixed(2) ?? '-'}%`
       );
     });
 
