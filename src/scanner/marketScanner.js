@@ -16,6 +16,9 @@
  * No entry / stop loss / targets.
  * No short signals.
  *
+ * Buy pressure is estimated from candle price behavior.
+ * Public trade size sign is NOT treated as verified taker side.
+ *
  * File: src/scanner/marketScanner.js
  */
 
@@ -49,17 +52,9 @@ const CONFIG = {
 
   TELEGRAM_DELAY: 400,
 
-  TRADE_LIMIT: 100,
-
-  TRADE_WINDOW_SECONDS: 900,
-
-  MIN_TRADE_COUNT: 15,
-
-  MIN_TRADE_COVERAGE_SECONDS: 60,
-
-  MIN_BUY_RATIO: 0.54,
-
   MIN_PRICE_CHANGE_15M: 0.12,
+
+  MIN_PRESSURE_SCORE: 54,
 
   MIN_VOLUME_RATIO_15M: 1.15,
 
@@ -67,9 +62,7 @@ const CONFIG = {
 
   VOLUME_BASELINE_CANDLES: 20,
 
-  MIN_CANDLE_ELAPSED_SECONDS: 90,
-
-  MAX_VOLUME_RATIO: 12
+  MIN_CANDLE_ELAPSED_SECONDS: 90
 };
 
 // ============================================================
@@ -119,12 +112,29 @@ const getContractMultiplier = contract => {
   return multiplier > 0 ? multiplier : 1;
 };
 
-// Gate Futures candles provide contract volume.
-// Convert it to approximate quote turnover.
-const candleValue = (candle, multiplier) =>
-  Math.max(0, number(candle?.volume)) *
-  Math.max(0, number(candle?.close)) *
-  multiplier;
+// ============================================================
+// CANDLE TURNOVER
+// ============================================================
+
+// Gate futures candles:
+// sum = quote-currency turnover.
+// v   = contract volume.
+//
+// Prefer sum. Only use the approximate fallback when sum
+// is unavailable.
+
+const candleValue = (candle, multiplier = 1) => {
+  const turnover = number(candle?.turnover);
+
+  if (turnover > 0) {
+    return turnover;
+  }
+
+  const volume = Math.max(0, number(candle?.volume));
+  const close = Math.max(0, number(candle?.close));
+
+  return volume * close * multiplier;
+};
 
 // ============================================================
 // HTTP
@@ -185,21 +195,6 @@ async function getTickers() {
   );
 }
 
-async function getRecentTrades(contract) {
-  const now = Math.floor(Date.now() / 1000);
-
-  const params = new URLSearchParams({
-    contract,
-    from: String(now - CONFIG.TRADE_WINDOW_SECONDS),
-    to: String(now),
-    limit: String(CONFIG.TRADE_LIMIT)
-  });
-
-  return fetchJSON(
-    `${CONFIG.API_BASE}/futures/usdt/trades?${params}`
-  );
-}
-
 async function getCandles(
   contract,
   interval,
@@ -227,7 +222,8 @@ async function getCandles(
       high: number(c.h),
       low: number(c.l),
       close: number(c.c),
-      volume: number(c.v)
+      volume: number(c.v),
+      turnover: number(c.sum)
     }))
     .filter(c =>
       c.time > 0 &&
@@ -291,179 +287,124 @@ async function mapLimit(items, limit, worker) {
 }
 
 // ============================================================
-// AGGRESSIVE BUY / SELL FLOW
-// ============================================================
-
-function analyzeTradeFlow(trades, multiplier = 1) {
-  const nowSeconds = Date.now() / 1000;
-
-  const contractMultiplier =
-    number(multiplier) > 0 ? number(multiplier) : 1;
-
-  let buyVolume = 0;
-  let sellVolume = 0;
-  let tradeCount = 0;
-
-  const timestamps = [];
-
-  if (!Array.isArray(trades)) {
-    return {
-      buyVolume: 0,
-      sellVolume: 0,
-      totalVolume: 0,
-      buyRatio: 0,
-      imbalance: 0,
-      tradeCount: 0,
-      coverageSeconds: 0,
-      quality: 'LOW'
-    };
-  }
-
-  for (const trade of trades) {
-    if (
-      !trade ||
-      trade.is_internal === true ||
-      number(trade.size) === 0 ||
-      number(trade.price) <= 0
-    ) {
-      continue;
-    }
-
-    const rawTime = number(
-      trade.create_time_ms,
-      number(trade.create_time)
-    );
-
-    const timestamp =
-      rawTime > 1e12 ? rawTime / 1000 : rawTime;
-
-    if (
-      timestamp <= 0 ||
-      nowSeconds - timestamp > CONFIG.TRADE_WINDOW_SECONDS ||
-      timestamp > nowSeconds + 5
-    ) {
-      continue;
-    }
-
-    const size = number(trade.size);
-
-    const notional =
-      Math.abs(size) *
-      number(trade.price) *
-      contractMultiplier;
-
-    if (notional <= 0) continue;
-
-    // Gate futures.trades:
-    // Positive size = taker buyer
-    // Negative size = taker seller
-    if (size > 0) {
-      buyVolume += notional;
-    } else {
-      sellVolume += notional;
-    }
-
-    timestamps.push(timestamp);
-    tradeCount++;
-  }
-
-  const totalVolume = buyVolume + sellVolume;
-
-  const buyRatio =
-    totalVolume > 0
-      ? buyVolume / totalVolume
-      : 0;
-
-  const imbalance =
-    totalVolume > 0
-      ? (buyVolume - sellVolume) / totalVolume
-      : 0;
-
-  const coverageSeconds =
-    timestamps.length >= 2
-      ? Math.max(...timestamps) - Math.min(...timestamps)
-      : 0;
-
-  const quality =
-    tradeCount >= CONFIG.MIN_TRADE_COUNT &&
-    coverageSeconds >= CONFIG.MIN_TRADE_COVERAGE_SECONDS
-      ? 'GOOD'
-      : 'LOW';
-
-  return {
-    buyVolume,
-    sellVolume,
-    totalVolume,
-    buyRatio,
-    imbalance,
-    tradeCount,
-    coverageSeconds,
-    quality
-  };
-}
-
-// ============================================================
 // PRICE MOMENTUM
 // ============================================================
 
 function analyzeMomentum(
-  candles15m,
   candles1h,
   candles4h,
   current15m,
   livePrice
 ) {
   const last1h = candles1h.at(-1);
+  const previous1h = candles1h.at(-2);
+
   const last4h = candles4h.at(-1);
+  const previous4h = candles4h.at(-2);
 
   const price = number(livePrice);
 
-  // Never substitute a closed candle for the live 15m candle.
   if (
     !current15m ||
     !last1h ||
+    !previous1h ||
     !last4h ||
+    !previous4h ||
     !price
   ) {
     return null;
   }
 
+  // Current 15m candle: live price versus candle open.
   const return15m = pctChange(
     price,
     current15m.open
   );
 
+  // One-hour momentum: latest closed 1h candle versus
+  // the immediately preceding closed 1h candle.
   const return1h = pctChange(
     last1h.close,
-    candles1h.at(-5)?.close || last1h.open
+    previous1h.close
   );
 
+  // Four-hour momentum: latest closed 4h candle versus
+  // the immediately preceding closed 4h candle.
   const return4h = pctChange(
     last4h.close,
-    candles4h.at(-5)?.close || last4h.open
+    previous4h.close
   );
 
-  const currentRange =
-    current15m.high - current15m.low;
+  const currentHigh = Math.max(
+    current15m.high,
+    price
+  );
+
+  const currentLow = Math.min(
+    current15m.low,
+    price
+  );
+
+  const currentRange = currentHigh - currentLow;
 
   const closeLocation =
     currentRange > 0
       ? clamp(
-          (price - current15m.low) / currentRange,
+          (price - currentLow) / currentRange,
           0,
           1
         )
       : 0.5;
 
+  const bullish15m = return15m > 0;
+  const bullish1h = return1h > 0;
+  const bullish4h = return4h > 0;
+
   return {
     return15m,
     return1h,
     return4h,
+
     closeLocation,
 
-    bullish15m: return15m > 0,
-    bullish1h: return1h > 0,
-    bullish4h: return4h > 0
+    bullish15m,
+    bullish1h,
+    bullish4h
+  };
+}
+
+// ============================================================
+// ESTIMATED BUY PRESSURE
+// ============================================================
+
+// IMPORTANT:
+// This is a price-action pressure estimate.
+// It is NOT verified aggressive taker-buy volume.
+
+function analyzeBuyPressure(momentum) {
+  const locationScore =
+    momentum.closeLocation * 100;
+
+  const bodyStrength = clamp(
+    momentum.return15m / 0.50,
+    -1,
+    1
+  );
+
+  const bodyScore =
+    50 + bodyStrength * 50;
+
+  const pressureScore = clamp(
+    locationScore * 0.65 +
+    bodyScore * 0.35,
+    0,
+    100
+  );
+
+  return {
+    score: pressureScore,
+    closeLocation: momentum.closeLocation,
+    quality: 'ESTIMATED'
   };
 }
 
@@ -471,17 +412,20 @@ function analyzeMomentum(
 // VOLUME EXPANSION
 // ============================================================
 
-function getClosedVolumeExpansion(candles, multiplier) {
-  const baselineCandles = candles.slice(
-    -(CONFIG.VOLUME_BASELINE_CANDLES + 5),
-    -5
-  );
-
-  if (
-    baselineCandles.length < CONFIG.VOLUME_BASELINE_CANDLES
-  ) {
+function getClosedVolumeExpansion(
+  candles,
+  multiplier
+) {
+  if (candles.length < CONFIG.VOLUME_BASELINE_CANDLES + 1) {
     return 0;
   }
+
+  const recent = candles.at(-1);
+
+  const baselineCandles = candles.slice(
+    -(CONFIG.VOLUME_BASELINE_CANDLES + 1),
+    -1
+  );
 
   const baseline = median(
     baselineCandles.map(c =>
@@ -489,15 +433,10 @@ function getClosedVolumeExpansion(candles, multiplier) {
     )
   );
 
-  const recent = candles.at(-1);
-
   if (!recent || baseline <= 0) return 0;
 
-  return clamp(
-    candleValue(recent, multiplier) / baseline,
-    0,
-    CONFIG.MAX_VOLUME_RATIO
-  );
+  // Keep the real ratio. Do not cap it at 12x.
+  return candleValue(recent, multiplier) / baseline;
 }
 
 function getCurrent15mVolumeExpansion(
@@ -507,16 +446,16 @@ function getCurrent15mVolumeExpansion(
 ) {
   if (!currentCandle) return 0;
 
-  const baselineCandles = closedCandles.slice(
-    -(CONFIG.VOLUME_BASELINE_CANDLES + 5),
-    -5
-  );
-
   if (
-    baselineCandles.length < CONFIG.VOLUME_BASELINE_CANDLES
+    closedCandles.length <
+    CONFIG.VOLUME_BASELINE_CANDLES
   ) {
     return 0;
   }
+
+  const baselineCandles = closedCandles.slice(
+    -CONFIG.VOLUME_BASELINE_CANDLES
+  );
 
   const baseline = median(
     baselineCandles.map(c =>
@@ -534,6 +473,8 @@ function getCurrent15mVolumeExpansion(
     CONFIG.TIMEFRAMES['15m'].seconds
   );
 
+  // Estimate the expected turnover proportionally
+  // to elapsed time in the current 15m candle.
   const expectedVolume =
     baseline *
     (
@@ -543,10 +484,10 @@ function getCurrent15mVolumeExpansion(
 
   if (expectedVolume <= 0) return 0;
 
-  return clamp(
-    candleValue(currentCandle, multiplier) / expectedVolume,
-    0,
-    CONFIG.MAX_VOLUME_RATIO
+  // Keep actual expansion ratio without artificial cap.
+  return (
+    candleValue(currentCandle, multiplier) /
+    expectedVolume
   );
 }
 
@@ -554,9 +495,9 @@ function getCurrent15mVolumeExpansion(
 // SCORING
 // ============================================================
 
-function calculateFlowScore(buyRatio) {
+function calculatePressureScore(pressure) {
   return clamp(
-    (buyRatio - 0.50) * 500,
+    pressure.score,
     0,
     100
   );
@@ -588,13 +529,25 @@ function calculatePriceScore(momentum) {
   );
 }
 
-function calculateVolumeScore(ratio15, ratio1h, ratio4h) {
-  const score = ratio =>
-    clamp(
+function calculateVolumeScore(
+  ratio15,
+  ratio1h,
+  ratio4h
+) {
+  // Logarithmic scoring preserves the difference between
+  // high-volume coins without allowing volume alone
+  // to dominate the complete ranking.
+  const score = ratio => {
+    if (!Number.isFinite(ratio) || ratio <= 0) {
+      return 0;
+    }
+
+    return clamp(
       Math.log2(Math.max(0.01, ratio)) * 35 + 50,
       0,
       100
     );
+  };
 
   return (
     score(ratio15) * 0.50 +
@@ -625,7 +578,6 @@ function analyzeCoin(data) {
     candles4h,
     current15m,
     livePrice,
-    flow,
     contract
   } = data;
 
@@ -641,7 +593,6 @@ function analyzeCoin(data) {
   const multiplier = getContractMultiplier(contract);
 
   const momentum = analyzeMomentum(
-    candles15m,
     candles1h,
     candles4h,
     current15m,
@@ -649,6 +600,8 @@ function analyzeCoin(data) {
   );
 
   if (!momentum) return null;
+
+  const pressure = analyzeBuyPressure(momentum);
 
   const volume15m = getCurrent15mVolumeExpansion(
     candles15m,
@@ -670,9 +623,12 @@ function analyzeCoin(data) {
   // HARD FILTERS
   // ----------------------------------------------------------
 
-  if (flow.quality !== 'GOOD') return null;
-
-  if (flow.buyRatio < CONFIG.MIN_BUY_RATIO) return null;
+  if (
+    pressure.score <
+    CONFIG.MIN_PRESSURE_SCORE
+  ) {
+    return null;
+  }
 
   if (
     momentum.return15m <
@@ -692,8 +648,8 @@ function analyzeCoin(data) {
   // SINGLE SCORE
   // ----------------------------------------------------------
 
-  const flowScore = calculateFlowScore(
-    flow.buyRatio
+  const flowScore = calculatePressureScore(
+    pressure
   );
 
   const priceScore = calculatePriceScore(
@@ -721,11 +677,11 @@ function analyzeCoin(data) {
 
   const strength =
     score >= 85
-      ? 'خرید بسیار قوی'
+      ? 'فشار صعودی بسیار قوی'
       : score >= 70
-        ? 'خرید قوی'
+        ? 'فشار صعودی قوی'
         : score >= 55
-          ? 'فشار خرید'
+          ? 'فشار صعودی'
           : 'شروع اولیه';
 
   const confirmations = [
@@ -743,12 +699,9 @@ function analyzeCoin(data) {
     score,
     strength,
 
-    buyRatio: flow.buyRatio,
-    buyVolume: flow.buyVolume,
-    sellVolume: flow.sellVolume,
-    tradeCount: flow.tradeCount,
-    flowQuality: flow.quality,
-    flowCoverageSeconds: flow.coverageSeconds,
+    pressureScore: pressure.score,
+    pressureQuality: pressure.quality,
+    closeLocation: pressure.closeLocation,
 
     momentum: {
       '15m': momentum.return15m,
@@ -873,9 +826,9 @@ function buildReport(candidates, stats, duration, rankChanges) {
   const lines = [
     '🚀 GATE.IO | LONG BUY PRESSURE RADAR',
     '━━━━━━━━━━━━━━━━━━',
-    '🎯 افزایش قیمت + حجم + خرید تهاجمی',
+    '🎯 افزایش قیمت + افزایش گردش مالی + فشار صعودی قیمت',
     '⏱ تحلیل: 15M | 1H | 4H',
-    '🔄 اجرای اسکن: هر ۵ دقیقه (بدون تایم‌فریم 5m)',
+    '🔄 اجرای اسکن هر ۵ دقیقه؛ بدون دخالت در امتیاز',
     `📊 بازار: ${stats.active} | نقدشونده: ${stats.liquid}`,
     `✅ موفق: ${stats.success} | خطا: ${stats.errors}`,
     `⏱ زمان اسکن: ${(duration / 1000).toFixed(1)} ثانیه`,
@@ -884,7 +837,7 @@ function buildReport(candidates, stats, duration, rankChanges) {
 
   if (!candidates.length) {
     lines.push(
-      'در حال حاضر ارز واجد شرایط خرید قوی پیدا نشد.'
+      'در حال حاضر ارز واجد شرایط پیدا نشد.'
     );
 
     return lines.join('\n');
@@ -907,9 +860,7 @@ function buildReport(candidates, stats, duration, rankChanges) {
     );
 
     lines.push(
-      `🟢 ${coin.strength} | قیمت 15m +${coin.momentum['15m'].toFixed(2)}% | حجم ${coin.volume['15m'].toFixed(2)}x | خرید ${(
-        coin.buyRatio * 100
-      ).toFixed(1)}%`
+      `🟢 ${coin.strength} | 15m +${coin.momentum['15m'].toFixed(2)}% | حجم ${coin.volume['15m'].toFixed(2)}x | فشار ${coin.pressureScore.toFixed(1)}/100`
     );
 
     lines.push('');
@@ -917,7 +868,7 @@ function buildReport(candidates, stats, duration, rankChanges) {
 
   lines.push(
     '━━━━━━━━━━━━━━━━━━',
-    'ℹ️ رادار شرایط بازار است، نه توصیه قطعی معامله.'
+    'ℹ️ فشار خرید، تخمین مبتنی بر رفتار قیمت است؛ نه داده قطعی معاملات تهاجمی.'
   );
 
   return lines.join('\n');
@@ -993,8 +944,7 @@ async function main() {
       const [
         candles15Data,
         candles1h,
-        candles4h,
-        trades
+        candles4h
       ] = await Promise.all([
         getCandles(
           market.symbol,
@@ -1013,9 +963,7 @@ async function main() {
           market.symbol,
           '4h',
           CONFIG.TIMEFRAMES['4h'].limit
-        ),
-
-        getRecentTrades(market.symbol)
+        )
       ]);
 
       if (
@@ -1024,13 +972,10 @@ async function main() {
         candles4h.length < 25 ||
         !candles15Data.current
       ) {
-        throw new Error('کندل کافی یا کندل جاری 15m دریافت نشد.');
+        throw new Error(
+          'کندل کافی یا کندل جاری 15m دریافت نشد.'
+        );
       }
-
-      const flow = analyzeTradeFlow(
-        trades,
-        getContractMultiplier(market.contract)
-      );
 
       const coin = analyzeCoin({
         symbol: market.symbol,
@@ -1043,7 +988,6 @@ async function main() {
 
         livePrice: market.lastPrice,
 
-        flow,
         contract: market.contract
       });
 
@@ -1100,7 +1044,7 @@ async function main() {
     .slice(0, CONFIG.TOP_COUNT)
     .forEach(coin => {
       console.log(
-        `${coin.rank}. ${coin.symbol} | ${coin.score}/100 | Buy ${(coin.buyRatio * 100).toFixed(1)}% | Volume ${coin.volume['15m'].toFixed(2)}x`
+        `${coin.rank}. ${coin.symbol} | ${coin.score}/100 | Pressure ${coin.pressureScore.toFixed(1)} | Volume ${coin.volume['15m'].toFixed(2)}x`
       );
     });
 
