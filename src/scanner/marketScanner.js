@@ -9,13 +9,7 @@
  * 1h  = Trend confirmation
  * 4h  = Overhead resistance / room-to-grow filter
  *
- * Main objective:
- * Detect early bullish breakouts with volume confirmation.
- *
- * No short signals.
- * No entry / stop loss / targets.
- * No 5m analysis.
- * No public trade size-sign assumptions.
+ * Diagnostic counters added.
  *
  * File: src/scanner/marketScanner.js
  */
@@ -37,7 +31,6 @@ const CONFIG = {
   },
 
   TOP_COUNT: 30,
-
   MIN_QUOTE_VOLUME_24H: 100000,
 
   CONCURRENCY: 8,
@@ -119,6 +112,35 @@ const getContractMultiplier = contract => {
   const multiplier = number(contract?.quanto_multiplier, 1);
   return multiplier > 0 ? multiplier : 1;
 };
+
+// ============================================================
+// DIAGNOSTICS
+// ============================================================
+
+function createDiagnostics() {
+  return {
+    validData: 0,
+    consolidation: 0,
+    breakout: 0,
+    volume: 0,
+    trend: 0,
+    room: 0,
+    score: 0
+  };
+}
+
+function formatDiagnostics(d) {
+  return [
+    '🔬 مراحل عبور ارزها:',
+    `1️⃣ داده معتبر: ${d.validData}`,
+    `2️⃣ تشکیل تراکم: ${d.consolidation}`,
+    `3️⃣ شکست معتبر: ${d.breakout}`,
+    `4️⃣ تأیید حجم: ${d.volume}`,
+    `5️⃣ تأیید روند 1H: ${d.trend}`,
+    `6️⃣ فضای رشد 4H: ${d.room}`,
+    `7️⃣ امتیاز نهایی: ${d.score}`
+  ].join('\n');
+}
 
 // ============================================================
 // CANDLE TURNOVER
@@ -358,7 +380,8 @@ function analyzeConsolidation(candles) {
 function analyzeBreakout(
   closed15m,
   current15m,
-  livePrice
+  livePrice,
+  diagnostics
 ) {
   if (!current15m || !livePrice) return null;
 
@@ -367,6 +390,8 @@ function analyzeBreakout(
   );
 
   if (!consolidation) return null;
+
+  diagnostics.consolidation++;
 
   const {
     resistance,
@@ -379,7 +404,6 @@ function analyzeBreakout(
     resistance
   );
 
-  // Price must actually cross the previous range ceiling.
   if (
     breakoutPercent < CONFIG.MIN_BREAKOUT_PERCENT ||
     breakoutPercent > CONFIG.MAX_BREAKOUT_EXTENSION
@@ -421,6 +445,8 @@ function analyzeBreakout(
   ) {
     return null;
   }
+
+  diagnostics.breakout++;
 
   return {
     resistance,
@@ -470,7 +496,6 @@ function getCurrentVolumeRatio(
     CONFIG.TIMEFRAMES['15m'].seconds
   );
 
-  // Estimated expected turnover for elapsed candle time.
   const expectedTurnover =
     baseline *
     (
@@ -522,12 +547,10 @@ function analyze1hTrend(candles, livePrice) {
 
   const lastClose = closes.at(-1);
 
-  // Trend should not be below its main average.
   const aboveEMA =
     lastClose > currentEMA &&
     livePrice > currentEMA;
 
-  // Avoid falling EMA trends.
   const positiveSlope = emaSlope > 0;
 
   if (!aboveEMA || !positiveSlope) {
@@ -557,8 +580,6 @@ function analyze4hRoom(candles, livePrice) {
 
   if (resistance <= 0) return null;
 
-  // If price has already moved above the recent high,
-  // there is no overhead resistance in this window.
   if (livePrice >= resistance) {
     return {
       resistance,
@@ -572,7 +593,6 @@ function analyze4hRoom(candles, livePrice) {
     livePrice
   );
 
-  // Avoid a breakout directly underneath 4h resistance.
   if (
     roomPercent < CONFIG.MIN_RESISTANCE_ROOM
   ) {
@@ -596,36 +616,30 @@ function calculateBreakoutScore({
   trend,
   room
 }) {
-  // Breakout strength: prefer a real break,
-  // but penalize excessive extension.
   const breakoutScore = clamp(
     65 + breakout.breakoutPercent * 15,
     0,
     100
   );
 
-  // Volume: meaningful expansion is important.
   const volumeScore = clamp(
     50 + Math.log2(Math.max(0.01, volumeRatio)) * 30,
     0,
     100
   );
 
-  // Narrower consolidation receives a higher score.
   const compressionScore = clamp(
     100 - breakout.rangePercent * 12,
     0,
     100
   );
 
-  // Rising 1h EMA confirms the broader direction.
   const trendScore = clamp(
     65 + trend.emaSlope * 20,
     0,
     100
   );
 
-  // More available room before 4h resistance is better.
   const roomScore = room.roomPercent >= 100
     ? 100
     : clamp(
@@ -634,7 +648,6 @@ function calculateBreakoutScore({
         100
       );
 
-  // Price near the candle high indicates a stronger close.
   const candleScore =
     breakout.closeLocation * 100;
 
@@ -664,7 +677,7 @@ function calculateBreakoutScore({
 // COIN ANALYSIS
 // ============================================================
 
-function analyzeCoin(data) {
+function analyzeCoin(data, diagnostics) {
   const {
     symbol,
     candles15m,
@@ -687,16 +700,17 @@ function analyzeCoin(data) {
 
   const multiplier = getContractMultiplier(contract);
 
-  // 1. Detect a fresh breakout from consolidation.
+  // 1. Detect breakout
   const breakout = analyzeBreakout(
     candles15m,
     current15m,
-    livePrice
+    livePrice,
+    diagnostics
   );
 
   if (!breakout) return null;
 
-  // 2. Confirm volume expansion.
+  // 2. Volume confirmation
   const volumeRatio = getCurrentVolumeRatio(
     candles15m,
     current15m,
@@ -707,7 +721,9 @@ function analyzeCoin(data) {
     return null;
   }
 
-  // 3. Confirm 1h trend.
+  diagnostics.volume++;
+
+  // 3. 1h trend
   const trend = analyze1hTrend(
     candles1h,
     livePrice
@@ -715,7 +731,9 @@ function analyzeCoin(data) {
 
   if (!trend) return null;
 
-  // 4. Check available room on 4h.
+  diagnostics.trend++;
+
+  // 4. 4h room
   const room = analyze4hRoom(
     candles4h,
     livePrice
@@ -723,7 +741,9 @@ function analyzeCoin(data) {
 
   if (!room) return null;
 
-  // 5. Rank the opportunity.
+  diagnostics.room++;
+
+  // 5. Ranking
   const ranking = calculateBreakoutScore({
     breakout,
     volumeRatio,
@@ -734,6 +754,8 @@ function analyzeCoin(data) {
   if (ranking.score < CONFIG.MIN_SCORE) {
     return null;
   }
+
+  diagnostics.score++;
 
   const strength =
     ranking.score >= 85
@@ -761,7 +783,6 @@ function analyzeCoin(data) {
     strength,
     stage,
 
-    // Compatibility fields for existing storage.
     pressureScore: breakout.closeLocation * 100,
     pressureQuality: 'BREAKOUT_PRICE_ACTION',
     closeLocation: breakout.closeLocation,
@@ -922,6 +943,8 @@ function buildReport(
     `📊 بازار: ${stats.active} | نقدشونده: ${stats.liquid}`,
     `✅ دریافت موفق: ${stats.success} | خطا: ${stats.errors}`,
     `⏱ زمان اسکن: ${(duration / 1000).toFixed(1)} ثانیه`,
+    '━━━━━━━━━━━━━━━━━━',
+    formatDiagnostics(stats.diagnostics),
     '━━━━━━━━━━━━━━━━━━'
   ];
 
@@ -974,6 +997,8 @@ function buildReport(
 
 async function main() {
   const startedAt = Date.now();
+
+  const diagnostics = createDiagnostics();
 
   console.log('\n🚀 GATE.IO EARLY LONG BREAKOUT RADAR');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━');
@@ -1074,6 +1099,9 @@ async function main() {
         );
       }
 
+      // Valid market data received.
+      diagnostics.validData++;
+
       const coin = analyzeCoin({
         symbol: market.symbol,
 
@@ -1086,7 +1114,7 @@ async function main() {
         livePrice: market.lastPrice,
 
         contract: market.contract
-      });
+      }, diagnostics);
 
       success++;
 
@@ -1127,7 +1155,8 @@ async function main() {
     active: activeContracts.length,
     liquid: liquidMarkets.length,
     success,
-    errors
+    errors,
+    diagnostics
   };
 
   // ----------------------------------------------------------
@@ -1144,6 +1173,8 @@ async function main() {
         `${index + 1}. ${coin.symbol} | ${coin.score}/100 | Volume ${coin.volume['15m'].toFixed(2)}x | Breakout ${coin.breakout?.extension?.toFixed(2) ?? '-'}%`
       );
     });
+
+  console.log('\n' + formatDiagnostics(diagnostics));
 
   console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log(`Candidates: ${rankedCandidates.length}`);
