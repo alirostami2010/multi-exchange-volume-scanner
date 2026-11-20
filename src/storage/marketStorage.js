@@ -3,9 +3,13 @@
  * MARKET STORAGE — LONG BUY RADAR
  * -----------------------------------------------
  * Ranking: Single Long-Only Score
+ * Ranking sort: Strict descending
+ *
  * Detailed history: 15 days
  * Coin summaries: 30 days
  * Rank memory: 15 days
+ *
+ * Scan frequency does not contribute to score.
  *
  * File: src/storage/marketStorage.js
  */
@@ -26,14 +30,13 @@ const RANK_MEMORY_RETENTION_DAYS = 15;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-const SCORE_SMOOTHING = 0.70;
-
 // ============================================================
 // UTILITIES
 // ============================================================
 
 const number = (value, fallback = 0) => {
   const n = Number(value);
+
   return Number.isFinite(n) ? n : fallback;
 };
 
@@ -72,7 +75,6 @@ async function readState() {
           ? data.rankMemory
           : {},
 
-      // Preserve previous data for backward compatibility.
       tradeStates:
         data.tradeStates &&
         typeof data.tradeStates === 'object'
@@ -197,34 +199,6 @@ function updateSummary(previous, coin, now) {
 }
 
 // ============================================================
-// SCORE SMOOTHING
-// ============================================================
-
-function smoothScore(current, previous) {
-  const raw = clamp(number(current), 0, 100);
-
-  if (
-    !previous ||
-    !Number.isFinite(Number(previous.score))
-  ) {
-    return raw;
-  }
-
-  const oldScore = number(previous.score);
-
-  if (Math.abs(raw - oldScore) < 1.5) {
-    return oldScore;
-  }
-
-  return Number(
-    (
-      oldScore * SCORE_SMOOTHING +
-      raw * (1 - SCORE_SMOOTHING)
-    ).toFixed(2)
-  );
-}
-
-// ============================================================
 // RANK CHANGE
 // ============================================================
 
@@ -234,11 +208,13 @@ function buildRankChanges(rankedCandidates, previousMemory) {
   for (const coin of rankedCandidates) {
     const previous = previousMemory[coin.symbol];
 
+    // Only use the previous unified rank.
+    // Never read legacy growth.rank or move.rank.
     const previousRank =
-      previous?.rank ??
-      previous?.growth?.rank ??
-      previous?.move?.rank ??
-      null;
+      Number.isFinite(Number(previous?.rank)) &&
+      Number(previous.rank) > 0
+        ? Number(previous.rank)
+        : null;
 
     const change =
       previousRank == null
@@ -267,18 +243,20 @@ function buildRankChanges(rankedCandidates, previousMemory) {
 }
 
 // ============================================================
-// SORTING
+// STRICT SORTING
 // ============================================================
 
 function compareCandidates(a, b) {
   const scoreDifference =
     number(b.score) - number(a.score);
 
-  if (Math.abs(scoreDifference) > 1.25) {
+  if (scoreDifference !== 0) {
     return scoreDifference;
   }
 
-  return a.symbol.localeCompare(b.symbol);
+  return String(a.symbol).localeCompare(
+    String(b.symbol)
+  );
 }
 
 // ============================================================
@@ -294,27 +272,32 @@ export async function saveMarketSnapshot(candidates = []) {
   const previousMemory = state.rankMemory;
 
   // ----------------------------------------------------------
-  // SMOOTH SCORES
+  // PREPARE CURRENT RAW SCORES
   // ----------------------------------------------------------
 
-  const rankedCandidates = candidates.map(coin => {
-    const previous = previousMemory[coin.symbol];
+  const rankedCandidates = candidates
+    .filter(coin =>
+      coin &&
+      typeof coin.symbol === 'string' &&
+      coin.symbol.length > 0
+    )
+    .map(coin => {
+      const rawScore = clamp(
+        number(coin.score),
+        0,
+        100
+      );
 
-    const rawScore = number(coin.score);
+      return {
+        ...coin,
 
-    const smoothedScore = smoothScore(
-      rawScore,
-      previous
-    );
+        scoreRaw: rawScore,
 
-    return {
-      ...coin,
-
-      scoreRaw: rawScore,
-
-      score: Number(smoothedScore.toFixed(2))
-    };
-  });
+        // No old-score smoothing.
+        // Current valid market conditions determine ranking.
+        score: rawScore
+      };
+    });
 
   // ----------------------------------------------------------
   // SINGLE RANKING
@@ -379,6 +362,8 @@ export async function saveMarketSnapshot(candidates = []) {
     tradeCount: coin.tradeCount,
 
     flowQuality: coin.flowQuality,
+
+    flowCoverageSeconds: coin.flowCoverageSeconds,
 
     momentum: coin.momentum,
 
@@ -462,7 +447,6 @@ export async function saveMarketSnapshot(candidates = []) {
 
       rankMemory: state.rankMemory,
 
-      // Keep old records; the new scanner does not use them.
       tradeStates: state.tradeStates,
 
       events: state.events
