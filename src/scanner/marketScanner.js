@@ -12,6 +12,7 @@
  * Diagnostics:
  * - Breakout volume details
  * - API rate-limit protection
+ * - Reliable Telegram delivery
  *
  * File: src/scanner/marketScanner.js
  */
@@ -43,6 +44,10 @@ const CONFIG = {
 
   TELEGRAM_MAX_LENGTH: 3500,
   TELEGRAM_DELAY: 400,
+
+  // Telegram reliability
+  TELEGRAM_RETRIES: 4,
+  TELEGRAM_REQUEST_TIMEOUT: 15000,
 
   // Consolidation detection
   CONSOLIDATION_CANDLES: 12,
@@ -979,17 +984,103 @@ function analyzeCoin(data, diagnostics) {
 }
 
 // ============================================================
-// TELEGRAM
+// TELEGRAM — RELIABLE DELIVERY
 // ============================================================
+
+function getNestedErrorCodes(error) {
+  const codes = new Set();
+  const visited = new Set();
+
+  function inspect(value, depth = 0) {
+    if (!value || depth > 5) return;
+
+    if (typeof value !== 'object') return;
+    if (visited.has(value)) return;
+
+    visited.add(value);
+
+    if (value.code) {
+      codes.add(String(value.code).toUpperCase());
+    }
+
+    if (value.cause) {
+      inspect(value.cause, depth + 1);
+    }
+
+    if (Array.isArray(value.errors)) {
+      for (const item of value.errors) {
+        inspect(item, depth + 1);
+      }
+    } else if (value.errors) {
+      inspect(value.errors, depth + 1);
+    }
+  }
+
+  inspect(error);
+
+  return [...codes];
+}
+
+function isRetryableTelegramError(error) {
+  const status = Number(error?.status);
+
+  // Telegram rate limit
+  if (status === 429) return true;
+
+  // Telegram server errors
+  if (status >= 500 && status <= 599) return true;
+
+  // Network errors
+  const retryableCodes = new Set([
+    'ETIMEDOUT',
+    'ECONNRESET',
+    'ECONNREFUSED',
+    'EAI_AGAIN',
+    'ENOTFOUND',
+    'EHOSTUNREACH',
+    'ENETUNREACH',
+    'UND_ERR_CONNECT_TIMEOUT',
+    'UND_ERR_HEADERS_TIMEOUT',
+    'UND_ERR_SOCKET',
+    'ECONNABORTED'
+  ]);
+
+  const codes = getNestedErrorCodes(error);
+
+  if (codes.some(code => retryableCodes.has(code))) {
+    return true;
+  }
+
+  // Fetch network failures
+  if (
+    error instanceof TypeError &&
+    /fetch failed|network|socket/i.test(error.message)
+  ) {
+    return true;
+  }
+
+  // Request timeout / aborted connection
+  if (
+    error?.name === 'TimeoutError' ||
+    error?.name === 'AbortError'
+  ) {
+    return true;
+  }
+
+  return false;
+}
 
 async function sendTelegram(message) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = process.env.TELEGRAM_CHAT_ID;
 
   if (!token || !chatId) {
-    throw new Error(
+    const error = new Error(
       'TELEGRAM_BOT_TOKEN یا TELEGRAM_CHAT_ID تنظیم نشده است.'
     );
+
+    error.permanent = true;
+    throw error;
   }
 
   const response = await fetch(
@@ -1004,20 +1095,38 @@ async function sendTelegram(message) {
         text: message,
         disable_web_page_preview: true
       }),
-      signal: AbortSignal.timeout(15000)
+      signal: AbortSignal.timeout(
+        CONFIG.TELEGRAM_REQUEST_TIMEOUT
+      )
     }
   );
 
-  const result = await response.json();
+  let result = null;
 
-  if (!response.ok || !result.ok) {
+  try {
+    result = await response.json();
+  } catch {
+    // Invalid or empty response body.
+  }
+
+  if (!response.ok || !result?.ok) {
     const error = new Error(
-      result.description || `Telegram HTTP ${response.status}`
+      result?.description ||
+      `Telegram HTTP ${response.status}`
     );
 
-    error.retryAfter = result.parameters?.retry_after;
+    error.status = response.status;
+
+    error.retryAfter =
+      number(result?.parameters?.retry_after, 0);
+
+    error.retryAfterMs =
+      error.retryAfter * 1000;
+
     throw error;
   }
+
+  return true;
 }
 
 function splitTelegramMessage(text, maxLength) {
@@ -1034,7 +1143,22 @@ function splitTelegramMessage(text, maxLength) {
       current = candidate;
     } else {
       if (current) messages.push(current);
-      current = block;
+
+      if (block.length > maxLength) {
+        let remaining = block;
+
+        while (remaining.length > maxLength) {
+          messages.push(
+            remaining.slice(0, maxLength)
+          );
+
+          remaining = remaining.slice(maxLength);
+        }
+
+        current = remaining;
+      } else {
+        current = block;
+      }
     }
   }
 
@@ -1043,10 +1167,83 @@ function splitTelegramMessage(text, maxLength) {
   return messages;
 }
 
+async function sendTelegramWithRetry(message, messageIndex) {
+  let lastError = null;
+
+  for (
+    let attempt = 1;
+    attempt <= CONFIG.TELEGRAM_RETRIES;
+    attempt++
+  ) {
+    try {
+      await sendTelegram(message);
+
+      return {
+        sent: true,
+        attempts: attempt
+      };
+
+    } catch (error) {
+      lastError = error;
+
+      const retryable =
+        isRetryableTelegramError(error);
+
+      if (
+        !retryable ||
+        attempt >= CONFIG.TELEGRAM_RETRIES
+      ) {
+        break;
+      }
+
+      const exponentialBackoff =
+        1500 * Math.pow(2, attempt - 1);
+
+      const jitter = Math.floor(
+        Math.random() * 700
+      );
+
+      const retryAfterMs = Math.max(
+        number(error.retryAfterMs, 0),
+        number(error.retryAfter, 0) * 1000
+      );
+
+      const delay =
+        error.status === 429
+          ? Math.max(
+              retryAfterMs,
+              exponentialBackoff + jitter
+            )
+          : exponentialBackoff + jitter;
+
+      console.warn(
+        `⚠️ Telegram retry ${attempt}/${CONFIG.TELEGRAM_RETRIES - 1} | Message ${messageIndex} | ${error.status || error.code || error.name || 'NETWORK'} | wait ${Math.ceil(delay / 1000)}s`
+      );
+
+      await sleep(delay);
+    }
+  }
+
+  return {
+    sent: false,
+    attempts: CONFIG.TELEGRAM_RETRIES,
+    error: lastError
+  };
+}
+
 async function sendReports(report) {
   const messages = splitTelegramMessage(
     report,
     CONFIG.TELEGRAM_MAX_LENGTH - 50
+  );
+
+  let sentCount = 0;
+  let failedCount = 0;
+
+  const failures = [];
+
+  console.log(
+    `\n📨 Telegram: sending ${messages.length} report message(s)...`
   );
 
   for (let i = 0; i < messages.length; i++) {
@@ -1054,19 +1251,58 @@ async function sendReports(report) {
       `📄 گزارش ${i + 1}/${messages.length}\n\n` +
       messages[i];
 
-    try {
-      await sendTelegram(payload);
-    } catch (error) {
-      if (!error.retryAfter) throw error;
+    const result = await sendTelegramWithRetry(
+      payload,
+      `${i + 1}/${messages.length}`
+    );
 
-      await sleep(error.retryAfter * 1000 + 500);
-      await sendTelegram(payload);
+    if (result.sent) {
+      sentCount++;
+
+      console.log(
+        `✅ Telegram message ${i + 1}/${messages.length} sent.`
+      );
+
+    } else {
+      failedCount++;
+
+      const errorMessage =
+        result.error?.message || 'Unknown Telegram error';
+
+      failures.push({
+        message: i + 1,
+        error: errorMessage
+      });
+
+      console.error(
+        `❌ Telegram message ${i + 1}/${messages.length} failed after ${result.attempts} attempt(s): ${errorMessage}`
+      );
     }
 
     if (i < messages.length - 1) {
       await sleep(CONFIG.TELEGRAM_DELAY);
     }
   }
+
+  const deliveryResult = {
+    sent: failedCount === 0,
+    total: messages.length,
+    sentCount,
+    failedCount,
+    failures
+  };
+
+  if (failedCount > 0) {
+    console.warn(
+      `⚠️ Telegram delivery incomplete: ${sentCount}/${messages.length} messages sent.`
+    );
+  } else {
+    console.log(
+      `✅ Telegram delivery completed: ${sentCount}/${messages.length} messages sent.`
+    );
+  }
+
+  return deliveryResult;
 }
 
 // ============================================================
@@ -1338,16 +1574,28 @@ async function main() {
   // TELEGRAM
   // ----------------------------------------------------------
 
-  await sendReports(
-    buildReport(
-      rankedCandidates.slice(0, CONFIG.TOP_COUNT),
-      stats,
-      duration,
-      rankChanges
-    )
+  const report = buildReport(
+    rankedCandidates.slice(0, CONFIG.TOP_COUNT),
+    stats,
+    duration,
+    rankChanges
   );
 
-  console.log('\n✅ Telegram report sent.');
+  const telegramResult = await sendReports(report);
+
+  if (telegramResult.sent) {
+    console.log('\n✅ All Telegram reports sent successfully.');
+  } else {
+    console.warn(
+      '\n⚠️ Scan completed, but Telegram delivery was incomplete.'
+    );
+
+    console.warn(
+      `📨 Sent: ${telegramResult.sentCount}/${telegramResult.total}`
+    );
+  }
+
+  console.log('\n✅ SCAN COMPLETED.');
 }
 
 // ============================================================
