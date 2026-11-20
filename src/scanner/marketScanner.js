@@ -1,9 +1,8 @@
-
 /**
- * GATE.IO USDT PERPETUAL — FOUR TIMEFRAME BULLISH RADAR
- * Timeframes: 5m confirmation + 15m / 1h / 4h / 1d analysis
- * Base scoring and four-timeframe ranking weights are preserved.
- * HTML dashboard + Telegram document delivery added.
+ * GATE.IO USDT PERPETUAL — EARLY BULLISH RADAR
+ * 1W context | 1D structure | 4H primary trend
+ * 1H momentum | 15M confirmation | 5M entry timing only
+ * Opportunity Score and Entry Score are independent.
  * File: src/scanner/marketScanner.js | Node.js 20+
  */
 
@@ -27,6 +26,7 @@ const CONFIG = {
     '1h': { seconds: 3600, limit: 100 },
     '4h': { seconds: 14400, limit: 100 },
     '1d': { seconds: 86400, limit: 100 },
+    '1w': { seconds: 604800, limit: 100 },
   },
 
   TOP_COUNT: 20,
@@ -38,7 +38,7 @@ const CONFIG = {
   TELEGRAM_MAX_LENGTH: 3500,
   TELEGRAM_DELAY: 400,
 
-  MIN_SCORE: 58,
+  MIN_SCORE: 55,
 
   MAX_RETURN_15M: 4,
   MAX_RETURN_1H: 6,
@@ -136,6 +136,15 @@ async function fetchJSON(url) {
       return await response.json();
     } catch (error) {
       lastError = error;
+
+      const permanentClientError =
+        error.status >= 400 &&
+        error.status < 500 &&
+        error.status !== 429;
+
+      if (permanentClientError) {
+        throw error;
+      }
 
       if (attempt < CONFIG.RETRIES) {
         await sleep(
@@ -514,6 +523,61 @@ function analyzeTimeframe(candles) {
 }
 
 // ========================
+// WEEKLY CONTEXT
+// ========================
+
+function analyzeWeekly(candles, livePrice) {
+  if (!candles || candles.length < 20) {
+    return {
+      available: false,
+      bullish: false,
+      emaBullish: false,
+      nearResistance: false,
+      resistance: 0,
+      return4w: 0,
+    };
+  }
+
+  const closes = candles.map((c) => c.close);
+  const ema21 = calculateEMA(closes, 21);
+  const price = number(livePrice, candles.at(-1).close);
+
+  const resistanceCandles = candles.slice(-13, -1);
+
+  const resistance = resistanceCandles.length
+    ? Math.max(...resistanceCandles.map((c) => c.high))
+    : 0;
+
+  const last = candles.at(-1);
+
+  const emaBullish =
+    ema21.length > 0 &&
+    price > ema21.at(-1);
+
+  const higherLow =
+    candles.length >= 5 &&
+    candles.at(-1).low > candles.at(-5).low;
+
+  const nearResistance =
+    resistance > 0 &&
+    price >= resistance * 0.97 &&
+    price <= resistance * 1.03;
+
+  return {
+    available: true,
+    bullish: emaBullish || higherLow,
+    emaBullish,
+    higherLow,
+    nearResistance,
+    resistance,
+    return4w: pctChange(
+      last.close,
+      candles.at(-5).close
+    ),
+  };
+}
+
+// ========================
 // DAILY ANALYSIS
 // ========================
 
@@ -746,6 +810,54 @@ function emptyDailyAnalysis(price = 0) {
 }
 
 // ========================
+// ENTRY SCORE
+// ========================
+
+function calculateEntryScore(
+  tf15,
+  candles5m,
+  entrySetup = null
+) {
+  let score = 50;
+
+  if (tf15?.emaBullish) score += 10;
+  if (tf15?.structure?.higherLow) score += 10;
+  if (tf15?.structure?.breakout) score += 12;
+
+  if (
+    tf15?.strength?.bullish &&
+    tf15.strength.closeLocation >= 0.7
+  ) {
+    score += 8;
+  }
+
+  if (tf15?.volumeRatio >= 1.5) score += 5;
+
+  const last5m = candles5m?.at(-1);
+  const previous5m = candles5m?.at(-2);
+
+  if (last5m && previous5m) {
+    const strength = getCandleStrength(last5m);
+
+    if (strength.bullish) score += 5;
+    if (strength.closeLocation >= 0.65) score += 5;
+
+    if (last5m.close > previous5m.high) {
+      score += 10;
+    }
+
+    if (
+      entrySetup?.confirmationMet &&
+      last5m.close > entrySetup.entryHigh
+    ) {
+      score += 10;
+    }
+  }
+
+  return Math.round(clamp(score, 0, 100));
+}
+
+// ========================
 // EARLY BULLISH SCORING
 // ========================
 
@@ -760,6 +872,11 @@ function analyzeCoin(data) {
   const tf15 = analyzeTimeframe(candles['15m']);
   const tf1h = analyzeTimeframe(candles['1h']);
   const tf4h = analyzeTimeframe(candles['4h']);
+
+  const weekly = analyzeWeekly(
+    candles['1w'],
+    livePrice
+  );
 
   const daily =
     analyzeDaily(
@@ -818,6 +935,11 @@ function analyzeCoin(data) {
     evidence.push('حفظ کف بالاتر 4H');
   }
 
+  if (tf4h.structure.breakout) {
+    score += 5;
+    evidence.push('شکست ساختاری 4H');
+  }
+
   if (tf1h.emaBullish) {
     score += 7;
     evidence.push('EMA صعودی 1H');
@@ -860,6 +982,10 @@ function analyzeCoin(data) {
   ) {
     score += 5;
     evidence.push('قدرت خریداران در کندل 1H');
+  }
+
+  if (tf4h.returns.return4 > 0) {
+    score += 2;
   }
 
   const return15m = tf15.returns.return1;
@@ -920,17 +1046,28 @@ function analyzeCoin(data) {
   let stage = 'شروع روند صعودی';
 
   if (
-    tf1h.structure.breakout &&
-    tf15.structure.breakout
+    tf4h.structure.breakout &&
+    tf1h.structure.breakout
   ) {
-    stage = 'شکست اولیه و تأیید صعود';
+    stage = 'شکست اولیه و تأیید روند 4H';
   } else if (
-    tf1h.structure.higherLow &&
-    tf15.structure.higherLow
+    tf4h.structure.higherLow &&
+    tf1h.structure.higherLow
   ) {
     stage = 'تشکیل ساختار صعودی';
-  } else if (tf15.structure.breakout) {
+  } else if (
+    tf1h.structure.breakout ||
+    tf15.structure.breakout
+  ) {
     stage = 'اولین نشانه‌های حرکت';
+  }
+
+  if (
+    return4h > 7 ||
+    daily.dailyReturn > 12
+  ) {
+    stage = 'روند صعودی نسبتاً جاافتاده';
+    warnings.push('بخشی از حرکت صعودی قبلاً انجام شده است');
   }
 
   if (daily.breakout20) {
@@ -951,6 +1088,21 @@ function analyzeCoin(data) {
     evidence.push(
       `شتاب حجم روز جاری (${daily.projectedVolumeRatio.toFixed(2)}x)`
     );
+  }
+
+  if (weekly.available && weekly.bullish) {
+    evidence.push('زمینه هفتگی مثبت');
+  }
+
+  if (weekly.nearResistance) {
+    warnings.push('قیمت نزدیک مقاومت هفتگی است');
+  }
+
+  if (
+    weekly.available &&
+    !weekly.bullish
+  ) {
+    warnings.push('زمینه هفتگی هنوز صعودی نیست');
   }
 
   return {
@@ -974,6 +1126,7 @@ function analyzeCoin(data) {
     },
 
     daily,
+    weekly,
 
     evidence,
     warnings,
@@ -982,11 +1135,14 @@ function analyzeCoin(data) {
       tf15: {
         ema21: tf15.ema21,
         emaBullish: tf15.emaBullish,
+        volumeRatio: tf15.volumeRatio,
+        strength: tf15.strength,
         structure: tf15.structure,
       },
 
       tf1h: {
         emaBullish: tf1h.emaBullish,
+        emaSlope: tf1h.emaSlope,
         structure: tf1h.structure,
       },
 
@@ -995,6 +1151,8 @@ function analyzeCoin(data) {
         emaSlope: tf4h.emaSlope,
         structure: tf4h.structure,
       },
+
+      weekly,
     },
   };
 }
@@ -1273,8 +1431,11 @@ function updateTradeState(
 
   const createdAt = previous?.createdAt || now;
 
-  const ageHours =
-    (nowMs - Date.parse(createdAt)) / 3600000;
+  const parsedCreatedAt = Date.parse(createdAt);
+
+  const ageHours = Number.isFinite(parsedCreatedAt)
+    ? (nowMs - parsedCreatedAt) / 3600000
+    : 0;
 
   const oldStatus = previous?.status;
 
@@ -1423,7 +1584,6 @@ async function sendTelegram(message) {
   }
 }
 
-// ارسال فایل HTML به تلگرام
 async function sendTelegramDocument(
   html,
   filename = 'gateio-bullish-radar.html'
@@ -1546,7 +1706,7 @@ async function sendReports(report) {
 }
 
 // ========================
-// REPORT GROUPS
+// REPORT HELPERS
 // ========================
 
 const GROUPS = [
@@ -1564,6 +1724,15 @@ const GROUPS = [
   },
 ];
 
+function selectTopCandidates(candidates) {
+  return [...candidates]
+    .sort((a, b) =>
+      number(b.opportunityScore, b.rankScore) -
+      number(a.opportunityScore, a.rankScore)
+    )
+    .slice(0, CONFIG.TOP_COUNT);
+}
+
 // ========================
 // BUILD TELEGRAM REPORT
 // ========================
@@ -1574,21 +1743,15 @@ function buildReport(
   duration,
   rankChanges = null
 ) {
-  const selected = GROUPS.flatMap((group) =>
-    candidates
-      .filter(
-        (coin) => coin.opportunityType === group.key
-      )
-      .slice(0, CONFIG.TOP_COUNT)
-  );
+  const selected = selectTopCandidates(candidates);
 
   const blocks = [[
-    '🚀 GATE.IO | BULLISH RADAR',
+    '🚀 GATE.IO | EARLY BULLISH RADAR',
     '━━━━━━━━━━━━━━━━━━',
-    '🟢↑ بهبود رتبه | 🔴↓ افت رتبه | ➖ ثابت | 🆕 جدید',
-    '✅ تأیید واقعی ورود 5M | 🟡 نزدیک ورود | ⏳ انتظار تأیید',
+    'رتبه‌بندی بر اساس Opportunity Score است؛ وضعیت ورود رتبه فرصت را تغییر نمی‌دهد.',
+    '✅ تأیید واقعی ورود | 🟡 نزدیک ورود | ⏳ انتظار تأیید',
     `📌 کاندید: ${selected.length}/${candidates.length} | قرارداد: ${stats.active} | نقدشونده: ${stats.liquid}`,
-    `🔍 موفق: ${stats.success} | خطا: ${stats.errors} | ⏱ ${(duration / 1000).toFixed(1)} ثانیه`,
+    `🔍 تحلیل موفق: ${stats.success} | خطا: ${stats.errors} | ⏱ ${(duration / 1000).toFixed(1)} ثانیه`,
     '━━━━━━━━━━━━━━━━━━',
   ].join('\n')];
 
@@ -1605,14 +1768,11 @@ function buildReport(
       (coin) => coin.opportunityType === group.key
     );
 
+    if (!coins.length) continue;
+
     blocks.push(
       `${group.title}\nتعداد: ${coins.length}\n━━━━━━━━━━━━━━━━━━`
     );
-
-    if (!coins.length) {
-      blocks.push('— موردی در این گروه نیست.');
-      continue;
-    }
 
     const coinBlocks = [];
 
@@ -1633,40 +1793,51 @@ function buildReport(
         rankText = '➖';
       }
 
-      const setup = coin.tradeSetup;
-
-      const entryConfirmed =
-        setup?.confirmationMet === true;
+      const status = coin.tradeStatus;
 
       let entryMark = '⏳';
-      let statusText = 'در انتظار تأیید 5M';
+      let statusText = 'در انتظار تأیید';
 
-      if (entryConfirmed) {
+      if (status === 'ENTRY_CONFIRMED') {
         entryMark = '✅';
-        statusText = '';
-      } else if (coin.tradeStatus === 'NEAR_ENTRY') {
+        statusText = 'ورود تأیید شده';
+      } else if (status === 'NEAR_ENTRY') {
         entryMark = '🟡';
         statusText = 'نزدیک ورود';
-      } else if (
-        [
-          'INVALIDATED',
-          'EXPIRED',
-          'EXIT_CONFIRMED',
-          'NEAR_EXIT',
-        ].includes(coin.tradeStatus)
-      ) {
+      } else if (status === 'NEAR_EXIT') {
         entryMark = '⚠️';
-        statusText =
-          coin.tradeStatusLabel || 'وضعیت غیرورودی';
+        statusText = 'نزدیک خروج';
+      } else if (status === 'EXIT_CONFIRMED') {
+        entryMark = '🔴';
+        statusText = 'خروج قطعی';
+      } else if (status === 'INVALIDATED') {
+        entryMark = '❌';
+        statusText = 'ابطال موقعیت';
+      } else if (status === 'EXPIRED') {
+        entryMark = '⌛';
+        statusText = 'منقضی شده';
       }
 
-      const firstLine =
-        `${printed}. ${coin.symbol} ${rankText} ${entryMark} | پایه ${coin.score} | رتبه ${coin.rankScore ?? '-'}`;
+      const lines = [
+        `${printed}. ${coin.symbol} ${rankText} ${entryMark}`,
+        `   Opportunity: ${coin.opportunityScore ?? coin.rankScore ?? '-'} | Entry: ${coin.entryScore ?? '-'} | Base: ${coin.score}`,
+        `   ${coin.stage} | ${statusText}`,
+      ];
 
-      const lines = [firstLine];
+      if (coin.tradeSetup) {
+        lines.push(
+          `   ورود: ${formatPrice(coin.tradeSetup.entryLow)} - ${formatPrice(coin.tradeSetup.entryHigh)}`
+        );
 
-      if (statusText) {
-        lines.push(`   ${statusText}`);
+        lines.push(
+          `   حد ضرر: ${formatPrice(coin.tradeSetup.stopLoss)} | هدف اول: ${formatPrice(coin.tradeSetup.tp1)} | RR: ${coin.tradeSetup.riskReward}R`
+        );
+      }
+
+      if (coin.warnings?.length) {
+        lines.push(
+          `   ⚠️ ${coin.warnings.slice(0, 2).join('، ')}`
+        );
       }
 
       coinBlocks.push(lines.join('\n'));
@@ -1678,7 +1849,7 @@ function buildReport(
   }
 
   blocks.push(
-    '━━━━━━━━━━━━━━━━━━\nℹ️ ورود فقط با تأیید واقعی کندل بسته‌شده ۵ دقیقه‌ای معتبر است. این سیگنال‌ها تضمین سود نیستند.'
+    '━━━━━━━━━━━━━━━━━━\nℹ️ 5M فقط برای زمان‌بندی ورود است و در Opportunity Score یا رتبه‌بندی فرصت دخالت ندارد. سیگنال‌ها تضمین سود نیستند.'
   );
 
   return blocks.join('\n\n');
@@ -1716,8 +1887,6 @@ function htmlPercent(value) {
 }
 
 function getHtmlStatus(coin) {
-  const status = coin.tradeStatus;
-
   const statuses = {
     ENTRY_CONFIRMED: {
       label: 'ورود تأیید شده',
@@ -1762,7 +1931,7 @@ function getHtmlStatus(coin) {
     },
   };
 
-  return statuses[status] || statuses.WAITING;
+  return statuses[coin.tradeStatus] || statuses.WAITING;
 }
 
 function getRankMovement(coin, rankChanges) {
@@ -1812,13 +1981,7 @@ function buildHtmlReport(
   duration,
   rankChanges = null
 ) {
-  const selected = GROUPS.flatMap((group) =>
-    candidates
-      .filter(
-        (coin) => coin.opportunityType === group.key
-      )
-      .slice(0, CONFIG.TOP_COUNT)
-  );
+  const selected = selectTopCandidates(candidates);
 
   const statusCounts = {
     ENTRY_CONFIRMED: 0,
@@ -1852,20 +2015,21 @@ function buildHtmlReport(
         rankChanges
       );
 
-      const rank = number(coin.rankScore);
+      const opportunityScore = number(
+        coin.opportunityScore,
+        coin.rankScore
+      );
+
+      const entryScore = number(coin.entryScore);
       const baseScore = number(coin.score);
+
       const price = number(
         coin.livePrice,
         coin.price
       );
 
-      const return15m = number(coin.returns?.['15m']);
-      const return1h = number(coin.returns?.['1h']);
-      const return4h = number(coin.returns?.['4h']);
-      const return1d = number(coin.returns?.['1d']);
-
-      const volume15m = number(coin.volume?.['15m']);
-      const volume1h = number(coin.volume?.['1h']);
+      const returns = coin.returns || {};
+      const volume = coin.volume || {};
 
       const evidence = Array.isArray(coin.evidence)
         ? coin.evidence
@@ -1887,9 +2051,11 @@ function buildHtmlReport(
           ).join('')
         : '<li>هشدار خاصی ثبت نشده است</li>';
 
-      const confirmation = setup.confirmationMet
-        ? '<span class="confirmation yes">تأیید واقعی 5M</span>'
-        : '<span class="confirmation no">تأیید 5M انجام نشده</span>';
+      const confirmation =
+        coin.tradeStatus === 'ENTRY_CONFIRMED' &&
+        setup.confirmationMet === true
+          ? '<span class="confirmation yes">تأیید واقعی ورود 5M</span>'
+          : '<span class="confirmation no">تأیید ورود کامل نشده</span>';
 
       return `
         <article
@@ -1916,13 +2082,18 @@ function buildHtmlReport(
 
           <div class="score-row">
             <div class="score-box">
-              <span>امتیاز پایه</span>
-              <strong>${baseScore}</strong>
+              <span>Opportunity Score</span>
+              <strong>${opportunityScore.toFixed(2)}</strong>
             </div>
 
             <div class="score-box">
-              <span>رتبه نهایی</span>
-              <strong>${rank || '-'}</strong>
+              <span>Entry Score</span>
+              <strong>${entryScore}</strong>
+            </div>
+
+            <div class="score-box">
+              <span>امتیاز پایه</span>
+              <strong>${baseScore}</strong>
             </div>
 
             <div class="score-box">
@@ -1989,39 +2160,30 @@ function buildHtmlReport(
           <div class="section-title">بازده تایم‌فریم‌ها</div>
 
           <div class="returns-grid">
-            <div>
-              <span>15M</span>
-              <strong class="${return15m >= 0 ? 'positive' : 'negative'}">
-                ${htmlPercent(return15m)}
-              </strong>
-            </div>
+            ${['15m', '1h', '4h', '1d'].map((tf) => {
+              const value = number(returns[tf]);
 
-            <div>
-              <span>1H</span>
-              <strong class="${return1h >= 0 ? 'positive' : 'negative'}">
-                ${htmlPercent(return1h)}
-              </strong>
-            </div>
-
-            <div>
-              <span>4H</span>
-              <strong class="${return4h >= 0 ? 'positive' : 'negative'}">
-                ${htmlPercent(return4h)}
-              </strong>
-            </div>
-
-            <div>
-              <span>1D</span>
-              <strong class="${return1d >= 0 ? 'positive' : 'negative'}">
-                ${htmlPercent(return1d)}
-              </strong>
-            </div>
+              return `
+                <div>
+                  <span>${tf.toUpperCase()}</span>
+                  <strong class="${value >= 0 ? 'positive' : 'negative'}">
+                    ${htmlPercent(value)}
+                  </strong>
+                </div>
+              `;
+            }).join('')}
           </div>
 
           <div class="volume-row">
-            <span>نسبت حجم 15M: <b>${volume15m.toFixed(2)}x</b></span>
-            <span>نسبت حجم 1H: <b>${volume1h.toFixed(2)}x</b></span>
+            <span>نسبت حجم 15M: <b>${number(volume['15m']).toFixed(2)}x</b></span>
+            <span>نسبت حجم 1H: <b>${number(volume['1h']).toFixed(2)}x</b></span>
             <span>حجم روزانه: <b>${number(coin.daily?.volumeRatio5).toFixed(2)}x</b></span>
+          </div>
+
+          <div class="volume-row">
+            <span>امتیاز روزانه: <b>${number(coin.daily?.score)}</b></span>
+            <span>زمینه هفتگی: <b>${coin.weekly?.bullish ? 'مثبت' : 'خنثی/منفی'}</b></span>
+            <span>مقاومت هفتگی: <b>${htmlPrice(coin.weekly?.resistance)}</b></span>
           </div>
 
           <details>
@@ -2077,7 +2239,6 @@ function buildHtmlReport(
   --red: #ff6578;
   --yellow: #f4c75e;
   --blue: #65a9ff;
-  --purple: #b69aff;
 }
 
 * {
@@ -2300,7 +2461,7 @@ body {
 
 .score-row {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 9px;
   margin: 16px 0;
 }
@@ -2479,7 +2640,7 @@ summary {
   }
 
   .score-row {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(2, 1fr);
   }
 
   .score-box {
@@ -2501,14 +2662,15 @@ summary {
 <div class="container">
 
   <header class="header">
-    <h1>🚀 GATE.IO | BULLISH RADAR</h1>
+    <h1>🚀 GATE.IO | EARLY BULLISH RADAR</h1>
     <p>داشبورد تحلیل قراردادهای دائمی USDT</p>
-    <p>تحلیل چندتایم‌فریمی: 5M / 15M / 1H / 4H / 1D</p>
+    <p>تحلیل چندتایم‌فریمی: 1W / 1D / 4H / 1H / 15M / 5M</p>
+    <p>رتبه‌بندی بر اساس کیفیت و تازگی فرصت؛ امتیاز ورود مستقل است.</p>
 
     <div class="header-meta">
       <span class="meta-pill">📅 ${escapeHtml(generatedAt)}</span>
       <span class="meta-pill">⏱ ${(duration / 1000).toFixed(1)} ثانیه</span>
-      <span class="meta-pill">📊 رتبه‌بندی چندتایم‌فریمی</span>
+      <span class="meta-pill">📊 Opportunity Ranking</span>
     </div>
   </header>
 
@@ -2590,6 +2752,7 @@ summary {
   <footer class="footer">
     این داشبورد صرفاً ابزار تحلیل و نمایش داده است.
     تأیید ورود بر اساس کندل بسته‌شده ۵ دقیقه‌ای انجام می‌شود.
+    تایم‌فریم 5M در Opportunity Score دخالت ندارد.
     هیچ سیگنالی تضمین سود نیست.
   </footer>
 
@@ -2662,7 +2825,7 @@ async function main() {
   const nowMs = Date.now();
 
   console.log(
-    '\n🚀 GATE.IO FOUR TIMEFRAME BULLISH RADAR'
+    '\n🚀 GATE.IO EARLY BULLISH RADAR'
   );
 
   console.log(
@@ -2674,11 +2837,15 @@ async function main() {
   );
 
   console.log(
-    '⏱ Timeframes: 5m confirmation / 15m / 1h / 4h / 1d'
+    '⏱ Context: 1W / 1D | Main: 4H | Momentum: 1H'
   );
 
   console.log(
-    '📈 Ranking: Base + Multi-Timeframe Momentum + Persistence'
+    '🎯 Entry timing: 15M + 5M'
+  );
+
+  console.log(
+    '📈 Ranking: Opportunity Score only; Entry Score is separate'
   );
 
   const [
@@ -2765,6 +2932,7 @@ async function main() {
         candles1h,
         candles4h,
         candles1dData,
+        candles1w,
       ] = await Promise.all([
         getCandles(
           market.symbol,
@@ -2798,6 +2966,12 @@ async function main() {
           CONFIG.TIMEFRAMES['1d'].limit,
           true
         ),
+
+        getCandles(
+          market.symbol,
+          '1w',
+          CONFIG.TIMEFRAMES['1w'].limit
+        ),
       ]);
 
       const candles5m = candles5mData.closed;
@@ -2825,6 +2999,7 @@ async function main() {
           '1h': candles1h,
           '4h': candles4h,
           '1d': candles1d,
+          '1w': candles1w,
         },
 
         dailyCurrent: candles1dData.current,
@@ -2846,6 +3021,12 @@ async function main() {
       const setup = buildTradeSetup(
         candidate,
         candles15m
+      );
+
+      candidate.entryScore = calculateEntryScore(
+        candidate._analysis.tf15,
+        candles5m,
+        setup
       );
 
       const tradeState = updateTradeState(
@@ -2934,7 +3115,7 @@ async function main() {
     );
 
     console.log(
-      '📊 Four-timeframe ranking + opportunity/status ordering calculated.'
+      '📊 Opportunity Score ranking calculated.'
     );
   } catch (storageError) {
     console.error(
@@ -2943,36 +3124,10 @@ async function main() {
     );
 
     rankedCandidates = [...candidates].sort(
-      (a, b) => {
-        const groups = {
-          SWING: 0,
-          'SHORT-TERM': 1,
-          SCALP: 2,
-        };
-
-        const statuses = {
-          ENTRY_CONFIRMED: 0,
-          NEAR_ENTRY: 1,
-          WAITING: 2,
-          NEAR_EXIT: 3,
-          EXIT_CONFIRMED: 4,
-          INVALIDATED: 5,
-          EXPIRED: 6,
-        };
-
-        return (
-          (groups[a.opportunityType] ?? 9) -
-            (groups[b.opportunityType] ?? 9) ||
-
-          (statuses[a.tradeStatus] ?? 9) -
-            (statuses[b.tradeStatus] ?? 9) ||
-
-          number(b.rankScore) -
-            number(a.rankScore) ||
-
-          b.score - a.score
-        );
-      }
+      (a, b) =>
+        number(b.opportunityScore, b.rankScore) -
+          number(a.opportunityScore, a.rankScore) ||
+        number(b.score) - number(a.score)
     );
   }
 
@@ -2999,30 +3154,21 @@ async function main() {
     '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
   );
 
-  for (const group of GROUPS) {
-    const groupCoins = rankedCandidates.filter(
-      (coin) =>
-        coin.opportunityType === group.key
-    );
+  const topCandidates = selectTopCandidates(
+    rankedCandidates
+  );
 
+  topCandidates.forEach((coin, index) => {
     console.log(
-      `\n${group.title} (${groupCoins.length})`
+      `${index + 1}. ${coin.symbol} | Opportunity: ${coin.opportunityScore ?? coin.rankScore} | Entry: ${coin.entryScore} | ${coin.tradeStatusLabel} | ${coin.stage}`
     );
 
-    groupCoins
-      .slice(0, CONFIG.TOP_COUNT)
-      .forEach((coin, index) => {
-        console.log(
-          `${index + 1}. ${coin.symbol} | ${coin.tradeStatusLabel} | Base: ${coin.score} | Rank: ${coin.rankScore ?? '-'} | ${coin.stage}`
-        );
-
-        if (coin.tradeSetup) {
-          console.log(
-            `   Entry ${formatPrice(coin.tradeSetup.entryLow)}-${formatPrice(coin.tradeSetup.entryHigh)} | SL ${formatPrice(coin.tradeSetup.stopLoss)} | TP1 ${formatPrice(coin.tradeSetup.tp1)} | RR ${coin.tradeSetup.riskReward}R`
-          );
-        }
-      });
-  }
+    if (coin.tradeSetup) {
+      console.log(
+        `   Entry ${formatPrice(coin.tradeSetup.entryLow)}-${formatPrice(coin.tradeSetup.entryHigh)} | SL ${formatPrice(coin.tradeSetup.stopLoss)} | TP1 ${formatPrice(coin.tradeSetup.tp1)} | RR ${coin.tradeSetup.riskReward}R`
+      );
+    }
+  });
 
   console.log(
     '\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
@@ -3030,6 +3176,10 @@ async function main() {
 
   console.log(
     `Candidates: ${rankedCandidates.length}`
+  );
+
+  console.log(
+    `Top reported: ${topCandidates.length}`
   );
 
   console.log(
