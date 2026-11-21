@@ -11,6 +11,8 @@
  *
  * Diagnostics:
  * - Breakout volume details
+ * - Detailed 1h EMA diagnostics
+ * - Detailed 4h room diagnostics
  * - API rate-limit protection
  * - Reliable Telegram delivery
  *
@@ -123,6 +125,12 @@ const formatTurnover = value =>
     maximumFractionDigits: 2
   }).format(number(value));
 
+const formatPercent = value => {
+  if (!Number.isFinite(value)) return '-';
+
+  return `${value >= 0 ? '+' : ''}${value.toFixed(3)}%`;
+};
+
 const getContractMultiplier = contract => {
   const multiplier = number(contract?.quanto_multiplier, 1);
   return multiplier > 0 ? multiplier : 1;
@@ -182,9 +190,47 @@ function createDiagnostics() {
     room: 0,
     score: 0,
 
-    // Detailed volume information for valid breakouts
-    volumeSamples: []
+    // Breakout volume details
+    volumeSamples: [],
+
+    // Detailed diagnostics for volume-confirmed breakouts
+    trendSamples: []
   };
+}
+
+function getTrendFailureReasons(trend) {
+  const reasons = [];
+
+  if (!trend.dataValid) {
+    reasons.push('داده EMA نامعتبر');
+    return reasons;
+  }
+
+  if (!trend.lastCloseAboveEMA) {
+    reasons.push('قیمت بسته‌شدن زیر EMA20');
+  }
+
+  if (!trend.livePriceAboveEMA) {
+    reasons.push('قیمت زنده زیر EMA20');
+  }
+
+  if (!trend.positiveSlope) {
+    reasons.push('شیب EMA مثبت نیست');
+  }
+
+  return reasons;
+}
+
+function getRoomFailureReason(room) {
+  if (!room.dataValid) {
+    return 'داده مقاومت 4H نامعتبر';
+  }
+
+  if (!room.passed) {
+    return `فضای رشد کمتر از ${CONFIG.MIN_RESISTANCE_ROOM.toFixed(2)}%`;
+  }
+
+  return 'تأیید شد';
 }
 
 function formatDiagnostics(d) {
@@ -201,36 +247,116 @@ function formatDiagnostics(d) {
     '📊 بررسی حجم شکست‌های معتبر:'
   ];
 
-  const samples = [...d.volumeSamples]
+  const volumeSamples = [...d.volumeSamples]
     .sort((a, b) => b.volumeRatio - a.volumeRatio)
     .slice(0, 8);
 
-  if (!samples.length) {
+  if (!volumeSamples.length) {
     lines.push('در این اسکن شکست معتبری برای بررسی حجم ثبت نشد.');
-    return lines.join('\n');
-  }
+  } else {
+    for (const sample of volumeSamples) {
+      const status =
+        sample.volumeRatio >= CONFIG.MIN_VOLUME_RATIO
+          ? '✅'
+          : '❌';
 
-  for (const sample of samples) {
-    const status =
-      sample.volumeRatio >= CONFIG.MIN_VOLUME_RATIO
-        ? '✅'
-        : '❌';
+      lines.push(
+        `${status} ${sample.symbol} | نسبت حجم: ${sample.volumeRatio.toFixed(2)}x`
+      );
 
-    lines.push(
-      `${status} ${sample.symbol} | نسبت حجم: ${sample.volumeRatio.toFixed(2)}x`
-    );
+      lines.push(
+        `   گردش جاری: ${formatTurnover(sample.currentTurnover)} | مبنا: ${formatTurnover(sample.baselineTurnover)}`
+      );
 
-    lines.push(
-      `   گردش جاری: ${formatTurnover(sample.currentTurnover)} | مبنا: ${formatTurnover(sample.baselineTurnover)}`
-    );
-
-    lines.push(
-      `   حجم موردانتظار: ${formatTurnover(sample.expectedTurnover)} | زمان کندل: ${sample.elapsedSeconds}s`
-    );
+      lines.push(
+        `   حجم موردانتظار: ${formatTurnover(sample.expectedTurnover)} | زمان کندل: ${sample.elapsedSeconds}s`
+      );
+    }
   }
 
   lines.push(
     `📌 حداقل نسبت حجم موردنیاز: ${CONFIG.MIN_VOLUME_RATIO.toFixed(2)}x`
+  );
+
+  // ----------------------------------------------------------
+  // 1H + 4H DIAGNOSTICS
+  // ----------------------------------------------------------
+
+  lines.push(
+    '',
+    '🔍 بررسی تشخیصی ارزهای دارای شکست + حجم تأییدشده:'
+  );
+
+  const trendSamples = [...d.trendSamples]
+    .sort((a, b) => b.volumeRatio - a.volumeRatio)
+    .slice(0, 10);
+
+  if (!trendSamples.length) {
+    lines.push(
+      'ارزی با شکست و حجم تأییدشده برای بررسی 1H و 4H ثبت نشد.'
+    );
+
+    return lines.join('\n');
+  }
+
+  for (const sample of trendSamples) {
+    const trendStatus = sample.trend.passed
+      ? '✅'
+      : '❌';
+
+    const roomStatus = sample.room.passed
+      ? '✅'
+      : '❌';
+
+    lines.push('');
+    lines.push(
+      `${trendStatus} ${sample.symbol} | حجم ${sample.volumeRatio.toFixed(2)}x`
+    );
+
+    lines.push(
+      `   1H EMA20: ${formatPrice(sample.trend.ema)}`
+    );
+
+    lines.push(
+      `   قیمت زنده: ${formatPrice(sample.trend.livePrice)} | فاصله از EMA: ${formatPercent(sample.trend.liveDistancePct)}`
+    );
+
+    lines.push(
+      `   آخرین Close: ${formatPrice(sample.trend.lastClose)} | فاصله از EMA: ${formatPercent(sample.trend.closeDistancePct)}`
+    );
+
+    lines.push(
+      `   شیب EMA20: ${formatPercent(sample.trend.emaSlope)}`
+    );
+
+    lines.push(
+      `   شروط 1H: Close ${sample.trend.lastCloseAboveEMA ? '✅' : '❌'} | Live ${sample.trend.livePriceAboveEMA ? '✅' : '❌'} | Slope ${sample.trend.positiveSlope ? '✅' : '❌'}`
+    );
+
+    if (sample.trend.passed) {
+      lines.push('   نتیجه 1H: تأیید شد');
+    } else {
+      lines.push(
+        `   علت رد 1H: ${sample.trend.failureReasons.join('، ')}`
+      );
+    }
+
+    lines.push(
+      `   4H مقاومت: ${formatPrice(sample.room.resistance)}`
+    );
+
+    lines.push(
+      `   فضای رشد 4H: ${formatPercent(sample.room.roomPercent)}`
+    );
+
+    lines.push(
+      `   نتیجه 4H: ${roomStatus} ${getRoomFailureReason(sample.room)}`
+    );
+  }
+
+  lines.push(
+    '',
+    'ℹ️ این بخش صرفاً تشخیصی است و در پذیرش یا رد ارزها تغییری ایجاد نمی‌کند.'
   );
 
   return lines.join('\n');
@@ -641,12 +767,19 @@ function getCurrentVolumeDetails(
 }
 
 // ============================================================
-// 1H TREND CONFIRMATION
+// 1H TREND CONFIRMATION + DETAILED DIAGNOSTICS
 // ============================================================
 
 function analyze1hTrend(candles, livePrice) {
-  if (candles.length < CONFIG.EMA_PERIOD + 6) {
-    return null;
+  if (
+    candles.length <
+    CONFIG.EMA_PERIOD + 6
+  ) {
+    return {
+      dataValid: false,
+      passed: false,
+      failureReasons: ['تعداد کندل کافی نیست']
+    };
   }
 
   const closes = candles.map(c => c.close);
@@ -660,7 +793,11 @@ function analyze1hTrend(candles, livePrice) {
     emaValues.length <
     CONFIG.EMA_SLOPE_LOOKBACK + 1
   ) {
-    return null;
+    return {
+      dataValid: false,
+      passed: false,
+      failureReasons: ['محاسبه EMA نامعتبر است']
+    };
   }
 
   const currentEMA = emaValues.at(-1);
@@ -676,41 +813,87 @@ function analyze1hTrend(candles, livePrice) {
 
   const lastClose = closes.at(-1);
 
-  const aboveEMA =
-    lastClose > currentEMA &&
+  const lastCloseAboveEMA =
+    lastClose > currentEMA;
+
+  const livePriceAboveEMA =
     livePrice > currentEMA;
+
+  const aboveEMA =
+    lastCloseAboveEMA &&
+    livePriceAboveEMA;
 
   const positiveSlope = emaSlope > 0;
 
-  if (!aboveEMA || !positiveSlope) {
-    return null;
-  }
+  const passed =
+    aboveEMA &&
+    positiveSlope;
 
-  return {
+  const result = {
+    dataValid: true,
+    passed,
+
     ema: currentEMA,
     emaSlope,
+
+    lastClose,
+    livePrice,
+
+    // Percentage distance from EMA20
+    closeDistancePct: pctChange(
+      lastClose,
+      currentEMA
+    ),
+
+    liveDistancePct: pctChange(
+      livePrice,
+      currentEMA
+    ),
+
+    lastCloseAboveEMA,
+    livePriceAboveEMA,
     aboveEMA,
     positiveSlope
   };
+
+  result.failureReasons =
+    getTrendFailureReasons(result);
+
+  return result;
 }
 
 // ============================================================
-// 4H RESISTANCE / ROOM TO GROW
+// 4H RESISTANCE / ROOM TO GROW + DIAGNOSTICS
 // ============================================================
 
 function analyze4hRoom(candles, livePrice) {
   const count = CONFIG.RESISTANCE_CANDLES_4H;
 
-  if (candles.length < count) return null;
+  if (candles.length < count) {
+    return {
+      dataValid: false,
+      passed: false,
+      failureReason: 'تعداد کندل کافی نیست'
+    };
+  }
 
   const recent = candles.slice(-count);
 
   const resistance = getMax(recent, 'high');
 
-  if (resistance <= 0) return null;
+  if (resistance <= 0) {
+    return {
+      dataValid: false,
+      passed: false,
+      failureReason: 'مقاومت نامعتبر است'
+    };
+  }
 
   if (livePrice >= resistance) {
     return {
+      dataValid: true,
+      passed: true,
+
       resistance,
       roomPercent: 100,
       hasOverheadResistance: false
@@ -722,16 +905,20 @@ function analyze4hRoom(candles, livePrice) {
     livePrice
   );
 
-  if (
-    roomPercent < CONFIG.MIN_RESISTANCE_ROOM
-  ) {
-    return null;
-  }
+  const passed =
+    roomPercent >= CONFIG.MIN_RESISTANCE_ROOM;
 
   return {
+    dataValid: true,
+    passed,
+
     resistance,
     roomPercent,
-    hasOverheadResistance: true
+    hasOverheadResistance: true,
+
+    failureReason: passed
+      ? null
+      : `فضای رشد ${roomPercent.toFixed(3)}% کمتر از حداقل ${CONFIG.MIN_RESISTANCE_ROOM.toFixed(2)}%`
   };
 }
 
@@ -857,7 +1044,6 @@ function analyzeCoin(data, diagnostics) {
   } = volumeDetails;
 
   // Save diagnostic sample BEFORE volume filtering.
-  // This includes breakouts that fail the 1.35x threshold.
   diagnostics.volumeSamples.push({
     symbol,
     volumeRatio,
@@ -873,23 +1059,68 @@ function analyzeCoin(data, diagnostics) {
 
   diagnostics.volume++;
 
-  // 3. 1h trend
+  // ----------------------------------------------------------
+  // 3. Evaluate BOTH 1h and 4h
+  //    4h is evaluated even when 1h fails.
+  //    This section is diagnostic and does not change
+  //    the original acceptance conditions.
+  // ----------------------------------------------------------
+
   const trend = analyze1hTrend(
     candles1h,
     livePrice
   );
 
-  if (!trend) return null;
-
-  diagnostics.trend++;
-
-  // 4. 4h room
   const room = analyze4hRoom(
     candles4h,
     livePrice
   );
 
-  if (!room) return null;
+  // Save detailed diagnostic sample for every
+  // volume-confirmed breakout.
+  diagnostics.trendSamples.push({
+    symbol,
+    volumeRatio,
+
+    trend: {
+      dataValid: trend.dataValid,
+      passed: trend.passed,
+
+      ema: trend.ema,
+      emaSlope: trend.emaSlope,
+
+      lastClose: trend.lastClose,
+      livePrice: trend.livePrice,
+
+      closeDistancePct: trend.closeDistancePct,
+      liveDistancePct: trend.liveDistancePct,
+
+      lastCloseAboveEMA: trend.lastCloseAboveEMA,
+      livePriceAboveEMA: trend.livePriceAboveEMA,
+      positiveSlope: trend.positiveSlope,
+
+      failureReasons: trend.failureReasons || []
+    },
+
+    room: {
+      dataValid: room.dataValid,
+      passed: room.passed,
+
+      resistance: room.resistance,
+      roomPercent: room.roomPercent,
+      hasOverheadResistance: room.hasOverheadResistance,
+
+      failureReason: room.failureReason
+    }
+  });
+
+  // Original 1h acceptance condition preserved.
+  if (!trend.passed) return null;
+
+  diagnostics.trend++;
+
+  // Original 4h acceptance condition preserved.
+  if (!room.passed) return null;
 
   diagnostics.room++;
 
@@ -1024,13 +1255,9 @@ function getNestedErrorCodes(error) {
 function isRetryableTelegramError(error) {
   const status = Number(error?.status);
 
-  // Telegram rate limit
   if (status === 429) return true;
-
-  // Telegram server errors
   if (status >= 500 && status <= 599) return true;
 
-  // Network errors
   const retryableCodes = new Set([
     'ETIMEDOUT',
     'ECONNRESET',
@@ -1051,7 +1278,6 @@ function isRetryableTelegramError(error) {
     return true;
   }
 
-  // Fetch network failures
   if (
     error instanceof TypeError &&
     /fetch failed|network|socket/i.test(error.message)
@@ -1059,7 +1285,6 @@ function isRetryableTelegramError(error) {
     return true;
   }
 
-  // Request timeout / aborted connection
   if (
     error?.name === 'TimeoutError' ||
     error?.name === 'AbortError'
@@ -1169,12 +1394,15 @@ function splitTelegramMessage(text, maxLength) {
 
 async function sendTelegramWithRetry(message, messageIndex) {
   let lastError = null;
+  let attemptsMade = 0;
 
   for (
     let attempt = 1;
     attempt <= CONFIG.TELEGRAM_RETRIES;
     attempt++
   ) {
+    attemptsMade = attempt;
+
     try {
       await sendTelegram(message);
 
@@ -1226,7 +1454,7 @@ async function sendTelegramWithRetry(message, messageIndex) {
 
   return {
     sent: false,
-    attempts: CONFIG.TELEGRAM_RETRIES,
+    attempts: attemptsMade,
     error: lastError
   };
 }
