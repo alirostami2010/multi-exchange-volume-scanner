@@ -1,33 +1,37 @@
 
 /**
- * GATE.IO USDT PERPETUAL — UNIFIED LONG RADAR
+ * GATE.IO USDT PERPETUAL — EARLY LONG RADAR
  * ------------------------------------------------------------
  * LONG ONLY
  *
- * Fresh unified behavioral detection engine.
+ * Main objective:
+ * Detect bullish movement as early as reasonably possible.
  *
- * 15m = Early movement and entry behavior
- * 1h  = Structural confirmation
- * 4h  = Trend context and extension filter
+ * 15m = Early entry behavior and trigger
+ * 1h  = Soft structural validation (not a strict trend requirement)
+ * 4h  = Extension and major-risk protection
  * BTC = Market risk context
  *
- * Eight bullish behaviors:
- * 1. Accumulation Breakout
- * 2. Trend Reversal
- * 3. Bull Flag
- * 4. Ascending Triangle
- * 5. Breakout Retest
- * 6. Momentum Expansion
- * 7. Trend Continuation
- * 8. Volatility Squeeze Breakout
+ * Behaviors:
+ * 1. شکست از سکون
+ * 2. برگشت روند
+ * 3. پرچم صعودی
+ * 4. مثلث صعودی
+ * 5. شکست و پولبک
+ * 6. انفجار مومنتوم
+ * 7. ادامه روند صعودی
+ * 8. خروج از فشردگی نوسان
+ * 9. فشار خرید زیر مقاومت
  *
- * Report:
- * Symbol + New Trend Marker + Behavior
+ * Signal state is persisted between process restarts.
  *
  * File: src/scanner/marketScanner.js
  */
 
 import { saveMarketSnapshot } from "../storage/marketStorage.js";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 // ============================================================
 // CONFIG
@@ -46,12 +50,11 @@ const CONFIG = {
 
   CANDLE_LIMITS: {
     FAST: 100,
-    MEDIUM: 80,
-    SLOW: 60,
+    MEDIUM: 60,
+    SLOW: 40,
   },
 
   MIN_QUOTE_VOLUME_24H: 100000,
-
   MAX_MARKETS_PER_SCAN: 0,
 
   CONCURRENCY: 3,
@@ -59,64 +62,69 @@ const CONFIG = {
   REQUEST_TIMEOUT_MS: 15000,
   RETRIES: 3,
 
-  MIN_HISTORY_FAST: 55,
-  MIN_HISTORY_MEDIUM: 30,
-  MIN_HISTORY_SLOW: 15,
+  MIN_HISTORY_FAST: 45,
+  MIN_HISTORY_MEDIUM: 25,
+  MIN_HISTORY_SLOW: 12,
 
-  // Structure detection
-  STRUCTURE_LOOKBACK: 20,
-  COMPRESSION_LOOKBACK: 16,
+  // Early detection
+  EARLY_VOLUME_RATIO: 1.10,
+  BREAKOUT_VOLUME_RATIO: 1.20,
+  STRONG_VOLUME_RATIO: 1.50,
+
+  MIN_EARLY_CANDLE_BODY: 0.08,
+  MIN_BREAKOUT_BODY: 0.12,
+  MIN_CLOSE_LOCATION: 0.62,
 
   // Consolidation
-  MAX_CONSOLIDATION_RANGE: 5.0,
-  MAX_AVERAGE_CANDLE_RANGE: 0.85,
+  CONSOLIDATION_LOOKBACK: 16,
+  MAX_CONSOLIDATION_RANGE: 6.0,
+  MAX_AVERAGE_CANDLE_RANGE: 1.10,
 
-  // Breakout
-  MIN_BREAKOUT_VOLUME: 1.35,
-  MIN_BREAKOUT_CLOSE_LOCATION: 0.68,
-  MIN_BREAKOUT_BODY: 0.12,
+  // Early resistance approach
+  RESISTANCE_DISTANCE_PERCENT: 0.45,
+  MIN_HIGHER_LOW_RATIO: 0.15,
 
   // Momentum
-  MIN_MOMENTUM_15M: 0.65,
-  MIN_MOMENTUM_1H: 0.90,
-  MIN_MOMENTUM_VOLUME: 1.35,
+  MIN_EARLY_MOMENTUM_15M: 0.30,
+  MIN_STRONG_MOMENTUM_15M: 0.65,
 
   // Reversal
-  MIN_REVERSAL_VOLUME: 1.20,
+  REVERSAL_LOOKBACK: 12,
+  REVERSAL_VOLUME_RATIO: 1.05,
 
-  // Trend confirmation
-  MIN_1H_TREND_STRENGTH: 0.0,
+  // Trend and extension
+  MAX_CHANGE_4H: 12,
+  MAX_CHANGE_24H: 25,
+  MAX_DISTANCE_FROM_EMA: 11,
 
-  // Late movement protection
-  MAX_CHANGE_4H: 15,
-  MAX_CHANGE_24H: 30,
-  MAX_DISTANCE_FROM_EMA: 12,
+  // Avoid severe market collapse
+  BTC_MAX_DROP_1H: -2.5,
+  BTC_MAX_DROP_4H: -5.0,
 
-  // BTC risk protection
-  BTC_MAX_DROP_1H: -2.0,
-  BTC_MAX_DROP_4H: -4.0,
-
-  // Ranking stabilization
-  RANKING_MEMORY_WEIGHT: 0.65,
-  RANKING_NEW_WEIGHT: 0.35,
-  RANKING_SWITCH_MARGIN: 8,
-  RANKING_CONFIRMATIONS: 2,
-
-  // Signal lifetime
-  SIGNAL_MAX_AGE_MINUTES: 180,
+  // Signal lifecycle
   SIGNAL_EXPIRY_MINUTES: 60,
+  SIGNAL_REACTIVATION_MINUTES: 60,
+  SIGNAL_MAX_MEMORY_DAYS: 7,
+
+  // Ranking
+  RANKING_MEMORY_WEIGHT: 0.70,
+  RANKING_NEW_WEIGHT: 0.30,
 
   // Report
   MAX_REPORT_ITEMS: 30,
   TELEGRAM_MAX_LENGTH: 3900,
+
+  // Persistent state
+  STATE_FILENAME: "gateLongSignalState.json",
 };
 
 // ============================================================
-// CONSTANTS
+// BEHAVIORS
 // ============================================================
 
 const BEHAVIORS = {
   ACCUMULATION: "شکست از سکون",
+  PRE_BREAKOUT: "فشار خرید زیر مقاومت",
   REVERSAL: "برگشت روند",
   BULL_FLAG: "پرچم صعودی",
   ASCENDING_TRIANGLE: "مثلث صعودی",
@@ -128,24 +136,35 @@ const BEHAVIORS = {
 
 const BEHAVIOR_PRIORITY = {
   [BEHAVIORS.ACCUMULATION]: 1,
-  [BEHAVIORS.REVERSAL]: 2,
-  [BEHAVIORS.BREAKOUT_RETEST]: 3,
-  [BEHAVIORS.SQUEEZE]: 4,
-  [BEHAVIORS.MOMENTUM]: 5,
-  [BEHAVIORS.BULL_FLAG]: 6,
-  [BEHAVIORS.ASCENDING_TRIANGLE]: 7,
-  [BEHAVIORS.CONTINUATION]: 8,
+  [BEHAVIORS.PRE_BREAKOUT]: 2,
+  [BEHAVIORS.REVERSAL]: 3,
+  [BEHAVIORS.BREAKOUT_RETEST]: 4,
+  [BEHAVIORS.SQUEEZE]: 5,
+  [BEHAVIORS.MOMENTUM]: 6,
+  [BEHAVIORS.BULL_FLAG]: 7,
+  [BEHAVIORS.ASCENDING_TRIANGLE]: 8,
+  [BEHAVIORS.CONTINUATION]: 9,
 };
 
 // ============================================================
-// PERSISTENT RUNTIME MEMORY
+// STATE
 // ============================================================
 
 const signalMemory = new Map();
 const rankingMemory = new Map();
 
-let previousRanking = [];
 let lastRequestTime = 0;
+let stateLoaded = false;
+let stateSavePromise = Promise.resolve();
+
+const currentFile = fileURLToPath(import.meta.url);
+const currentDirectory = path.dirname(currentFile);
+
+const STATE_PATH = path.join(
+  currentDirectory,
+  "../storage",
+  CONFIG.STATE_FILENAME
+);
 
 // ============================================================
 // UTILITIES
@@ -210,11 +229,107 @@ function getReturn(candles, count) {
   );
 }
 
+function getHighest(candles) {
+  return candles.length
+    ? Math.max(...candles.map((c) => c.high))
+    : 0;
+}
+
+function getLowest(candles) {
+  return candles.length
+    ? Math.min(...candles.map((c) => c.low))
+    : 0;
+}
+
+// ============================================================
+// PERSISTENT SIGNAL STATE
+// ============================================================
+
+async function loadPersistentState() {
+  if (stateLoaded) return;
+
+  stateLoaded = true;
+
+  try {
+    const content = await fs.readFile(STATE_PATH, "utf8");
+    const data = JSON.parse(content);
+
+    const now = Date.now();
+    const maxAge =
+      CONFIG.SIGNAL_MAX_MEMORY_DAYS * 24 * 60 * 60 * 1000;
+
+    for (const [symbol, memory] of Object.entries(
+      data.signals || {}
+    )) {
+      if (
+        memory &&
+        Number.isFinite(memory.lastSeen) &&
+        now - memory.lastSeen <= maxAge
+      ) {
+        signalMemory.set(symbol, memory);
+      }
+    }
+
+    for (const [symbol, memory] of Object.entries(
+      data.rankings || {}
+    )) {
+      if (memory && Number.isFinite(memory.stableScore)) {
+        rankingMemory.set(symbol, memory);
+      }
+    }
+
+    console.log(
+      `[STATE] Restored ${signalMemory.size} signals and ${rankingMemory.size} rankings`
+    );
+
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      console.error("[STATE LOAD ERROR]", error.message);
+    }
+  }
+}
+
+async function savePersistentState() {
+  const data = {
+    savedAt: Date.now(),
+
+    signals: Object.fromEntries(signalMemory),
+
+    rankings: Object.fromEntries(rankingMemory),
+  };
+
+  const content = JSON.stringify(data);
+
+  stateSavePromise = stateSavePromise
+    .catch(() => {})
+    .then(async () => {
+      await fs.mkdir(path.dirname(STATE_PATH), {
+        recursive: true,
+      });
+
+      const temporaryPath = `${STATE_PATH}.tmp`;
+
+      await fs.writeFile(
+        temporaryPath,
+        content,
+        "utf8"
+      );
+
+      await fs.rename(temporaryPath, STATE_PATH);
+    });
+
+  try {
+    await stateSavePromise;
+  } catch (error) {
+    console.error("[STATE SAVE ERROR]", error.message);
+  }
+}
+
 // ============================================================
 // REQUEST ENGINE
 // ============================================================
 
-async function requestGate(path, params = {}) {
+async function requestGate(endpoint, params = {}) {
   let attempt = 0;
 
   while (attempt <= CONFIG.RETRIES) {
@@ -229,7 +344,9 @@ async function requestGate(path, params = {}) {
 
       lastRequestTime = Date.now();
 
-      const url = new URL(`${CONFIG.API_BASE}${path}`);
+      const url = new URL(
+        `${CONFIG.API_BASE}${endpoint}`
+      );
 
       for (const [key, value] of Object.entries(params)) {
         if (value !== undefined && value !== null) {
@@ -245,7 +362,9 @@ async function requestGate(path, params = {}) {
       );
 
       const response = await fetch(url, {
-        headers: { Accept: "application/json" },
+        headers: {
+          Accept: "application/json",
+        },
         signal: controller.signal,
       });
 
@@ -258,7 +377,9 @@ async function requestGate(path, params = {}) {
     } catch (error) {
       attempt++;
 
-      if (attempt > CONFIG.RETRIES) throw error;
+      if (attempt > CONFIG.RETRIES) {
+        throw error;
+      }
 
       await sleep(500 * attempt);
 
@@ -344,12 +465,11 @@ function getClosedCandles(candles, intervalSeconds) {
 }
 
 // ============================================================
-// CANDLE STRUCTURE
+// CANDLE ANALYSIS
 // ============================================================
 
 function candleInfo(candle) {
   const range = Math.max(candle.high - candle.low, 0);
-
   const body = candle.close - candle.open;
 
   return {
@@ -365,11 +485,17 @@ function candleInfo(candle) {
       : 0.5,
 
     upperWick: range > 0
-      ? (candle.high - Math.max(candle.open, candle.close)) / range
+      ? (
+          candle.high -
+          Math.max(candle.open, candle.close)
+        ) / range
       : 0,
 
     lowerWick: range > 0
-      ? (Math.min(candle.open, candle.close) - candle.low) / range
+      ? (
+          Math.min(candle.open, candle.close) -
+          candle.low
+        ) / range
       : 0,
 
     rangePercent: candle.close > 0
@@ -410,15 +536,14 @@ function analyzeTrend(candles) {
       ema9: 0,
       ema21: 0,
       distance: 0,
+      separation: 0,
     };
   }
 
   const last = closes[closes.length - 1];
 
   return {
-    bullish:
-      ema9 > ema21 &&
-      last > ema9,
+    bullish: ema9 > ema21 && last > ema9,
 
     ema9,
     ema21,
@@ -430,11 +555,13 @@ function analyzeTrend(candles) {
 }
 
 // ============================================================
-// TURNOVER / VOLUME
+// VOLUME ANALYSIS
 // ============================================================
 
 function getTurnover(candle) {
-  if (candle.turnover > 0) return candle.turnover;
+  if (candle.turnover > 0) {
+    return candle.turnover;
+  }
 
   return candle.volume * candle.close;
 }
@@ -463,12 +590,12 @@ function analyzeVolume(candles) {
 
   return {
     ratio,
-    expanded: ratio >= CONFIG.MIN_MOMENTUM_VOLUME,
+    expanded: ratio >= CONFIG.EARLY_VOLUME_RATIO,
   };
 }
 
 // ============================================================
-// MARKET STRUCTURE HELPERS
+// STRUCTURE HELPERS
 // ============================================================
 
 function getRange(candles) {
@@ -480,16 +607,16 @@ function getRange(candles) {
     };
   }
 
-  const high = Math.max(...candles.map((c) => c.high));
-  const low = Math.min(...candles.map((c) => c.low));
+  const high = getHighest(candles);
+  const low = getLowest(candles);
 
-  const mid = (high + low) / 2;
+  const middle = (high + low) / 2;
 
   return {
     high,
     low,
-    percent: mid > 0
-      ? ((high - low) / mid) * 100
+    percent: middle > 0
+      ? ((high - low) / middle) * 100
       : 0,
   };
 }
@@ -500,8 +627,8 @@ function isHigherLow(candles) {
   const first = candles.slice(0, 4);
   const second = candles.slice(4);
 
-  const low1 = Math.min(...first.map((c) => c.low));
-  const low2 = Math.min(...second.map((c) => c.low));
+  const low1 = getLowest(first);
+  const low2 = getLowest(second);
 
   return low2 > low1;
 }
@@ -512,31 +639,26 @@ function isLowerHigh(candles) {
   const first = candles.slice(0, 4);
   const second = candles.slice(4);
 
-  const high1 = Math.max(...first.map((c) => c.high));
-  const high2 = Math.max(...second.map((c) => c.high));
-
-  return high2 < high1;
-}
-
-function countBullish(candles) {
-  return candles.filter((c) => c.close > c.open).length;
+  return getHighest(second) < getHighest(first);
 }
 
 // ============================================================
-// CONSOLIDATION DETECTION
+// CONSOLIDATION
 // ============================================================
 
 function detectConsolidation(candles) {
-  if (candles.length < 40) {
+  const lookback = CONFIG.CONSOLIDATION_LOOKBACK;
+
+  if (candles.length < lookback + 5) {
     return { valid: false };
   }
 
-  const rangeCandles = candles.slice(-17, -1);
+  const base = candles.slice(-lookback - 1, -1);
 
-  const range = getRange(rangeCandles);
+  const range = getRange(base);
 
   const averageRange = average(
-    rangeCandles.map((c) => candleInfo(c).rangePercent)
+    base.map((c) => candleInfo(c).rangePercent)
   );
 
   const valid =
@@ -549,6 +671,7 @@ function detectConsolidation(candles) {
     low: range.low,
     rangePercent: range.percent,
     averageRange,
+    candles: base,
   };
 }
 
@@ -566,62 +689,116 @@ function detectAccumulationBreakout(candles, volume) {
 
   const breakout =
     last.close > consolidation.high &&
-    info.closeLocation >= CONFIG.MIN_BREAKOUT_CLOSE_LOCATION &&
+    info.closeLocation >= CONFIG.MIN_CLOSE_LOCATION &&
     info.bodyPercent >= CONFIG.MIN_BREAKOUT_BODY &&
-    volume.ratio >= CONFIG.MIN_BREAKOUT_VOLUME;
+    volume.ratio >= CONFIG.BREAKOUT_VOLUME_RATIO;
 
   if (!breakout) return null;
 
   return {
     behavior: BEHAVIORS.ACCUMULATION,
-    strength: 90,
+    strength: 91,
     fresh: true,
   };
 }
 
 // ============================================================
-// 2. TREND REVERSAL
+// 2. EARLY PRE-BREAKOUT PRESSURE
+// ============================================================
+
+function detectPreBreakout(candles, volume) {
+  const consolidation = detectConsolidation(candles);
+
+  if (!consolidation.valid) return null;
+
+  const last = candles[candles.length - 1];
+  const info = candleInfo(last);
+
+  const distance = changePercent(
+    consolidation.high,
+    last.close
+  );
+
+  const nearResistance =
+    distance >= 0 &&
+    distance <= CONFIG.RESISTANCE_DISTANCE_PERCENT;
+
+  const risingLows = isHigherLow(
+    candles.slice(-9, -1)
+  );
+
+  const bullishPressure =
+    last.close > last.open &&
+    info.closeLocation >= 0.55 &&
+    info.bodyPercent >= CONFIG.MIN_EARLY_CANDLE_BODY;
+
+  const volumeValid =
+    volume.ratio >= CONFIG.EARLY_VOLUME_RATIO;
+
+  if (
+    nearResistance &&
+    risingLows &&
+    bullishPressure &&
+    volumeValid
+  ) {
+    return {
+      behavior: BEHAVIORS.PRE_BREAKOUT,
+      strength: 89,
+      fresh: true,
+    };
+  }
+
+  return null;
+}
+
+// ============================================================
+// 3. TREND REVERSAL
 // ============================================================
 
 function detectReversal(fast, medium, volume) {
-  const recent = fast.slice(-9);
+  const recent = fast.slice(-CONFIG.REVERSAL_LOOKBACK);
 
-  const older = recent.slice(0, 5);
-  const newer = recent.slice(5);
+  if (recent.length < 9) return null;
 
-  const oldHigh = Math.max(...older.map((c) => c.high));
-  const oldLow = Math.min(...older.map((c) => c.low));
+  const previous = recent.slice(0, -3);
+  const latest = recent.slice(-3);
 
-  const newLow = Math.min(...newer.map((c) => c.low));
+  const previousLow = getLowest(previous);
+  const latestLow = getLowest(latest);
 
   const last = fast[fast.length - 1];
+  const previousCandle = fast[fast.length - 2];
 
-  const mediumTrend = analyzeTrend(medium);
+  const shortEMA = calculateEMA(
+    fast.slice(-20).map((c) => c.close),
+    9
+  );
 
-  const priorDecline =
-    recent[0].close > last.close &&
-    newLow <= oldLow * 1.005;
+  if (!shortEMA) return null;
 
-  const recovery =
-    last.close > oldHigh * 0.998 &&
-    last.close > last.open;
+  const bottomStabilizing =
+    latestLow >= previousLow * 0.997;
+
+  const reclaim =
+    last.close > shortEMA &&
+    last.close > previousCandle.high * 0.998;
+
+  const bullishCandle =
+    last.close > last.open &&
+    candleInfo(last).closeLocation >= 0.60;
 
   const volumeValid =
-    volume.ratio >= CONFIG.MIN_REVERSAL_VOLUME;
+    volume.ratio >= CONFIG.REVERSAL_VOLUME_RATIO;
 
-  const hourlyRecovery =
-    getReturn(medium, 2) > 0 &&
-    (
-      mediumTrend.bullish ||
-      medium[medium.length - 1].close >
-        medium[medium.length - 2].close
-    );
+  const hourlyNotCollapsing =
+    getReturn(medium, 2) > -2.5;
 
   if (
-    priorDecline &&
-    recovery &&
+    bottomStabilizing &&
+    reclaim &&
+    bullishCandle &&
     volumeValid &&
-    hourlyRecovery
+    hourlyNotCollapsing
   ) {
     return {
       behavior: BEHAVIORS.REVERSAL,
@@ -634,14 +811,14 @@ function detectReversal(fast, medium, volume) {
 }
 
 // ============================================================
-// 3. BULL FLAG
+// 4. BULL FLAG
 // ============================================================
 
 function detectBullFlag(candles, volume) {
   if (candles.length < 25) return null;
 
-  const impulse = candles.slice(-11, -5);
-  const flag = candles.slice(-5, -1);
+  const impulse = candles.slice(-12, -6);
+  const flag = candles.slice(-6, -1);
   const last = candles[candles.length - 1];
 
   const impulseChange = changePercent(
@@ -649,80 +826,35 @@ function detectBullFlag(candles, volume) {
     impulse[0].open
   );
 
-  const impulseHigh = Math.max(
-    ...impulse.map((c) => c.high)
-  );
+  const impulseHigh = getHighest(impulse);
 
-  const impulseLow = Math.min(
-    ...impulse.map((c) => c.low)
-  );
+  const flagLow = getLowest(flag);
+  const flagHigh = getHighest(flag);
 
   const flagRange = getRange(flag);
 
   const retracement = changePercent(
     impulseHigh,
-    Math.min(...flag.map((c) => c.low))
+    flagLow
   );
 
-  const pullbackValid =
-    flagRange.percent < 4.5 &&
-    retracement > 0 &&
+  const controlledPullback =
+    flagRange.percent < 5 &&
+    retracement >= 0 &&
     retracement < 65;
 
-  const breakout =
-    last.close > Math.max(...flag.map((c) => c.high)) &&
-    last.close > last.open;
+  const earlyRecovery =
+    last.close > last.open &&
+    last.close > flag[flag.length - 1].high;
 
   if (
-    impulseChange >= 3 &&
-    impulseHigh > impulseLow &&
-    pullbackValid &&
-    breakout &&
-    volume.ratio >= 1.15
+    impulseChange >= 2.5 &&
+    controlledPullback &&
+    earlyRecovery &&
+    volume.ratio >= 1.05
   ) {
     return {
       behavior: BEHAVIORS.BULL_FLAG,
-      strength: 82,
-      fresh: true,
-    };
-  }
-
-  return null;
-}
-
-// ============================================================
-// 4. ASCENDING TRIANGLE
-// ============================================================
-
-function detectAscendingTriangle(candles, volume) {
-  if (candles.length < 30) return null;
-
-  const base = candles.slice(-19, -1);
-
-  const highs = base.map((c) => c.high);
-  const lows = base.map((c) => c.low);
-
-  const resistance = Math.max(...highs);
-
-  const highDeviation =
-    ((Math.max(...highs) - Math.min(...highs)) / resistance) * 100;
-
-  const higherLows = isHigherLow(base);
-
-  const last = candles[candles.length - 1];
-
-  const breakout =
-    last.close > resistance &&
-    last.close > last.open &&
-    volume.ratio >= CONFIG.MIN_BREAKOUT_VOLUME;
-
-  if (
-    highDeviation <= 1.5 &&
-    higherLows &&
-    breakout
-  ) {
-    return {
-      behavior: BEHAVIORS.ASCENDING_TRIANGLE,
       strength: 83,
       fresh: true,
     };
@@ -732,7 +864,56 @@ function detectAscendingTriangle(candles, volume) {
 }
 
 // ============================================================
-// 5. BREAKOUT RETEST
+// 5. ASCENDING TRIANGLE
+// ============================================================
+
+function detectAscendingTriangle(candles, volume) {
+  if (candles.length < 30) return null;
+
+  const base = candles.slice(-19, -1);
+
+  const resistance = getHighest(base);
+
+  const deviation =
+    resistance > 0
+      ? ((resistance - getLowest(
+          base.map((c) => ({
+            ...c,
+            high: c.high,
+          }))
+        )) / resistance) * 100
+      : 0;
+
+  const risingLows = isHigherLow(base);
+
+  const last = candles[candles.length - 1];
+
+  const approaching =
+    last.close >= resistance * 0.995;
+
+  const pressure =
+    last.close > last.open &&
+    candleInfo(last).closeLocation >= 0.58;
+
+  if (
+    deviation <= 5 &&
+    risingLows &&
+    approaching &&
+    pressure &&
+    volume.ratio >= 1.05
+  ) {
+    return {
+      behavior: BEHAVIORS.ASCENDING_TRIANGLE,
+      strength: 82,
+      fresh: true,
+    };
+  }
+
+  return null;
+}
+
+// ============================================================
+// 6. BREAKOUT RETEST
 // ============================================================
 
 function detectBreakoutRetest(candles, volume) {
@@ -750,36 +931,33 @@ function detectBreakoutRetest(candles, volume) {
 
     if (before.length < 10) continue;
 
-    const resistance = Math.max(
-      ...before.map((c) => c.high)
-    );
+    const resistance = getHighest(before);
 
     const breakoutCandle = candles[breakoutIndex];
 
     if (breakoutCandle.close <= resistance) continue;
 
-    const retestCandles = candles.slice(
+    const retest = candles.slice(
       breakoutIndex + 1
     );
 
-    const retestLow = Math.min(
-      ...retestCandles.map((c) => c.low)
-    );
+    const retestLow = getLowest(retest);
 
-    const heldLevel = retestLow >= resistance * 0.985;
+    const held =
+      retestLow >= resistance * 0.985;
 
     const recovered =
-      last.close > resistance &&
-      last.close > last.open;
+      last.close > last.open &&
+      last.close > resistance * 0.998;
 
     if (
-      heldLevel &&
+      held &&
       recovered &&
-      volume.ratio >= 1.05
+      volume.ratio >= 1.0
     ) {
       return {
         behavior: BEHAVIORS.BREAKOUT_RETEST,
-        strength: 86,
+        strength: 87,
         fresh: true,
       };
     }
@@ -789,7 +967,7 @@ function detectBreakoutRetest(candles, volume) {
 }
 
 // ============================================================
-// 6. MOMENTUM EXPANSION
+// 7. EARLY MOMENTUM EXPANSION
 // ============================================================
 
 function detectMomentumExpansion(candles, volume) {
@@ -797,61 +975,67 @@ function detectMomentumExpansion(candles, volume) {
 
   const change15 = getReturn(candles, 1);
   const change30 = getReturn(candles, 2);
-  const change1h = getReturn(candles, 4);
 
   const info = candleInfo(last);
 
-  const acceleration =
-    change15 > average(
-      candles.slice(-5, -1).map((c, i, arr) => {
-        const previous = i === 0
-          ? candles[candles.length - 6]
-          : arr[i - 1];
+  const previousCandles = candles.slice(-5, -1);
 
-        return changePercent(c.close, previous.close);
-      })
-    );
+  const previousAverageBody = average(
+    previousCandles.map((c) =>
+      Math.abs(changePercent(c.close, c.open))
+    )
+  );
+
+  const expandingBody =
+    Math.abs(info.bodyPercent) >
+    previousAverageBody * 1.15;
 
   const valid =
-    change15 >= CONFIG.MIN_MOMENTUM_15M &&
+    change15 >= CONFIG.MIN_EARLY_MOMENTUM_15M &&
     change30 > 0 &&
-    change1h > 0 &&
-    volume.ratio >= CONFIG.MIN_MOMENTUM_VOLUME &&
-    info.closeLocation >= 0.70 &&
-    acceleration;
+    last.close > last.open &&
+    info.closeLocation >= 0.65 &&
+    volume.ratio >= CONFIG.EARLY_VOLUME_RATIO &&
+    expandingBody;
 
   if (!valid) return null;
 
   return {
     behavior: BEHAVIORS.MOMENTUM,
-    strength: 89,
+    strength: change15 >= CONFIG.MIN_STRONG_MOMENTUM_15M
+      ? 90
+      : 84,
     fresh: true,
   };
 }
 
 // ============================================================
-// 7. TREND CONTINUATION
+// 8. TREND CONTINUATION
 // ============================================================
 
 function detectTrendContinuation(fast, medium, slow, volume) {
   const trend1h = analyzeTrend(medium);
   const trend4h = analyzeTrend(slow);
 
-  const recent = fast.slice(-7);
+  const recent = fast.slice(-8);
 
-  const correction =
-    recent.some((c) => c.close < c.open);
+  const correction = recent.some(
+    (c) => c.close < c.open
+  );
 
   const higherLow = isHigherLow(recent);
 
   const last = fast[fast.length - 1];
 
+  const ema9 = calculateEMA(
+    fast.map((c) => c.close),
+    9
+  );
+
   const recovery =
+    ema9 &&
     last.close > last.open &&
-    last.close > calculateEMA(
-      fast.map((c) => c.close),
-      9
-    );
+    last.close > ema9;
 
   if (
     trend1h.bullish &&
@@ -859,11 +1043,11 @@ function detectTrendContinuation(fast, medium, slow, volume) {
     correction &&
     higherLow &&
     recovery &&
-    volume.ratio >= 1.05
+    volume.ratio >= 1.0
   ) {
     return {
       behavior: BEHAVIORS.CONTINUATION,
-      strength: 76,
+      strength: 77,
       fresh: false,
     };
   }
@@ -872,7 +1056,7 @@ function detectTrendContinuation(fast, medium, slow, volume) {
 }
 
 // ============================================================
-// 8. VOLATILITY SQUEEZE BREAKOUT
+// 9. VOLATILITY SQUEEZE BREAKOUT
 // ============================================================
 
 function detectSqueezeBreakout(candles, volume) {
@@ -885,20 +1069,22 @@ function detectSqueezeBreakout(candles, volume) {
   const olderRange = getRange(older);
 
   const compressed =
-    recentRange.percent < 3.5 &&
-    recentRange.percent < olderRange.percent * 0.65;
+    recentRange.percent < 4.5 &&
+    olderRange.percent > 0 &&
+    recentRange.percent < olderRange.percent * 0.75;
 
   const last = candles[candles.length - 1];
 
   const breakout =
     last.close > recentRange.high &&
     last.close > last.open &&
-    volume.ratio >= CONFIG.MIN_BREAKOUT_VOLUME;
+    candleInfo(last).closeLocation >= 0.62 &&
+    volume.ratio >= CONFIG.BREAKOUT_VOLUME_RATIO;
 
   if (compressed && breakout) {
     return {
       behavior: BEHAVIORS.SQUEEZE,
-      strength: 87,
+      strength: 88,
       fresh: true,
     };
   }
@@ -915,13 +1101,19 @@ function detectBullishBehavior(fast, medium, slow) {
 
   const detectors = [
     () => detectAccumulationBreakout(fast, volume),
-    () => detectBreakoutRetest(fast, volume),
+    () => detectPreBreakout(fast, volume),
     () => detectReversal(fast, medium, volume),
+    () => detectBreakoutRetest(fast, volume),
     () => detectSqueezeBreakout(fast, volume),
     () => detectMomentumExpansion(fast, volume),
     () => detectBullFlag(fast, volume),
     () => detectAscendingTriangle(fast, volume),
-    () => detectTrendContinuation(fast, medium, slow, volume),
+    () => detectTrendContinuation(
+      fast,
+      medium,
+      slow,
+      volume
+    ),
   ];
 
   const results = [];
@@ -931,6 +1123,7 @@ function detectBullishBehavior(fast, medium, slow) {
       const result = detector();
 
       if (result) results.push(result);
+
     } catch (error) {
       console.error("[BEHAVIOR ERROR]", error.message);
     }
@@ -951,24 +1144,26 @@ function detectBullishBehavior(fast, medium, slow) {
 
   return {
     ...results[0],
+
     alternatives: results.map((r) => r.behavior),
+
     volumeRatio: volume.ratio,
   };
 }
 
 // ============================================================
-// TREND QUALITY / LATE-MOVE FILTER
+// MARKET AND EXTENSION VALIDATION
 // ============================================================
 
-function validateTrend(fast, medium, slow, ticker, btc) {
+function validateTrend(fast, medium, slow, btc) {
   const trend1h = analyzeTrend(medium);
-  const trend4h = analyzeTrend(slow);
 
   const change4h = getReturn(slow, 1);
   const change24h = getReturn(slow, 6);
 
   const currentPrice = fast[fast.length - 1].close;
 
+  // Prevent entering after an already extended move.
   const tooExtended =
     change4h > CONFIG.MAX_CHANGE_4H ||
     change24h > CONFIG.MAX_CHANGE_24H ||
@@ -976,6 +1171,7 @@ function validateTrend(fast, medium, slow, ticker, btc) {
 
   if (tooExtended) return false;
 
+  // Avoid severe BTC collapse.
   if (
     btc.change1h <= CONFIG.BTC_MAX_DROP_1H &&
     btc.change4h <= CONFIG.BTC_MAX_DROP_4H
@@ -983,69 +1179,29 @@ function validateTrend(fast, medium, slow, ticker, btc) {
     return false;
   }
 
-  const positiveHourlyStructure =
-    trend1h.bullish ||
-    getReturn(medium, 3) > 0;
+  // Soft hourly validation:
+  // A positive 1h trend is NOT mandatory.
+  // Early reversals are allowed if the hourly decline
+  // is not excessively strong.
+  const hourlyNotCollapsing =
+    getReturn(medium, 2) > -3.5;
 
-  const positiveFastStructure =
-    currentPrice > fast[fast.length - 2].close;
+  if (!hourlyNotCollapsing) return false;
 
-  const higherTimeframeNotCollapsing =
-    !(
-      getReturn(slow, 2) < -8 &&
-      !trend4h.bullish
-    );
+  // Do not require the 15m candle to be above EMA21.
+  // Only reject a clear immediate breakdown.
+  const previous = fast[fast.length - 2];
 
-  return (
-    positiveHourlyStructure &&
-    positiveFastStructure &&
-    higherTimeframeNotCollapsing
-  );
-}
+  const fastStructureValid =
+    currentPrice >= previous.close * 0.992;
 
-// ============================================================
-// EARLY / CONTINUATION CLASSIFICATION
-// ============================================================
+  if (!fastStructureValid) return false;
 
-function classifySignal(behavior, fast, medium) {
-  const lastCandle = fast[fast.length - 1];
-
-  const recentHourly = medium.slice(-5);
-
-  const hourlyPositive =
-    recentHourly[recentHourly.length - 1].close >
-    recentHourly[0].close;
-
-  const newTrendBehaviors = [
-    BEHAVIORS.ACCUMULATION,
-    BEHAVIORS.REVERSAL,
-    BEHAVIORS.BREAKOUT_RETEST,
-    BEHAVIORS.SQUEEZE,
-    BEHAVIORS.MOMENTUM,
-    BEHAVIORS.ASCENDING_TRIANGLE,
-    BEHAVIORS.BULL_FLAG,
-  ];
-
-  const fresh =
-    behavior.fresh &&
-    newTrendBehaviors.includes(behavior.behavior);
-
-  return {
-    stage: fresh ? "NEW_TREND" : "CONTINUATION",
-
-    marker: fresh ? "🆕" : "🟢",
-
-    behavior: behavior.behavior,
-
-    candleTime: lastCandle.time,
-
-    hourlyPositive,
-  };
+  return true;
 }
 
 // ============================================================
 // INTERNAL QUALITY SCORE
-// NOT DISPLAYED IN TELEGRAM
 // ============================================================
 
 function calculateQuality(
@@ -1066,15 +1222,16 @@ function calculateQuality(
   const change15 = getReturn(fast, 1);
   const change1h = getReturn(medium, 1);
 
-  if (trend1h.bullish) score += 5;
-  if (trend4h.bullish) score += 3;
+  if (trend1h.bullish) score += 3;
+  if (trend4h.bullish) score += 2;
 
   if (volume.ratio >= 2) score += 5;
   else if (volume.ratio >= 1.5) score += 3;
 
-  if (change15 > 0 && change1h > 0) score += 3;
+  if (change15 > 0) score += 2;
+  if (change1h > 0) score += 2;
 
-  if (btc.change1h < -1) score -= 5;
+  if (btc.change1h < -1) score -= 4;
 
   if (quoteVolume >= 1000000) score += 3;
 
@@ -1084,143 +1241,7 @@ function calculateQuality(
 }
 
 // ============================================================
-// RANKING MEMORY
-// ============================================================
-
-function updateRankingMemory(candidates) {
-  const now = Date.now();
-
-  const currentSymbols = new Set(
-    candidates.map((c) => c.symbol)
-  );
-
-  for (const [symbol, memory] of rankingMemory) {
-    if (!currentSymbols.has(symbol)) {
-      memory.missingScans = (memory.missingScans || 0) + 1;
-
-      if (memory.missingScans >= 3) {
-        rankingMemory.delete(symbol);
-      }
-    }
-  }
-
-  for (const candidate of candidates) {
-    const previous = rankingMemory.get(candidate.symbol);
-
-    if (!previous) {
-      rankingMemory.set(candidate.symbol, {
-        stableScore: candidate.quality,
-        previousRank: 999,
-        missingScans: 0,
-        pendingRank: null,
-        pendingCount: 0,
-        confirmedRank: 999,
-      });
-
-      candidate.stableScore = candidate.quality;
-
-      continue;
-    }
-
-    previous.missingScans = 0;
-
-    previous.stableScore =
-      previous.stableScore * CONFIG.RANKING_MEMORY_WEIGHT +
-      candidate.quality * CONFIG.RANKING_NEW_WEIGHT;
-
-    candidate.stableScore = previous.stableScore;
-  }
-
-  const sorted = [...candidates].sort(
-    (a, b) => b.stableScore - a.stableScore
-  );
-
-  const proposedRanks = new Map(
-    sorted.map((candidate, index) => [
-      candidate.symbol,
-      index + 1,
-    ])
-  );
-
-  for (const candidate of candidates) {
-    const memory = rankingMemory.get(candidate.symbol);
-
-    const proposed = proposedRanks.get(candidate.symbol);
-
-    if (!memory) continue;
-
-    if (memory.confirmedRank === 999) {
-      memory.confirmedRank = proposed;
-      continue;
-    }
-
-    const rankDifference = Math.abs(
-      proposed - memory.confirmedRank
-    );
-
-    if (rankDifference === 0) {
-      memory.pendingRank = null;
-      memory.pendingCount = 0;
-      continue;
-    }
-
-    const currentLeader = sorted[proposed - 1];
-
-    const previousLeader = sorted[memory.confirmedRank - 1];
-
-    const significantDifference =
-      currentLeader &&
-      previousLeader &&
-      Math.abs(
-        currentLeader.stableScore -
-        previousLeader.stableScore
-      ) >= CONFIG.RANKING_SWITCH_MARGIN;
-
-    if (significantDifference) {
-      if (memory.pendingRank === proposed) {
-        memory.pendingCount++;
-      } else {
-        memory.pendingRank = proposed;
-        memory.pendingCount = 1;
-      }
-
-      if (
-        memory.pendingCount >=
-        CONFIG.RANKING_CONFIRMATIONS
-      ) {
-        memory.confirmedRank = proposed;
-        memory.pendingRank = null;
-        memory.pendingCount = 0;
-      }
-    }
-  }
-
-  const finalRanking = [...candidates].sort((a, b) => {
-    const rankA =
-      rankingMemory.get(a.symbol)?.confirmedRank ?? 999;
-
-    const rankB =
-      rankingMemory.get(b.symbol)?.confirmedRank ?? 999;
-
-    return rankA - rankB;
-  });
-
-  finalRanking.forEach((candidate, index) => {
-    const memory = rankingMemory.get(candidate.symbol);
-
-    if (memory) {
-      candidate.rank = index + 1;
-      memory.previousRank = index + 1;
-    }
-  });
-
-  previousRanking = finalRanking.map((c) => c.symbol);
-
-  return finalRanking;
-}
-
-// ============================================================
-// SIGNAL MEMORY / NEW TREND MARKER
+// SIGNAL LIFECYCLE
 // ============================================================
 
 function updateSignalState(candidate) {
@@ -1234,50 +1255,147 @@ function updateSignalState(candidate) {
     signalMemory.set(candidate.symbol, {
       firstSeen: now,
       lastSeen: now,
+      lastSignalCandle: candleTime,
       lastCandleTime: candleTime,
-      marker: candidate.stage === "NEW_TREND" ? "🆕" : "🟢",
       behavior: candidate.behavior,
+      active: true,
+      missingScans: 0,
+      marker: "🆕",
     });
 
-    candidate.marker =
-      candidate.stage === "NEW_TREND" ? "🆕" : "🟢";
+    candidate.marker = "🆕";
+    candidate.stage = "NEW_TREND";
 
     return;
   }
 
-  const sameCandle =
-    previous.lastCandleTime === candleTime;
+  const elapsedSinceLastSeen =
+    (now - previous.lastSeen) / 60000;
 
-  const sameBehavior =
-    previous.behavior === candidate.behavior;
+  const wasInactive =
+    previous.active === false ||
+    elapsedSinceLastSeen > CONFIG.SIGNAL_REACTIVATION_MINUTES;
 
-  const elapsedMinutes =
-    (now - previous.firstSeen) / 60000;
+  const isNewCandle =
+    candleTime > (previous.lastSignalCandle || 0);
 
-  const isFreshSignal =
-    candidate.stage === "NEW_TREND" &&
-    !sameBehavior &&
-    !sameCandle;
+  // A changed behavior on the same market movement
+  // does not automatically create a new signal.
+  const isNewSignal =
+    wasInactive &&
+    isNewCandle;
 
-  if (isFreshSignal) {
+  if (isNewSignal) {
     previous.firstSeen = now;
-    candidate.marker = "🆕";
+    previous.lastSignalCandle = candleTime;
 
-  } else if (
-    candidate.stage === "NEW_TREND" &&
-    elapsedMinutes <= CONFIG.SIGNAL_MAX_AGE_MINUTES &&
-    sameBehavior
-  ) {
-    candidate.marker = "🟢";
+    candidate.marker = "🆕";
+    candidate.stage = "NEW_TREND";
 
   } else {
     candidate.marker = "🟢";
+    candidate.stage = "CONTINUATION";
+
+    if (isNewCandle) {
+      previous.lastSignalCandle = candleTime;
+    }
   }
 
   previous.lastSeen = now;
   previous.lastCandleTime = candleTime;
   previous.behavior = candidate.behavior;
+  previous.active = true;
+  previous.missingScans = 0;
   previous.marker = candidate.marker;
+}
+
+function updateMissingSignals(currentSymbols) {
+  for (const [symbol, memory] of signalMemory) {
+    if (currentSymbols.has(symbol)) continue;
+
+    memory.missingScans =
+      (memory.missingScans || 0) + 1;
+
+    if (memory.missingScans >= 2) {
+      memory.active = false;
+    }
+  }
+}
+
+function cleanupSignalMemory() {
+  const now = Date.now();
+
+  const maxAge =
+    CONFIG.SIGNAL_MAX_MEMORY_DAYS * 24 * 60 * 60 * 1000;
+
+  for (const [symbol, memory] of signalMemory) {
+    if (now - memory.lastSeen > maxAge) {
+      signalMemory.delete(symbol);
+    }
+  }
+
+  for (const [symbol, memory] of rankingMemory) {
+    if (
+      (memory.missingScans || 0) >= 5 ||
+      now - (memory.lastSeen || 0) > maxAge
+    ) {
+      rankingMemory.delete(symbol);
+    }
+  }
+}
+
+// ============================================================
+// STABLE RANKING
+// ============================================================
+
+function updateRankingMemory(candidates) {
+  const currentSymbols = new Set(
+    candidates.map((c) => c.symbol)
+  );
+
+  for (const [symbol, memory] of rankingMemory) {
+    if (!currentSymbols.has(symbol)) {
+      memory.missingScans =
+        (memory.missingScans || 0) + 1;
+    }
+  }
+
+  for (const candidate of candidates) {
+    const previous = rankingMemory.get(candidate.symbol);
+
+    if (!previous) {
+      rankingMemory.set(candidate.symbol, {
+        stableScore: candidate.quality,
+        missingScans: 0,
+        lastSeen: Date.now(),
+      });
+
+      candidate.stableScore = candidate.quality;
+
+      continue;
+    }
+
+    previous.stableScore =
+      previous.stableScore *
+        CONFIG.RANKING_MEMORY_WEIGHT +
+      candidate.quality *
+        CONFIG.RANKING_NEW_WEIGHT;
+
+    previous.missingScans = 0;
+    previous.lastSeen = Date.now();
+
+    candidate.stableScore = previous.stableScore;
+  }
+
+  const sorted = [...candidates].sort(
+    (a, b) => b.stableScore - a.stableScore
+  );
+
+  sorted.forEach((candidate, index) => {
+    candidate.rank = index + 1;
+  });
+
+  return sorted;
 }
 
 // ============================================================
@@ -1326,13 +1444,54 @@ async function getBitcoinBenchmark() {
 }
 
 // ============================================================
+// CONCURRENCY
+// ============================================================
+
+function createSemaphore(max) {
+  let active = 0;
+  const waiting = [];
+
+  return {
+    async acquire() {
+      if (active < max) {
+        active++;
+
+        return () => {
+          active--;
+
+          const next = waiting.shift();
+
+          if (next) next();
+        };
+      }
+
+      await new Promise((resolve) => {
+        waiting.push(resolve);
+      });
+
+      active++;
+
+      return () => {
+        active--;
+
+        const next = waiting.shift();
+
+        if (next) next();
+      };
+    },
+  };
+}
+
+// ============================================================
 // COIN ANALYSIS
 // ============================================================
 
 async function analyzeCoin(ticker, btc, semaphore) {
   const symbol = normalizeSymbol(ticker.contract);
 
-  if (!symbol || symbol === CONFIG.BTC_SYMBOL) return null;
+  if (!symbol || symbol === CONFIG.BTC_SYMBOL) {
+    return null;
+  }
 
   const quoteVolume = num(ticker.volume_24h_quote);
 
@@ -1375,7 +1534,6 @@ async function analyzeCoin(ticker, btc, semaphore) {
       return null;
     }
 
-    // Unified behavior detection
     const behavior = detectBullishBehavior(
       fast,
       medium,
@@ -1384,22 +1542,14 @@ async function analyzeCoin(ticker, btc, semaphore) {
 
     if (!behavior) return null;
 
-    // Market context and late movement protection
     const trendValid = validateTrend(
       fast,
       medium,
       slow,
-      ticker,
       btc
     );
 
     if (!trendValid) return null;
-
-    const classification = classifySignal(
-      behavior,
-      fast,
-      medium
-    );
 
     const quality = calculateQuality(
       fast,
@@ -1421,14 +1571,12 @@ async function analyzeCoin(ticker, btc, semaphore) {
 
       behavior: behavior.behavior,
 
-      stage: classification.stage,
+      stage: "NEW_TREND",
+      marker: "🆕",
 
-      marker: classification.marker,
-
-      candleTime: classification.candleTime,
+      candleTime: fast[fast.length - 1].time,
 
       quality,
-
       score: Math.round(quality),
 
       volumeRatio15m: behavior.volumeRatio,
@@ -1450,72 +1598,14 @@ async function analyzeCoin(ticker, btc, semaphore) {
     return candidate;
 
   } catch (error) {
-    console.error(`[COIN ERROR] ${symbol}: ${error.message}`);
+    console.error(
+      `[COIN ERROR] ${symbol}: ${error.message}`
+    );
 
     return null;
 
   } finally {
     release();
-  }
-}
-
-// ============================================================
-// CONCURRENCY
-// ============================================================
-
-function createSemaphore(max) {
-  let active = 0;
-  const waiting = [];
-
-  return {
-    async acquire() {
-      if (active < max) {
-        active++;
-
-        return () => {
-          active--;
-
-          const next = waiting.shift();
-
-          if (next) next();
-        };
-      }
-
-      await new Promise((resolve) => waiting.push(resolve));
-
-      active++;
-
-      return () => {
-        active--;
-
-        const next = waiting.shift();
-
-        if (next) next();
-      };
-    },
-  };
-}
-
-// ============================================================
-// SIGNAL MEMORY CLEANUP
-// ============================================================
-
-function cleanupSignalMemory() {
-  const now = Date.now();
-
-  for (const [symbol, memory] of signalMemory) {
-    const age =
-      (now - memory.lastSeen) / 60000;
-
-    if (age > CONFIG.SIGNAL_EXPIRY_MINUTES) {
-      signalMemory.delete(symbol);
-    }
-  }
-
-  for (const [symbol, memory] of rankingMemory) {
-    if ((memory.missingScans || 0) >= 3) {
-      rankingMemory.delete(symbol);
-    }
   }
 }
 
@@ -1531,13 +1621,19 @@ function formatCandidate(candidate) {
 }
 
 function buildReport(candidates, stats) {
+  const visibleCandidates = candidates.slice(
+    0,
+    CONFIG.MAX_REPORT_ITEMS
+  );
+
   const lines = [
-    "🚀 GATE.IO | LONG RADAR",
+    "🚀 GATE.IO | EARLY LONG RADAR",
     "━━━━━━━━━━━━━━━━━━",
     `📊 بازار: ${stats.totalMarkets}`,
     `💧 نقدشونده: ${stats.liquidMarkets}`,
     `🔍 بررسی‌شده: ${stats.scannedMarkets}`,
     `📌 فرصت‌ها: ${candidates.length}`,
+    `📋 نمایش: ${visibleCandidates.length}`,
     "━━━━━━━━━━━━━━━━━━",
   ];
 
@@ -1550,20 +1646,25 @@ function buildReport(candidates, stats) {
     return lines.join("\n");
   }
 
-  candidates
-    .slice(0, CONFIG.MAX_REPORT_ITEMS)
-    .forEach((candidate) => {
-      lines.push(
-        "",
-        formatCandidate(candidate),
-        "──────────────────"
-      );
-    });
+  visibleCandidates.forEach((candidate) => {
+    lines.push(
+      "",
+      formatCandidate(candidate),
+      "──────────────────"
+    );
+  });
 
   lines.push(
     "",
-    "🆕 شروع روند جدید | 🟢 ادامه روند"
+    "🆕 شروع تازه | 🟢 ادامه موقعیت قبلی"
   );
+
+  if (candidates.length > visibleCandidates.length) {
+    lines.push(
+      "",
+      `تعداد ${candidates.length - visibleCandidates.length} فرصت دیگر در فایل JSON موجود است.`
+    );
+  }
 
   return lines.join("\n");
 }
@@ -1636,7 +1737,9 @@ async function sendTelegramMessage(message) {
       } catch (error) {
         attempt++;
 
-        if (attempt > CONFIG.RETRIES) throw error;
+        if (attempt > CONFIG.RETRIES) {
+          throw error;
+        }
 
         await sleep(1000 * attempt);
       }
@@ -1710,7 +1813,9 @@ async function sendTelegramDocument(filename, content) {
     } catch (error) {
       attempt++;
 
-      if (attempt > CONFIG.RETRIES) throw error;
+      if (attempt > CONFIG.RETRIES) {
+        throw error;
+      }
 
       await sleep(1000 * attempt);
     }
@@ -1743,8 +1848,10 @@ export async function scanGateMarkets() {
   const startedAt = Date.now();
 
   console.log("\n========================================");
-  console.log("GATE.IO UNIFIED LONG RADAR");
+  console.log("GATE.IO EARLY LONG RADAR");
   console.log("========================================\n");
+
+  await loadPersistentState();
 
   const [contracts, tickers] = await Promise.all([
     getContracts(),
@@ -1848,10 +1955,19 @@ export async function scanGateMarkets() {
 
   await Promise.all(workers);
 
-  // Stable ranking
+  // Mark disappeared candidates as inactive only after
+  // consecutive scans without a valid signal.
+  updateMissingSignals(
+    new Set(results.map((candidate) => candidate.symbol))
+  );
+
+  // Stable internal ranking.
   const rankedCandidates = updateRankingMemory(results);
 
   cleanupSignalMemory();
+
+  // Persist lifecycle and ranking state.
+  await savePersistentState();
 
   const stats = {
     totalMarkets: activeContracts.length,
@@ -1875,7 +1991,7 @@ export async function scanGateMarkets() {
 
     market: "USDT PERPETUAL",
 
-    strategy: "UNIFIED LONG RADAR",
+    strategy: "EARLY LONG RADAR",
 
     scannedAt: new Date().toISOString(),
 
@@ -1896,7 +2012,7 @@ export async function scanGateMarkets() {
     report,
   };
 
-  // Preserve existing storage integration
+  // Preserve existing storage integration.
   try {
     const storageResult =
       await saveMarketSnapshot(rankedCandidates);
@@ -1945,8 +2061,6 @@ export async function scanGateMarkets() {
 
 // ============================================================
 // AUTO START ON IMPORT
-// IMPORTANT:
-// src/index.js imports this file.
 // Preserve existing execution interface.
 // ============================================================
 
