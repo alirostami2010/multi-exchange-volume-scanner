@@ -1,4 +1,3 @@
-
 /**
  * GATE.IO USDT PERPETUAL — SUSTAINED BULLISH MOVE RADAR
  * Prioritizes sustained bullish trend quality, timely entries, and serious-decline exits.
@@ -7,7 +6,7 @@
  */
 
 import 'dotenv/config';
-import { saveMarketSnapshot } from '../storage/marketStorage.js';
+import { saveMarketSnapshot, getTradeStates } from '../storage/marketStorage.js';
 
 const CONFIG = {
   API_BASE: 'https://api.gateio.ws/api/v4',
@@ -488,6 +487,7 @@ function analyzeCoin(data) {
   const room4h = calculateRoomToResistance(candles['4h'], price, 30);
   const room1d = calculateRoomToResistance(candles['1d'], price, 30);
 
+  // The objective is a fresh, sustained bullish leg, not a low-growth/low-price coin.
   const structure15 = tf15.structure;
   const structure1h = tf1h.structure;
   const structure4h = tf4h.structure;
@@ -922,15 +922,9 @@ async function main() {
   console.log('🎯 Sustained bullish trend quality + timely entry readiness');
   console.log('🛑 Exit requires serious short-term structure breakdown with selling confirmation.');
 
-  // marketStorage.js فقط saveMarketSnapshot را export می‌کند.
-  // بازیابی trade states از این فایل انجام نمی‌شود.
-  const previousTradeStates = {};
-
-  const [contracts, tickers] = await Promise.all([
-    getContracts(),
-    getTickers(),
+  const [contracts, tickers, previousTradeStates] = await Promise.all([
+    getContracts(), getTickers(), getTradeStates(),
   ]);
-
   if (!Array.isArray(contracts) || !Array.isArray(tickers)) throw new Error('داده قراردادها یا تیکرهای Gate.io معتبر نیست.');
 
   const tickerMap = new Map(tickers.map((ticker) => [ticker.contract, ticker]));
@@ -998,17 +992,20 @@ async function main() {
     if (result) candidates.push(result);
   }
 
+  const updatedTradeStates = { ...previousTradeStates };
+  for (const coin of candidates) updatedTradeStates[coin.symbol] = coin.tradeState;
+
   let rankChanges = null;
   let rankedCandidates = candidates;
   try {
-    // امضای تابع storage فقط یک آرگومان دارد.
-    const storageResult = await saveMarketSnapshot(candidates);
-    rankChanges = storageResult?.rankChanges ?? null;
-    rankedCandidates = Array.isArray(storageResult?.rankedCandidates)
-      ? storageResult.rankedCandidates
-      : candidates;
-
+    const storageResult = await saveMarketSnapshot(candidates, { tradeStates: updatedTradeStates });
+    rankChanges = storageResult.rankChanges;
+    rankedCandidates = storageResult.rankedCandidates;
     console.log('\n💾 MARKET DATA SAVED');
+    console.log(`Snapshots: ${storageResult.snapshotsSaved}`);
+    console.log(`History records: ${storageResult.historyCount}`);
+    console.log(`Coin summaries: ${storageResult.summaryCount}`);
+    console.log(`Trade states: ${storageResult.tradeStateCount}`);
     console.log('📊 Independent growth and early-move ranks calculated.');
   } catch (storageError) {
     console.error('⚠️ MARKET STORAGE FAILED:', storageError);
