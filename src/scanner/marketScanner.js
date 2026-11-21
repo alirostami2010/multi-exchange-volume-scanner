@@ -4,25 +4,15 @@
  * ------------------------------------------------------------
  * LONG ONLY
  *
- * هدف:
- * 1) کشف شروع حرکت صعودی قبل از جهش‌های بزرگ
- * 2) شناسایی ارزهای قدرتمند حتی هنگام نزول BTC
- * 3) تشخیص افزایش قیمت همراه با افزایش گردش مالی
- * 4) تشخیص استمرار حرکت در تایم‌فریم‌های 15m و 1h و 4h
- * 5) جداسازی حرکت اولیه از حرکت پیشرفته
+ * 15m = Early momentum detection
+ * 1h  = Momentum and continuity confirmation
+ * 4h  = Trend confirmation
+ * BTC = Relative strength benchmark
  *
- * TIMEFRAMES:
- * 15m = کشف حرکت تازه و شتاب اولیه
- * 1h  = تأیید استمرار و قدرت حرکت
- * 4h  = بررسی جهت کلی و فضای حرکت
- * BTC = معیار سنجش قدرت مستقل ارز
- *
- * IMPORTANT:
- * Buy pressure is ESTIMATED from candle structure and turnover.
+ * Buy pressure is estimated from candle structure and turnover.
  * It is NOT verified taker-buy volume.
  *
- * FILE:
- * src/scanner/marketScanner.js
+ * File: src/scanner/marketScanner.js
  */
 
 import { saveMarketSnapshot } from "../storage/marketStorage.js";
@@ -33,7 +23,6 @@ import { saveMarketSnapshot } from "../storage/marketStorage.js";
 
 const CONFIG = {
   API_BASE: "https://api.gateio.ws/api/v4",
-
   SETTLE: "usdt",
   BTC_SYMBOL: "BTC_USDT",
 
@@ -49,56 +38,40 @@ const CONFIG = {
     SLOW: 40,
   },
 
-  // Liquidity protection
   MIN_QUOTE_VOLUME_24H: 100000,
   MAX_MARKETS_PER_SCAN: 0,
 
-  // Request control
   CONCURRENCY: 3,
   REQUEST_DELAY_MS: 150,
   REQUEST_TIMEOUT_MS: 15000,
   RETRIES: 3,
 
-  // Analysis
   VOLUME_BASELINE_CANDLES: 20,
+
   MIN_HISTORY_FAST: 25,
   MIN_HISTORY_MEDIUM: 15,
   MIN_HISTORY_SLOW: 10,
 
-  // Early movement thresholds
   EARLY_MIN_CHANGE_15M: 0.25,
   EARLY_MIN_CHANGE_1H: 0.50,
-  EARLY_MIN_CHANGE_4H: 0.50,
 
-  // Strong movement thresholds
   STRONG_CHANGE_15M: 0.80,
   STRONG_CHANGE_1H: 1.50,
 
-  // Turnover expansion
   MIN_TURNOVER_RATIO: 1.25,
   STRONG_TURNOVER_RATIO: 2.0,
 
-  // Relative strength
   MIN_RELATIVE_STRENGTH: 0.50,
   STRONG_RELATIVE_STRENGTH: 2.0,
 
-  // Avoid extreme late entries in early category
-  EARLY_MAX_CHANGE_24H: 18,
   ADVANCED_MIN_CHANGE_24H: 20,
 
-  // Abnormal candle protection
   MAX_SINGLE_CANDLE_CHANGE_15M: 12,
-  MAX_SINGLE_CANDLE_CHANGE_1H: 35,
 
-  // Ranking
   MIN_SCORE: 35,
 
-  // Reporting
   MAX_REPORT_ITEMS: 30,
   TELEGRAM_MAX_LENGTH: 3900,
-
-  // BTC benchmark
-  BTC_SYMBOL_ALIASES: ["BTC_USDT", "BTCUSDT"],
 };
 
 // ============================================================
@@ -143,6 +116,7 @@ const median = (values) => {
 
 const average = (values) => {
   const clean = values.filter(Number.isFinite);
+
   if (!clean.length) return 0;
 
   return clean.reduce((sum, value) => sum + value, 0) /
@@ -170,6 +144,8 @@ async function requestGate(path, params = {}) {
   let attempt = 0;
 
   while (attempt <= CONFIG.RETRIES) {
+    let timeout;
+
     try {
       const elapsed = Date.now() - lastRequestTime;
 
@@ -189,7 +165,7 @@ async function requestGate(path, params = {}) {
 
       const controller = new AbortController();
 
-      const timeout = setTimeout(
+      timeout = setTimeout(
         () => controller.abort(),
         CONFIG.REQUEST_TIMEOUT_MS
       );
@@ -201,8 +177,6 @@ async function requestGate(path, params = {}) {
         },
         signal: controller.signal,
       });
-
-      clearTimeout(timeout);
 
       if (!response.ok) {
         const errorText = await response.text().catch(() => "");
@@ -221,6 +195,8 @@ async function requestGate(path, params = {}) {
       }
 
       await sleep(500 * attempt);
+    } finally {
+      if (timeout) clearTimeout(timeout);
     }
   }
 
@@ -261,8 +237,6 @@ async function getCandles(symbol, interval, limit) {
 
   return result
     .map((item) => {
-      // Gate.io normally returns candle objects.
-      // Array support is retained as a defensive fallback.
       if (Array.isArray(item)) {
         return {
           time: toNumber(item[0]),
@@ -309,7 +283,6 @@ function getClosedCandles(candles, intervalSeconds) {
 
 function analyzeCandle(candle) {
   const range = Math.max(candle.high - candle.low, 0);
-
   const body = candle.close - candle.open;
 
   const bodyPercent = percentChange(
@@ -384,7 +357,6 @@ function analyzeTurnover(candles) {
     .filter((value) => value > 0);
 
   const baseline = median(baselineValues);
-
   const ratio = baseline > 0 ? current / baseline : 0;
 
   return {
@@ -453,7 +425,7 @@ function estimateBuyPressure(candles) {
 }
 
 // ============================================================
-// MOMENTUM ANALYSIS
+// 15 MINUTE ANALYSIS
 // ============================================================
 
 function analyzeFastTimeframe(candles) {
@@ -480,20 +452,20 @@ function analyzeFastTimeframe(candles) {
   const turnover = analyzeTurnover(candles);
   const pressure = estimateBuyPressure(candles);
 
-  const previousChanges = candles
-    .slice(-5, -1)
-    .map((candle, index, array) => {
-      const previousCandle = array[index - 1];
-      if (!previousCandle) return 0;
+  const previousChanges = [];
 
-      return percentChange(
-        candle.close,
-        previousCandle.close
-      );
-    });
+  for (let i = candles.length - 5; i < candles.length - 1; i++) {
+    if (i <= 0) continue;
+
+    previousChanges.push(
+      percentChange(
+        candles[i].close,
+        candles[i - 1].close
+      )
+    );
+  }
 
   const previousMomentum = average(previousChanges);
-
   const acceleration = change15m - previousMomentum;
 
   const abnormalCandle =
@@ -530,6 +502,10 @@ function analyzeFastTimeframe(candles) {
     lastPrice: last.close,
   };
 }
+
+// ============================================================
+// 1 HOUR ANALYSIS
+// ============================================================
 
 function analyzeMediumTimeframe(candles) {
   if (candles.length < CONFIG.MIN_HISTORY_MEDIUM) {
@@ -576,6 +552,10 @@ function analyzeMediumTimeframe(candles) {
   };
 }
 
+// ============================================================
+// 4 HOUR ANALYSIS
+// ============================================================
+
 function analyzeSlowTimeframe(candles) {
   if (candles.length < CONFIG.MIN_HISTORY_SLOW) {
     return {
@@ -619,25 +599,6 @@ function analyzeSlowTimeframe(candles) {
 // BTC BENCHMARK
 // ============================================================
 
-function analyzeBitcoin(candles) {
-  const fast = analyzeFastTimeframe(candles);
-  const medium = analyzeMediumTimeframe(candles);
-  const slow = analyzeSlowTimeframe(candles);
-
-  return {
-    valid: fast.valid && medium.valid && slow.valid,
-
-    change15m: fast.change15m || 0,
-    change1h: medium.change1h || 0,
-    change4h: slow.change4h || 0,
-    change24h: slow.change24h || 0,
-
-    fast,
-    medium,
-    slow,
-  };
-}
-
 function calculateRelativeStrength(coin, btc) {
   return {
     rs15m: round(coin.fast.change15m - btc.change15m),
@@ -661,16 +622,12 @@ function classifyMovement(data) {
   } = data;
 
   const independent =
-    (
-      relative.rs1h >= CONFIG.MIN_RELATIVE_STRENGTH ||
-      relative.rs4h >= CONFIG.MIN_RELATIVE_STRENGTH
-    );
+    relative.rs1h >= CONFIG.MIN_RELATIVE_STRENGTH ||
+    relative.rs4h >= CONFIG.MIN_RELATIVE_STRENGTH;
 
   const strongIndependent =
-    (
-      relative.rs1h >= CONFIG.STRONG_RELATIVE_STRENGTH ||
-      relative.rs4h >= CONFIG.STRONG_RELATIVE_STRENGTH
-    );
+    relative.rs1h >= CONFIG.STRONG_RELATIVE_STRENGTH ||
+    relative.rs4h >= CONFIG.STRONG_RELATIVE_STRENGTH;
 
   const earlyMomentum =
     fast.change15m >= CONFIG.EARLY_MIN_CHANGE_15M ||
@@ -848,41 +805,69 @@ function calculateScore(data) {
   score += scoreContinuity(medium, slow);
   score += scoreAcceleration(fast);
 
-  // Liquidity quality
   if (quoteVolume >= 1000000) score += 5;
   else if (quoteVolume >= 500000) score += 3;
   else if (quoteVolume >= 200000) score += 2;
 
-  // Independent movement bonus
   if (classification.independent) score += 5;
   if (classification.strongIndependent) score += 4;
 
-  // Early movement bonus
   if (classification.stage === "EARLY_INDEPENDENT") {
     score += 8;
   } else if (classification.stage === "EARLY") {
     score += 5;
   }
 
-  // Advanced moves remain visible but lose early-entry priority.
   if (classification.stage === "ADVANCED") {
     score -= 8;
   }
 
-  // Penalize extreme one-candle spikes.
   if (fast.abnormalCandle) score -= 15;
 
-  // Penalize weak close location.
   if (fast.candleStructure.closeLocation < 0.45) {
     score -= 5;
   }
 
-  // Penalize negative medium trend.
   if (!medium.rising && medium.change1h < 0) {
     score -= 5;
   }
 
   return Math.round(clamp(score, 0, 100));
+}
+
+// ============================================================
+// CONCURRENCY CONTROL
+// ============================================================
+
+function createSemaphore(max) {
+  let active = 0;
+  const waiting = [];
+
+  return {
+    async acquire() {
+      if (active < max) {
+        active++;
+
+        return () => {
+          active--;
+
+          const next = waiting.shift();
+          if (next) next();
+        };
+      }
+
+      await new Promise((resolve) => waiting.push(resolve));
+
+      active++;
+
+      return () => {
+        active--;
+
+        const next = waiting.shift();
+        if (next) next();
+      };
+    },
+  };
 }
 
 // ============================================================
@@ -896,9 +881,7 @@ async function analyzeCoin(ticker, btc, semaphore) {
     return null;
   }
 
-  const quoteVolume = toNumber(
-    ticker.volume_24h_quote
-  );
+  const quoteVolume = toNumber(ticker.volume_24h_quote);
 
   if (quoteVolume < CONFIG.MIN_QUOTE_VOLUME_24H) {
     return null;
@@ -913,11 +896,13 @@ async function analyzeCoin(ticker, btc, semaphore) {
         CONFIG.TIMEFRAMES.FAST,
         CONFIG.CANDLE_LIMITS.FAST
       ),
+
       getCandles(
         symbol,
         CONFIG.TIMEFRAMES.MEDIUM,
         CONFIG.CANDLE_LIMITS.MEDIUM
       ),
+
       getCandles(
         symbol,
         CONFIG.TIMEFRAMES.SLOW,
@@ -950,9 +935,7 @@ async function analyzeCoin(ticker, btc, semaphore) {
       fast.lastPrice
     );
 
-    const change24h = toNumber(
-      ticker.change_percentage
-    );
+    const change24h = toNumber(ticker.change_percentage);
 
     const relative = calculateRelativeStrength(
       {
@@ -976,25 +959,20 @@ async function analyzeCoin(ticker, btc, semaphore) {
       return null;
     }
 
-    const candidateData = {
+    const score = calculateScore({
       fast,
       medium,
       slow,
       relative,
       classification,
       quoteVolume,
-    };
-
-    const score = calculateScore({
-      ...candidateData,
-      change24h,
     });
 
     if (score < CONFIG.MIN_SCORE) {
       return null;
     }
 
-    const result = {
+    return {
       symbol,
       contract: symbol,
 
@@ -1065,9 +1043,8 @@ async function analyzeCoin(ticker, btc, semaphore) {
 
       scannedAt: new Date().toISOString(),
     };
-
-    return result;
   } catch (error) {
+    console.error(`[COIN ERROR] ${symbol}: ${error.message}`);
     return null;
   } finally {
     release();
@@ -1075,34 +1052,47 @@ async function analyzeCoin(ticker, btc, semaphore) {
 }
 
 // ============================================================
-// CONCURRENCY CONTROL
+// BTC ANALYSIS
 // ============================================================
 
-function createSemaphore(max) {
-  let active = 0;
-  const waiting = [];
+async function getBitcoinBenchmark() {
+  const [rawFast, rawMedium, rawSlow] = await Promise.all([
+    getCandles(
+      CONFIG.BTC_SYMBOL,
+      CONFIG.TIMEFRAMES.FAST,
+      CONFIG.CANDLE_LIMITS.FAST
+    ),
+
+    getCandles(
+      CONFIG.BTC_SYMBOL,
+      CONFIG.TIMEFRAMES.MEDIUM,
+      CONFIG.CANDLE_LIMITS.MEDIUM
+    ),
+
+    getCandles(
+      CONFIG.BTC_SYMBOL,
+      CONFIG.TIMEFRAMES.SLOW,
+      CONFIG.CANDLE_LIMITS.SLOW
+    ),
+  ]);
+
+  const fastCandles = getClosedCandles(rawFast, 15 * 60);
+  const mediumCandles = getClosedCandles(rawMedium, 60 * 60);
+  const slowCandles = getClosedCandles(rawSlow, 4 * 60 * 60);
+
+  if (
+    fastCandles.length < CONFIG.MIN_HISTORY_FAST ||
+    mediumCandles.length < CONFIG.MIN_HISTORY_MEDIUM ||
+    slowCandles.length < CONFIG.MIN_HISTORY_SLOW
+  ) {
+    throw new Error("BTC benchmark history is insufficient");
+  }
 
   return {
-    async acquire() {
-      if (active < max) {
-        active++;
-        return () => {
-          active--;
-          const next = waiting.shift();
-          if (next) next();
-        };
-      }
-
-      await new Promise((resolve) => waiting.push(resolve));
-
-      active++;
-
-      return () => {
-        active--;
-        const next = waiting.shift();
-        if (next) next();
-      };
-    },
+    change15m: round(getReturn(fastCandles, 1)),
+    change1h: round(getReturn(mediumCandles, 1)),
+    change4h: round(getReturn(slowCandles, 1)),
+    change24h: round(getReturn(slowCandles, 6)),
   };
 }
 
@@ -1123,7 +1113,6 @@ function rankCandidates(candidates) {
     const stageA = STAGE_PRIORITY[a.stage] || 99;
     const stageB = STAGE_PRIORITY[b.stage] || 99;
 
-    // Early independent opportunities get first priority.
     if (stageA !== stageB) {
       return stageA - stageB;
     }
@@ -1147,7 +1136,7 @@ function rankCandidates(candidates) {
 }
 
 // ============================================================
-// REPORT HELPERS
+// REPORT
 // ============================================================
 
 function stageEmoji(stage) {
@@ -1203,6 +1192,7 @@ function buildReport(candidates, stats, btc) {
     "",
     `📊 کل بازار: ${stats.totalMarkets}`,
     `💧 بازار نقدشونده: ${stats.liquidMarkets}`,
+    `🔍 بررسی‌شده: ${stats.scannedMarkets}`,
     `✅ بررسی موفق: ${stats.successful}`,
     `📌 فرصت‌های شناسایی‌شده: ${candidates.length}`,
     "",
@@ -1268,6 +1258,7 @@ async function sendTelegramMessage(message) {
   const chatId = process.env.TELEGRAM_CHAT_ID;
 
   if (!token || !chatId) {
+    console.log("[TELEGRAM] Credentials not configured");
     return {
       sent: false,
       reason: "Telegram credentials are not configured",
@@ -1329,6 +1320,8 @@ async function sendTelegramMessage(message) {
         await sleep(1000 * attempt);
       }
     }
+
+    await sleep(250);
   }
 
   return { sent: true };
@@ -1408,11 +1401,7 @@ async function sendTelegramReport(output) {
 
     return true;
   } catch (error) {
-    console.error(
-      "[TELEGRAM ERROR]",
-      error.message
-    );
-
+    console.error("[TELEGRAM ERROR]", error.message);
     return false;
   }
 }
@@ -1473,87 +1462,34 @@ export async function scanGateMarkets() {
 
   const marketsToScan =
     CONFIG.MAX_MARKETS_PER_SCAN > 0
-      ? liquidMarkets.slice(
-          0,
-          CONFIG.MAX_MARKETS_PER_SCAN
-        )
+      ? liquidMarkets.slice(0, CONFIG.MAX_MARKETS_PER_SCAN)
       : liquidMarkets;
 
   console.log(
     `[MARKETS] Total: ${activeContracts.length} | Liquid: ${liquidMarkets.length} | Scanning: ${marketsToScan.length}`
   );
 
-  // BTC data is fetched only once per scan.
-  let btcCandles;
+  const btc = await getBitcoinBenchmark();
 
-  try {
-    btcCandles = await getCandles(
-      CONFIG.BTC_SYMBOL,
-      CONFIG.TIMEFRAMES.FAST,
-      CONFIG.CANDLE_LIMITS.FAST
-    );
+  console.log(
+    `[BTC] 15m: ${formatPercent(btc.change15m)} | 1h: ${formatPercent(btc.change1h)} | 4h: ${formatPercent(btc.change4h)}`
+  );
 
-    const btcFastCandles = getClosedCandles(
-      btcCandles,
-      15 * 60
-    );
+  const semaphore = createSemaphore(CONFIG.CONCURRENCY);
 
-    const [btc1hRaw, btc4hRaw] = await Promise.all([
-      getCandles(
-        CONFIG.BTC_SYMBOL,
-        CONFIG.TIMEFRAMES.MEDIUM,
-        CONFIG.CANDLE_LIMITS.MEDIUM
-      ),
-      getCandles(
-        CONFIG.BTC_SYMBOL,
-        CONFIG.TIMEFRAMES.SLOW,
-        CONFIG.CANDLE_LIMITS.SLOW
-      ),
-    ]);
+  const results = [];
 
-    const btc1h = getClosedCandles(btc1hRaw, 60 * 60);
-    const btc4h = getClosedCandles(btc4hRaw, 4 * 60 * 60);
+  let successful = 0;
+  let failed = 0;
+  let completed = 0;
 
-    const btc = analyzeBitcoin([
-      ...btcFastCandles,
-    ]);
-
-    // Use timeframe-specific BTC returns.
-    const btcBenchmark = {
-      ...btc,
-      valid:
-        btcFastCandles.length >= CONFIG.MIN_HISTORY_FAST &&
-        btc1h.length >= CONFIG.MIN_HISTORY_MEDIUM &&
-        btc4h.length >= CONFIG.MIN_HISTORY_SLOW,
-
-      change15m: getReturn(btcFastCandles, 1),
-      change1h: getReturn(btc1h, 1),
-      change4h: getReturn(btc4h, 1),
-      change24h: getReturn(btc4h, 6),
-    };
-
-    if (!btcBenchmark.valid) {
-      throw new Error("BTC benchmark history is insufficient");
-    }
-
-    const semaphore = createSemaphore(
-      CONFIG.CONCURRENCY
-    );
-
-    const results = [];
-    let successful = 0;
-    let failed = 0;
-
-    let completed = 0;
-
-    const workers = marketsToScan.map(async (market) => {
+  const workers = marketsToScan.map(async (market) => {
+    try {
       const result = await analyzeCoin(
         market.ticker,
-        btcBenchmark,
+        btc,
         semaphore
       );
-
-      completed++;
 
       if (result) {
         successful++;
@@ -1561,143 +1497,135 @@ export async function scanGateMarkets() {
       } else {
         failed++;
       }
+    } catch (error) {
+      failed++;
+      console.error(
+        `[MARKET ERROR] ${market.symbol}: ${error.message}`
+      );
+    } finally {
+      completed++;
 
       if (completed % 50 === 0) {
         console.log(
           `[PROGRESS] ${completed}/${marketsToScan.length} | Candidates: ${results.length}`
         );
       }
-    });
-
-    await Promise.all(workers);
-
-    const rankedCandidates = rankCandidates(results);
-
-    const stats = {
-      totalMarkets: activeContracts.length,
-      liquidMarkets: liquidMarkets.length,
-      scannedMarkets: marketsToScan.length,
-      successful,
-      failed,
-      candidates: rankedCandidates.length,
-      durationMs: Date.now() - startedAt,
-    };
-
-    const report = buildReport(
-      rankedCandidates,
-      stats,
-      btcBenchmark
-    );
-
-    const output = {
-      success: true,
-
-      exchange: "GATE.IO",
-      market: "USDT PERPETUAL",
-
-      strategy: "INDEPENDENT LONG RADAR",
-
-      scannedAt: new Date().toISOString(),
-
-      stats,
-
-      btc: {
-        change15m: round(btcBenchmark.change15m),
-        change1h: round(btcBenchmark.change1h),
-        change4h: round(btcBenchmark.change4h),
-        change24h: round(btcBenchmark.change24h),
-      },
-
-      candidates: rankedCandidates,
-
-      // Compatibility aliases for existing consumers.
-      rankedCandidates,
-      rankChanges: [],
-      historyCount: 0,
-      summaryCount: rankedCandidates.length,
-
-      report,
-    };
-
-    // Persist scan snapshot.
-    try {
-      const storageResult = await saveMarketSnapshot(
-        rankedCandidates
-      );
-
-      if (storageResult) {
-        output.historyCount =
-          storageResult.historyCount ?? output.historyCount;
-
-        output.summaryCount =
-          storageResult.summaryCount ?? output.summaryCount;
-
-        output.rankChanges =
-          storageResult.rankChanges ?? output.rankChanges;
-      }
-    } catch (error) {
-      console.error(
-        "[STORAGE ERROR]",
-        error.message
-      );
     }
+  });
 
-    console.log("\n========================================");
-    console.log("SCAN FINISHED");
-    console.log("========================================");
-    console.log(`Markets: ${stats.totalMarkets}`);
-    console.log(`Liquid: ${stats.liquidMarkets}`);
-    console.log(`Scanned: ${stats.scannedMarkets}`);
-    console.log(`Successful: ${stats.successful}`);
-    console.log(`Candidates: ${stats.candidates}`);
-    console.log(`Duration: ${stats.durationMs}ms`);
-    console.log("========================================\n");
+  await Promise.all(workers);
 
-    console.log(report);
+  const rankedCandidates = rankCandidates(results);
 
-    await sendTelegramReport(output);
+  const stats = {
+    totalMarkets: activeContracts.length,
+    liquidMarkets: liquidMarkets.length,
+    scannedMarkets: marketsToScan.length,
+    successful,
+    failed,
+    candidates: rankedCandidates.length,
+    durationMs: Date.now() - startedAt,
+  };
 
-    return output;
-  } catch (error) {
-    console.error(
-      "[SCANNER FATAL ERROR]",
-      error.message
+  const report = buildReport(
+    rankedCandidates,
+    stats,
+    btc
+  );
+
+  const output = {
+    success: true,
+
+    exchange: "GATE.IO",
+    market: "USDT PERPETUAL",
+    strategy: "INDEPENDENT LONG RADAR",
+
+    scannedAt: new Date().toISOString(),
+
+    stats,
+    btc,
+
+    candidates: rankedCandidates,
+    rankedCandidates,
+
+    rankChanges: [],
+    historyCount: 0,
+    summaryCount: rankedCandidates.length,
+
+    report,
+  };
+
+  // Save snapshot using the existing storage module.
+  try {
+    const storageResult = await saveMarketSnapshot(
+      rankedCandidates
     );
 
-    const output = {
-      success: false,
-      error: error.message,
-      scannedAt: new Date().toISOString(),
-    };
+    if (storageResult) {
+      output.historyCount =
+        storageResult.historyCount ?? output.historyCount;
 
-    return output;
+      output.summaryCount =
+        storageResult.summaryCount ?? output.summaryCount;
+
+      output.rankChanges =
+        storageResult.rankChanges ?? output.rankChanges;
+    }
+  } catch (error) {
+    console.error("[STORAGE ERROR]", error.message);
   }
+
+  console.log("\n========================================");
+  console.log("SCAN FINISHED");
+  console.log("========================================");
+  console.log(`Markets: ${stats.totalMarkets}`);
+  console.log(`Liquid: ${stats.liquidMarkets}`);
+  console.log(`Scanned: ${stats.scannedMarkets}`);
+  console.log(`Successful: ${stats.successful}`);
+  console.log(`Failed: ${stats.failed}`);
+  console.log(`Candidates: ${stats.candidates}`);
+  console.log(`Duration: ${stats.durationMs}ms`);
+  console.log("========================================\n");
+
+  console.log(report);
+
+  await sendTelegramReport(output);
+
+  return output;
 }
 
 // ============================================================
-// OPTIONAL DIRECT EXECUTION
+// AUTO START ON IMPORT
+// IMPORTANT:
+// src/index.js imports this file.
+// Therefore this block must run when the module is imported.
 // ============================================================
 
-const isDirectExecution =
-  process.argv[1] &&
-  import.meta.url.endsWith(
-    process.argv[1].replace(/\\/g, "/")
+try {
+  const output = await scanGateMarkets();
+
+  console.log("\n[SCANNER RESULT]");
+
+  console.log(
+    JSON.stringify(
+      {
+        success: output.success,
+        totalMarkets: output.stats?.totalMarkets,
+        liquidMarkets: output.stats?.liquidMarkets,
+        scannedMarkets: output.stats?.scannedMarkets,
+        successfulMarkets: output.stats?.successful,
+        failedMarkets: output.stats?.failed,
+        candidates: output.stats?.candidates,
+        durationMs: output.stats?.durationMs,
+      },
+      null,
+      2
+    )
   );
 
-if (isDirectExecution) {
-  scanGateMarkets()
-    .then((result) => {
-      console.log(
-        "[SCANNER RESULT]",
-        result.success
-          ? `${result.candidates?.length || 0} candidates`
-          : result.error
-      );
+  console.log("\nScan completed.\n");
+} catch (error) {
+  console.error("\n[SCANNER FATAL ERROR]", error);
 
-      process.exitCode = result.success ? 0 : 1;
-    })
-    .catch((error) => {
-      console.error(error);
-      process.exitCode = 1;
-    });
+  process.exitCode = 1;
 }
