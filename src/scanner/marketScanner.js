@@ -10,6 +10,7 @@
  * 4h  = Overhead resistance / room-to-grow filter
  *
  * Diagnostics:
+ * - Detailed 15m breakout rejection diagnostics
  * - Breakout volume details
  * - Detailed 1h EMA diagnostics
  * - Detailed 4h room diagnostics
@@ -184,11 +185,24 @@ function createDiagnostics() {
   return {
     validData: 0,
     consolidation: 0,
+
+    // Breakout diagnostics
+    breakoutChecks: 0,
+    breakoutBelowResistance: 0,
+    breakoutNearResistance: 0,
+    breakoutAboveMax: 0,
+    candleReturnRejected: 0,
+    invalidCandleRange: 0,
+    closeLocationRejected: 0,
+
     breakout: 0,
     volume: 0,
     trend: 0,
     room: 0,
     score: 0,
+
+    // Breakout rejection samples
+    breakoutSamples: [],
 
     // Breakout volume details
     volumeSamples: [],
@@ -233,6 +247,64 @@ function getRoomFailureReason(room) {
   return 'تأیید شد';
 }
 
+function formatBreakoutDiagnostics(d) {
+  const lines = [
+    '🔬 تشخیص علت رد شکست 15M:',
+    `🔎 تعداد بررسی شکست: ${d.breakoutChecks}`,
+    `🔴 قیمت زیر مقاومت: ${d.breakoutBelowResistance}`,
+    `🟡 نزدیک مقاومت، اما شکست کمتر از ${CONFIG.MIN_BREAKOUT_PERCENT.toFixed(2)}%: ${d.breakoutNearResistance}`,
+    `🚀 عبور بیش از حد مجاز ${CONFIG.MAX_BREAKOUT_EXTENSION.toFixed(2)}%: ${d.breakoutAboveMax}`,
+    `📉 رشد کندل کمتر از ${CONFIG.MIN_CANDLE_RETURN.toFixed(2)}%: ${d.candleReturnRejected}`,
+    `⚠️ دامنه کندل نامعتبر: ${d.invalidCandleRange}`,
+    `📍 موقعیت Close کمتر از ${CONFIG.MIN_CLOSE_LOCATION.toFixed(2)}: ${d.closeLocationRejected}`,
+    `✅ شکست تأییدشده: ${d.breakout}`,
+    '',
+    '📋 نمونه ارزهای بررسی‌شده در مرحله شکست:'
+  ];
+
+  const samples = [...d.breakoutSamples]
+    .sort((a, b) => {
+      // Show the samples with the strongest proximity/breakout first.
+      return b.breakoutPercent - a.breakoutPercent;
+    })
+    .slice(0, 12);
+
+  if (!samples.length) {
+    lines.push('هیچ نمونه‌ای برای بررسی شکست ثبت نشد.');
+  } else {
+    for (const sample of samples) {
+      const status = sample.passed ? '✅' : '❌';
+
+      lines.push(
+        `${status} ${sample.symbol} | فاصله از مقاومت: ${formatPercent(sample.breakoutPercent)}`
+      );
+
+      lines.push(
+        `   رشد کندل: ${formatPercent(sample.candleReturn)} | موقعیت Close: ${sample.closeLocation === null ? '-' : sample.closeLocation.toFixed(2)}`
+      );
+
+      lines.push(
+        `   قیمت: ${formatPrice(sample.livePrice)} | مقاومت: ${formatPrice(sample.resistance)}`
+      );
+
+      if (sample.failedChecks.length) {
+        lines.push(
+          `   علت رد: ${sample.failedChecks.join('، ')}`
+        );
+      } else {
+        lines.push('   نتیجه: تمام شروط شکست تأیید شدند.');
+      }
+    }
+  }
+
+  lines.push(
+    '',
+    'ℹ️ شمارنده‌های علت رد مستقل هستند؛ یک ارز می‌تواند هم‌زمان در چند علت رد ثبت شود.'
+  );
+
+  return lines.join('\n');
+}
+
 function formatDiagnostics(d) {
   const lines = [
     '🔬 مراحل عبور ارزها:',
@@ -243,6 +315,8 @@ function formatDiagnostics(d) {
     `5️⃣ تأیید روند 1H: ${d.trend}`,
     `6️⃣ فضای رشد 4H: ${d.room}`,
     `7️⃣ امتیاز نهایی: ${d.score}`,
+    '',
+    formatBreakoutDiagnostics(d),
     '',
     '📊 بررسی حجم شکست‌های معتبر:'
   ];
@@ -620,14 +694,15 @@ function analyzeConsolidation(candles) {
 }
 
 // ============================================================
-// BREAKOUT DETECTION
+// BREAKOUT DETECTION + DETAILED DIAGNOSTICS
 // ============================================================
 
 function analyzeBreakout(
   closed15m,
   current15m,
   livePrice,
-  diagnostics
+  diagnostics,
+  symbol
 ) {
   if (!current15m || !livePrice) return null;
 
@@ -638,6 +713,7 @@ function analyzeBreakout(
   if (!consolidation) return null;
 
   diagnostics.consolidation++;
+  diagnostics.breakoutChecks++;
 
   const {
     resistance,
@@ -645,26 +721,20 @@ function analyzeBreakout(
     rangePercent
   } = consolidation;
 
+  // ----------------------------------------------------------
+  // Calculate all breakout measurements first.
+  // This allows independent diagnostics for every condition.
+  // ----------------------------------------------------------
+
   const breakoutPercent = pctChange(
     livePrice,
     resistance
   );
 
-  if (
-    breakoutPercent < CONFIG.MIN_BREAKOUT_PERCENT ||
-    breakoutPercent > CONFIG.MAX_BREAKOUT_EXTENSION
-  ) {
-    return null;
-  }
-
   const candleReturn = pctChange(
     livePrice,
     current15m.open
   );
-
-  if (candleReturn < CONFIG.MIN_CANDLE_RETURN) {
-    return null;
-  }
 
   const currentHigh = Math.max(
     current15m.high,
@@ -678,19 +748,134 @@ function analyzeBreakout(
 
   const currentRange = currentHigh - currentLow;
 
-  if (currentRange <= 0) return null;
+  const validCandleRange =
+    Number.isFinite(currentRange) &&
+    currentRange > 0;
 
-  const closeLocation = clamp(
-    (livePrice - currentLow) / currentRange,
-    0,
-    1
-  );
+  const closeLocation = validCandleRange
+    ? clamp(
+        (livePrice - currentLow) / currentRange,
+        0,
+        1
+      )
+    : null;
 
-  if (
-    closeLocation < CONFIG.MIN_CLOSE_LOCATION
-  ) {
-    return null;
+  // ----------------------------------------------------------
+  // Independent condition checks
+  // ----------------------------------------------------------
+
+  const belowResistance =
+    breakoutPercent < 0;
+
+  const nearResistance =
+    breakoutPercent >= 0 &&
+    breakoutPercent < CONFIG.MIN_BREAKOUT_PERCENT;
+
+  const aboveMaximum =
+    breakoutPercent > CONFIG.MAX_BREAKOUT_EXTENSION;
+
+  const candleReturnRejected =
+    candleReturn < CONFIG.MIN_CANDLE_RETURN;
+
+  const invalidCandleRange =
+    !validCandleRange;
+
+  const closeLocationRejected =
+    validCandleRange &&
+    closeLocation < CONFIG.MIN_CLOSE_LOCATION;
+
+  // ----------------------------------------------------------
+  // Update independent diagnostic counters
+  // One coin can be counted in multiple rejection categories.
+  // ----------------------------------------------------------
+
+  if (belowResistance) {
+    diagnostics.breakoutBelowResistance++;
   }
+
+  if (nearResistance) {
+    diagnostics.breakoutNearResistance++;
+  }
+
+  if (aboveMaximum) {
+    diagnostics.breakoutAboveMax++;
+  }
+
+  if (candleReturnRejected) {
+    diagnostics.candleReturnRejected++;
+  }
+
+  if (invalidCandleRange) {
+    diagnostics.invalidCandleRange++;
+  }
+
+  if (closeLocationRejected) {
+    diagnostics.closeLocationRejected++;
+  }
+
+  // ----------------------------------------------------------
+  // Collect rejection reasons
+  // ----------------------------------------------------------
+
+  const failedChecks = [];
+
+  if (belowResistance) {
+    failedChecks.push('قیمت هنوز زیر مقاومت است');
+  } else if (nearResistance) {
+    failedChecks.push('شکست کمتر از حداقل مجاز');
+  }
+
+  if (aboveMaximum) {
+    failedChecks.push('قیمت بیش از حد از مقاومت فاصله گرفته');
+  }
+
+  if (candleReturnRejected) {
+    failedChecks.push('رشد کندل کافی نیست');
+  }
+
+  if (invalidCandleRange) {
+    failedChecks.push('دامنه کندل نامعتبر است');
+  } else if (closeLocationRejected) {
+    failedChecks.push('موقعیت قیمت در کندل ضعیف است');
+  }
+
+  const passed =
+    !belowResistance &&
+    !nearResistance &&
+    !aboveMaximum &&
+    !candleReturnRejected &&
+    !invalidCandleRange &&
+    !closeLocationRejected;
+
+  // ----------------------------------------------------------
+  // Store a limited number of diagnostic samples.
+  // These samples do not affect trading decisions.
+  // ----------------------------------------------------------
+
+  if (diagnostics.breakoutSamples.length < 30) {
+    diagnostics.breakoutSamples.push({
+      symbol,
+      passed,
+
+      breakoutPercent,
+      candleReturn,
+      closeLocation,
+
+      livePrice,
+      resistance,
+      support,
+      rangePercent,
+
+      failedChecks
+    });
+  }
+
+  // ----------------------------------------------------------
+  // Original acceptance logic preserved:
+  // All original conditions must pass.
+  // ----------------------------------------------------------
+
+  if (!passed) return null;
 
   diagnostics.breakout++;
 
@@ -1021,7 +1206,8 @@ function analyzeCoin(data, diagnostics) {
     candles15m,
     current15m,
     livePrice,
-    diagnostics
+    diagnostics,
+    symbol
   );
 
   if (!breakout) return null;
