@@ -1,13 +1,13 @@
 
 /**
  * GATE.IO USDT PERPETUAL — SUSTAINED BULLISH MOVE RADAR
- * Prioritizes sustained bullish trend quality, timely entries, and serious-decline exits.
+ * Prioritizes fresh bullish moves, strong continuation, and timely entries.
  * 4H/1H = trend continuity | 15M = move start | 5M = entry/exit timing.
  * File: src/scanner/marketScanner.js | Node.js 20+
  */
 
 import 'dotenv/config';
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { saveMarketSnapshot } from '../storage/marketStorage.js';
 
 const CONFIG = {
@@ -19,7 +19,8 @@ const CONFIG = {
     '4h': { seconds: 14400, limit: 100 },
     '1d': { seconds: 86400, limit: 100 },
   },
-  TOP_COUNT: 20,
+
+  TOP_COUNT: 10,
   MIN_QUOTE_VOLUME_24H: 100000,
   CONCURRENCY: 8,
   REQUEST_TIMEOUT: 15000,
@@ -34,6 +35,13 @@ const CONFIG = {
   MAX_RETURN_4H: 12,
   NEAR_ENTRY_ATR: 1.25,
   SETUP_MAX_AGE_HOURS: { SWING: 240, 'SHORT-TERM': 72, SCALP: 24 },
+
+  // حافظه داخلی اسکنر
+  SCANNER_MEMORY_FILE: 'data/scanner-memory.json',
+  WATCHLIST_RETENTION_DAYS: 30,
+  TRADE_STATE_RETENTION_DAYS: 11,
+  MAX_ACTIVE_AGE_MINUTES: 240,
+
   HTML_REPORT_FILE: 'market-report.html',
 };
 
@@ -43,14 +51,24 @@ const number = (value, fallback = 0) => {
   return Number.isFinite(n) ? n : fallback;
 };
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
-const average = (values) => values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
+const average = (values) => values.length
+  ? values.reduce((a, b) => a + b, 0) / values.length
+  : 0;
+
 const median = (values) => {
   if (!values.length) return 0;
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  return sorted.length % 2
+    ? sorted[mid]
+    : (sorted[mid - 1] + sorted[mid]) / 2;
 };
-const pctChange = (current, previous) => !previous || previous <= 0 ? 0 : ((current - previous) / previous) * 100;
+
+const pctChange = (current, previous) =>
+  !previous || previous <= 0
+    ? 0
+    : ((current - previous) / previous) * 100;
+
 const formatPrice = (value) => {
   if (!Number.isFinite(value)) return '-';
   if (value >= 1000) return value.toFixed(2);
@@ -58,7 +76,177 @@ const formatPrice = (value) => {
   if (value >= 0.001) return value.toFixed(7);
   return value.toPrecision(5);
 };
-const getCandleValue = (candle) => candle.turnover > 0 ? candle.turnover : candle.volume;
+
+const getCandleValue = (candle) =>
+  candle.turnover > 0 ? candle.turnover : candle.volume;
+
+/* -------------------------------------------------------------------------- */
+/* SCANNER MEMORY                                                             */
+/* -------------------------------------------------------------------------- */
+
+function createEmptyMemory() {
+  return {
+    version: 1,
+    updatedAt: new Date().toISOString(),
+    watchlist: {},
+    tradeStates: {},
+  };
+}
+
+async function loadScannerMemory() {
+  try {
+    const raw = await readFile(CONFIG.SCANNER_MEMORY_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+
+    return {
+      ...createEmptyMemory(),
+      ...parsed,
+      watchlist: parsed.watchlist && typeof parsed.watchlist === 'object'
+        ? parsed.watchlist
+        : {},
+      tradeStates: parsed.tradeStates && typeof parsed.tradeStates === 'object'
+        ? parsed.tradeStates
+        : {},
+    };
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      console.error('⚠️ SCANNER MEMORY READ FAILED:', error.message);
+    }
+
+    return createEmptyMemory();
+  }
+}
+
+async function saveScannerMemory(memory) {
+  await mkdir('data', { recursive: true });
+
+  memory.updatedAt = new Date().toISOString();
+
+  await writeFile(
+    CONFIG.SCANNER_MEMORY_FILE,
+    JSON.stringify(memory, null, 2),
+    'utf8'
+  );
+}
+
+function isWatchCandidate(coin) {
+  if (!coin) return false;
+
+  if (coin.growthScore < 62) return false;
+
+  if (coin.moveStatus === 'CONFIRMED' || coin.moveStatus === 'EARLY') {
+    return false;
+  }
+
+  const warnings = coin.warnings || [];
+
+  if (
+    warnings.some((warning) =>
+      warning.includes('فشار فروش') ||
+      warning.includes('بیش از حد کشیده')
+    )
+  ) {
+    return false;
+  }
+
+  return coin.moveStatus === 'WATCHING' || coin.moveStatus === 'POTENTIAL';
+}
+
+function updateScannerMemory(memory, candidates, activeCoins, analyzedSymbols, nowMs) {
+  const now = new Date(nowMs).toISOString();
+  const activeSymbols = new Set(activeCoins.map((coin) => coin.symbol));
+  const candidateMap = new Map(candidates.map((coin) => [coin.symbol, coin]));
+  const analyzedSet = new Set(analyzedSymbols);
+
+  const watchlist = { ...memory.watchlist };
+  const tradeStates = { ...memory.tradeStates };
+
+  const watchRetentionMs =
+    CONFIG.WATCHLIST_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+
+  const tradeRetentionMs =
+    CONFIG.TRADE_STATE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+
+  // به‌روزرسانی و پاک‌سازی Watchlist
+  for (const [symbol, item] of Object.entries(watchlist)) {
+    if (activeSymbols.has(symbol)) {
+      delete watchlist[symbol];
+      continue;
+    }
+
+    const coin = candidateMap.get(symbol);
+
+    if (analyzedSet.has(symbol)) {
+      if (coin && isWatchCandidate(coin)) {
+        watchlist[symbol] = {
+          ...item,
+          symbol,
+          lastSeen: now,
+          growthScore: coin.growthScore,
+          moveScore: coin.moveScore,
+          moveStatus: coin.moveStatus,
+          reason: coin.moveTypeLabel,
+        };
+      } else {
+        delete watchlist[symbol];
+      }
+
+      continue;
+    }
+
+    const lastSeen = Date.parse(item.lastSeen || item.firstSeen || '');
+    if (!lastSeen || nowMs - lastSeen > watchRetentionMs) {
+      delete watchlist[symbol];
+    }
+  }
+
+  // افزودن ارزهای مستعد جدید به Watchlist
+  for (const coin of candidates) {
+    if (activeSymbols.has(coin.symbol)) continue;
+    if (!isWatchCandidate(coin)) continue;
+
+    const previous = watchlist[coin.symbol];
+
+    watchlist[coin.symbol] = {
+      symbol: coin.symbol,
+      firstSeen: previous?.firstSeen || now,
+      lastSeen: now,
+      growthScore: coin.growthScore,
+      moveScore: coin.moveScore,
+      moveStatus: coin.moveStatus,
+      reason: coin.moveTypeLabel,
+    };
+  }
+
+  // ذخیره وضعیت معاملات برای بازیابی در اسکن بعدی
+  for (const coin of candidates) {
+    if (coin.tradeState) {
+      tradeStates[coin.symbol] = coin.tradeState;
+    }
+  }
+
+  // پاک‌سازی وضعیت‌های معاملاتی منقضی‌شده
+  for (const [symbol, state] of Object.entries(tradeStates)) {
+    const referenceTime = Date.parse(
+      state.createdAt || state.updatedAt || ''
+    );
+
+    if (!referenceTime || nowMs - referenceTime > tradeRetentionMs) {
+      delete tradeStates[symbol];
+    }
+  }
+
+  return {
+    version: 1,
+    updatedAt: now,
+    watchlist,
+    tradeStates,
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* GATE API                                                                   */
+/* -------------------------------------------------------------------------- */
 
 async function fetchJSON(url) {
   let lastError;
@@ -85,7 +273,10 @@ async function fetchJSON(url) {
       if (attempt < CONFIG.RETRIES) {
         await sleep(
           error.status === 429
-            ? Math.max(error.retryAfter * 1000, 1800 * (2 ** (attempt - 1))) + Math.floor(Math.random() * 500)
+            ? Math.max(
+                error.retryAfter * 1000,
+                1800 * (2 ** (attempt - 1))
+              ) + Math.floor(Math.random() * 500)
             : 700 * attempt
         );
       }
@@ -104,8 +295,14 @@ async function getTickers() {
 }
 
 async function getRecentTrades(contract) {
-  const params = new URLSearchParams({ contract, limit: String(CONFIG.DERIVATIVE_TRADE_LIMIT) });
-  return fetchJSON(`${CONFIG.API_BASE}/futures/usdt/trades?${params}`);
+  const params = new URLSearchParams({
+    contract,
+    limit: String(CONFIG.DERIVATIVE_TRADE_LIMIT),
+  });
+
+  return fetchJSON(
+    `${CONFIG.API_BASE}/futures/usdt/trades?${params}`
+  );
 }
 
 async function getContractStats(contract) {
@@ -114,80 +311,167 @@ async function getContractStats(contract) {
     interval: '5m',
     limit: String(CONFIG.DERIVATIVE_STATS_LIMIT),
   });
-  return fetchJSON(`${CONFIG.API_BASE}/futures/usdt/contract_stats?${params}`);
+
+  return fetchJSON(
+    `${CONFIG.API_BASE}/futures/usdt/contract_stats?${params}`
+  );
 }
 
 function analyzeDerivatives(trades, stats, contractMultiplier = 1) {
   const nowSeconds = Date.now() / 1000;
-  const multiplier = number(contractMultiplier) > 0 ? number(contractMultiplier) : 1;
+  const multiplier = number(contractMultiplier) > 0
+    ? number(contractMultiplier)
+    : 1;
 
   const validTrades = Array.isArray(trades)
     ? trades.filter((trade) => {
-      if (!trade || trade.is_internal === true || number(trade.size) === 0 || number(trade.price) <= 0) return false;
-      const rawTime = number(trade.create_time_ms, number(trade.create_time));
-      const timestamp = rawTime > 1e12 ? rawTime / 1000 : rawTime;
-      return !timestamp || nowSeconds - timestamp <= 15 * 60;
-    })
+        if (
+          !trade ||
+          trade.is_internal === true ||
+          number(trade.size) === 0 ||
+          number(trade.price) <= 0
+        ) {
+          return false;
+        }
+
+        const rawTime = number(
+          trade.create_time_ms,
+          number(trade.create_time)
+        );
+
+        const timestamp = rawTime > 1e12
+          ? rawTime / 1000
+          : rawTime;
+
+        return !timestamp || nowSeconds - timestamp <= 15 * 60;
+      })
     : [];
 
   let buyNotional = 0;
   let sellNotional = 0;
 
   for (const trade of validTrades) {
-    const notional = Math.abs(number(trade.size)) * number(trade.price) * multiplier;
+    const notional =
+      Math.abs(number(trade.size)) *
+      number(trade.price) *
+      multiplier;
+
     if (number(trade.size) > 0) buyNotional += notional;
     else sellNotional += notional;
   }
 
   const totalNotional = buyNotional + sellNotional;
-  const buyRatio = totalNotional > 0 ? buyNotional / totalNotional : 0.5;
-  const imbalance = totalNotional > 0 ? (buyNotional - sellNotional) / totalNotional : 0;
+
+  const buyRatio = totalNotional > 0
+    ? buyNotional / totalNotional
+    : 0.5;
+
+  const imbalance = totalNotional > 0
+    ? (buyNotional - sellNotional) / totalNotional
+    : 0;
 
   const points = Array.isArray(stats)
     ? stats.map((item) => ({
-      time: number(item.time),
-      oi: number(item.open_interest_usd) || number(item.open_interest),
-      markPrice: number(item.mark_price),
-      longLiq: number(item.long_liq_usd_new, number(item.long_liq_usd)),
-      shortLiq: number(item.short_liq_usd_new, number(item.short_liq_usd)),
-      takerLong: number(item.long_taker_size),
-      takerShort: number(item.short_taker_size),
-      lsrTaker: number(item.lsr_taker),
-    })).filter((item) => item.time > 0 && item.oi > 0).sort((a, b) => a.time - b.time)
+        time: number(item.time),
+        oi:
+          number(item.open_interest_usd) ||
+          number(item.open_interest),
+        markPrice: number(item.mark_price),
+        longLiq: number(
+          item.long_liq_usd_new,
+          number(item.long_liq_usd)
+        ),
+        shortLiq: number(
+          item.short_liq_usd_new,
+          number(item.short_liq_usd)
+        ),
+        takerLong: number(item.long_taker_size),
+        takerShort: number(item.short_taker_size),
+        lsrTaker: number(item.lsr_taker),
+      }))
+        .filter((item) => item.time > 0 && item.oi > 0)
+        .sort((a, b) => a.time - b.time)
     : [];
 
   const first = points[0];
   const last = points.at(-1);
-  const oiChangePct = first && last && first.oi > 0 ? pctChange(last.oi, first.oi) : null;
-  const markChangePct = first && last && first.markPrice > 0 ? pctChange(last.markPrice, first.markPrice) : null;
-  const shortLiqTotal = points.reduce((sum, item) => sum + item.shortLiq, 0);
-  const longLiqTotal = points.reduce((sum, item) => sum + item.longLiq, 0);
+
+  const oiChangePct =
+    first && last && first.oi > 0
+      ? pctChange(last.oi, first.oi)
+      : null;
+
+  const markChangePct =
+    first && last && first.markPrice > 0
+      ? pctChange(last.markPrice, first.markPrice)
+      : null;
+
+  const shortLiqTotal = points.reduce(
+    (sum, item) => sum + item.shortLiq,
+    0
+  );
+
+  const longLiqTotal = points.reduce(
+    (sum, item) => sum + item.longLiq,
+    0
+  );
+
   const latestStats = points.at(-1);
-  const statsTakerTotal = number(latestStats?.takerLong) + number(latestStats?.takerShort);
+
+  const statsTakerTotal =
+    number(latestStats?.takerLong) +
+    number(latestStats?.takerShort);
 
   const statsTakerImbalance = statsTakerTotal > 0
-    ? (number(latestStats?.takerLong) - number(latestStats?.takerShort)) / statsTakerTotal
+    ? (
+        number(latestStats?.takerLong) -
+        number(latestStats?.takerShort)
+      ) / statsTakerTotal
     : null;
 
   const combinedImbalance = statsTakerImbalance == null
     ? imbalance
-    : clamp(imbalance * 0.70 + statsTakerImbalance * 0.30, -1, 1);
+    : clamp(
+        imbalance * 0.70 +
+        statsTakerImbalance * 0.30,
+        -1,
+        1
+      );
 
-  let flowScore = clamp(50 + combinedImbalance * 65, 0, 100);
+  let flowScore = clamp(
+    50 + combinedImbalance * 65,
+    0,
+    100
+  );
+
   let oiScore = 50;
 
   if (oiChangePct !== null && markChangePct !== null) {
-    if (oiChangePct > 0.15 && markChangePct > 0) oiScore = clamp(58 + oiChangePct * 5 + markChangePct * 2, 0, 100);
-    else if (oiChangePct < -0.15 && markChangePct > 0) oiScore = clamp(43 + oiChangePct * 3, 0, 60);
-    else if (oiChangePct > 0.15 && markChangePct <= 0) oiScore = clamp(48 + oiChangePct * 2, 0, 65);
-    else oiScore = clamp(50 + oiChangePct * 2, 0, 100);
+    if (oiChangePct > 0.15 && markChangePct > 0) {
+      oiScore = clamp(
+        58 + oiChangePct * 5 + markChangePct * 2,
+        0,
+        100
+      );
+    } else if (oiChangePct < -0.15 && markChangePct > 0) {
+      oiScore = clamp(43 + oiChangePct * 3, 0, 60);
+    } else if (oiChangePct > 0.15 && markChangePct <= 0) {
+      oiScore = clamp(48 + oiChangePct * 2, 0, 65);
+    } else {
+      oiScore = clamp(50 + oiChangePct * 2, 0, 100);
+    }
   }
 
-  const liquidationDistortion = shortLiqTotal > 0 && totalNotional > 0
-    ? clamp(shortLiqTotal / totalNotional, 0, 1)
-    : 0;
+  const liquidationDistortion =
+    shortLiqTotal > 0 && totalNotional > 0
+      ? clamp(shortLiqTotal / totalNotional, 0, 1)
+      : 0;
 
-  flowScore = clamp(flowScore - liquidationDistortion * 18, 0, 100);
+  flowScore = clamp(
+    flowScore - liquidationDistortion * 18,
+    0,
+    100
+  );
 
   return {
     tradeCount: validTrades.length,
@@ -206,19 +490,34 @@ function analyzeDerivatives(trades, stats, contractMultiplier = 1) {
     shortLiquidations: shortLiqTotal,
     longLiquidations: longLiqTotal,
     statsPoints: points.length,
-    dataQuality: validTrades.length >= 10 && points.length >= 2
-      ? 'GOOD'
-      : validTrades.length >= 5 || points.length >= 2
-        ? 'PARTIAL'
-        : 'LOW',
+    dataQuality:
+      validTrades.length >= 10 && points.length >= 2
+        ? 'GOOD'
+        : validTrades.length >= 5 || points.length >= 2
+          ? 'PARTIAL'
+          : 'LOW',
   };
 }
 
-async function getCandles(contract, interval, limit, includeCurrent = false) {
-  const params = new URLSearchParams({ contract, interval, limit: String(limit) });
-  const raw = await fetchJSON(`${CONFIG.API_BASE}/futures/usdt/candlesticks?${params}`);
+async function getCandles(
+  contract,
+  interval,
+  limit,
+  includeCurrent = false
+) {
+  const params = new URLSearchParams({
+    contract,
+    interval,
+    limit: String(limit),
+  });
 
-  if (!Array.isArray(raw)) throw new Error(`Invalid candle response: ${contract} ${interval}`);
+  const raw = await fetchJSON(
+    `${CONFIG.API_BASE}/futures/usdt/candlesticks?${params}`
+  );
+
+  if (!Array.isArray(raw)) {
+    throw new Error(`Invalid candle response: ${contract} ${interval}`);
+  }
 
   const candles = raw.map((c) => ({
     time: number(c.t),
@@ -228,28 +527,45 @@ async function getCandles(contract, interval, limit, includeCurrent = false) {
     close: number(c.c),
     volume: number(c.v),
     turnover: number(c.sum),
-  })).filter((c) => c.time > 0 && c.open > 0 && c.high > 0 && c.low > 0 && c.close > 0)
+  }))
+    .filter((c) =>
+      c.time > 0 &&
+      c.open > 0 &&
+      c.high > 0 &&
+      c.low > 0 &&
+      c.close > 0
+    )
     .sort((a, b) => a.time - b.time);
 
   const intervalSeconds = CONFIG.TIMEFRAMES[interval].seconds;
-  const currentBucket = Math.floor(Date.now() / 1000 / intervalSeconds) * intervalSeconds;
-  const closed = candles.filter((c) => c.time < currentBucket);
+
+  const currentBucket =
+    Math.floor(Date.now() / 1000 / intervalSeconds) *
+    intervalSeconds;
+
+  const closed = candles.filter(
+    (c) => c.time < currentBucket
+  );
 
   if (!includeCurrent) return closed;
 
-  const current = candles.find((c) => c.time === currentBucket) || null;
+  const current = candles.find(
+    (c) => c.time === currentBucket
+  ) || null;
 
   return {
     closed,
-    current: current ? {
-      bucketTime: currentBucket,
-      open: current.open,
-      high: current.high,
-      low: current.low,
-      close: current.close,
-      volume: current.volume,
-      turnover: current.turnover,
-    } : null,
+    current: current
+      ? {
+          bucketTime: currentBucket,
+          open: current.open,
+          high: current.high,
+          low: current.low,
+          close: current.close,
+          volume: current.volume,
+          turnover: current.turnover,
+        }
+      : null,
   };
 }
 
@@ -260,25 +576,40 @@ async function mapLimit(items, limit, worker) {
   async function runner() {
     while (true) {
       const index = nextIndex++;
+
       if (index >= items.length) return;
 
       try {
         results[index] = await worker(items[index], index);
       } catch (error) {
-        results[index] = { error: error.message, item: items[index] };
+        results[index] = {
+          error: error.message,
+          item: items[index],
+        };
       }
     }
   }
 
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => runner()));
+  await Promise.all(
+    Array.from(
+      { length: Math.min(limit, items.length) },
+      () => runner()
+    )
+  );
+
   return results;
 }
+
+/* -------------------------------------------------------------------------- */
+/* TECHNICAL ANALYSIS                                                         */
+/* -------------------------------------------------------------------------- */
 
 function calculateEMA(values, period) {
   if (values.length < period) return [];
 
   const multiplier = 2 / (period + 1);
   const result = [];
+
   let ema = average(values.slice(0, period));
   result.push(ema);
 
@@ -293,20 +624,41 @@ function calculateEMA(values, period) {
 function getVolumeRatio(candles) {
   if (candles.length < 25) return 0;
 
-  const recentAverage = average(candles.slice(-3).map(getCandleValue));
-  const baselineMedian = median(candles.slice(-23, -3).map(getCandleValue));
+  const recentAverage = average(
+    candles.slice(-3).map(getCandleValue)
+  );
 
-  return baselineMedian > 0 ? recentAverage / baselineMedian : 0;
+  const baselineMedian = median(
+    candles.slice(-23, -3).map(getCandleValue)
+  );
+
+  return baselineMedian > 0
+    ? recentAverage / baselineMedian
+    : 0;
 }
 
 function getCandleStrength(candle) {
   const range = candle.high - candle.low;
 
-  if (range <= 0) return { closeLocation: 0, bodyRatio: 0, bullish: false };
+  if (range <= 0) {
+    return {
+      closeLocation: 0,
+      bodyRatio: 0,
+      bullish: false,
+    };
+  }
 
   return {
-    closeLocation: clamp((candle.close - candle.low) / range, 0, 1),
-    bodyRatio: clamp(Math.abs(candle.close - candle.open) / range, 0, 1),
+    closeLocation: clamp(
+      (candle.close - candle.low) / range,
+      0,
+      1
+    ),
+    bodyRatio: clamp(
+      Math.abs(candle.close - candle.open) / range,
+      0,
+      1
+    ),
     bullish: candle.close > candle.open,
   };
 }
@@ -315,14 +667,29 @@ function findSwingPoints(candles, radius = 2) {
   const highs = [];
   const lows = [];
 
-  for (let i = radius; i < candles.length - radius; i++) {
+  for (
+    let i = radius;
+    i < candles.length - radius;
+    i++
+  ) {
     const current = candles[i];
     let isHigh = true;
     let isLow = true;
 
     for (let j = 1; j <= radius; j++) {
-      if (current.high <= candles[i - j].high || current.high <= candles[i + j].high) isHigh = false;
-      if (current.low >= candles[i - j].low || current.low >= candles[i + j].low) isLow = false;
+      if (
+        current.high <= candles[i - j].high ||
+        current.high <= candles[i + j].high
+      ) {
+        isHigh = false;
+      }
+
+      if (
+        current.low >= candles[i - j].low ||
+        current.low >= candles[i + j].low
+      ) {
+        isLow = false;
+      }
     }
 
     if (isHigh) highs.push(current.high);
@@ -343,21 +710,50 @@ function analyzeStructure(candles) {
     };
   }
 
-  const swings = findSwingPoints(candles.slice(-35), 2);
-  const higherHigh = swings.highs.length >= 2 && swings.highs.at(-1) > swings.highs.at(-2);
-  const higherLow = swings.lows.length >= 2 && swings.lows.at(-1) > swings.lows.at(-2);
+  const swings = findSwingPoints(
+    candles.slice(-35),
+    2
+  );
+
+  const higherHigh =
+    swings.highs.length >= 2 &&
+    swings.highs.at(-1) > swings.highs.at(-2);
+
+  const higherLow =
+    swings.lows.length >= 2 &&
+    swings.lows.at(-1) > swings.lows.at(-2);
+
   const previous = candles.slice(-13, -1);
-  const resistance = Math.max(...previous.map((c) => c.high));
+
+  const resistance = Math.max(
+    ...previous.map((c) => c.high)
+  );
+
   const last = candles[candles.length - 1];
-  const breakout = resistance > 0 && last.close > resistance && last.close > last.open;
-  const bullishStructure = (higherHigh && higherLow) || (breakout && higherLow);
+
+  const breakout =
+    resistance > 0 &&
+    last.close > resistance &&
+    last.close > last.open;
+
+  const bullishStructure =
+    (higherHigh && higherLow) ||
+    (breakout && higherLow);
 
   let score = 0;
+
   if (higherHigh) score += 30;
   if (higherLow) score += 30;
   if (breakout) score += 40;
 
-  return { higherHigh, higherLow, breakout, bullishStructure, resistance, score };
+  return {
+    higherHigh,
+    higherLow,
+    breakout,
+    bullishStructure,
+    resistance,
+    score,
+  };
 }
 
 function analyzeTimeframe(candles) {
@@ -371,6 +767,7 @@ function analyzeTimeframe(candles) {
 
   const last = candles.at(-1);
   const previous = candles.at(-2);
+
   const currentEma9 = ema9.at(-1);
   const currentEma21 = ema21.at(-1);
   const previousEma21 = ema21.at(-2);
@@ -379,15 +776,23 @@ function analyzeTimeframe(candles) {
     price: last.close,
     ema9: currentEma9,
     ema21: currentEma21,
-    emaBullish: last.close > currentEma9 && currentEma9 > currentEma21,
+    emaBullish:
+      last.close > currentEma9 &&
+      currentEma9 > currentEma21,
     emaSlope: currentEma21 > previousEma21,
     structure: analyzeStructure(candles),
     volumeRatio: getVolumeRatio(candles),
     strength: getCandleStrength(last),
     returns: {
       return1: pctChange(last.close, previous.close),
-      return4: pctChange(last.close, candles[candles.length - 5].close),
-      return16: pctChange(last.close, candles[candles.length - 17].close),
+      return4: pctChange(
+        last.close,
+        candles[candles.length - 5].close
+      ),
+      return16: pctChange(
+        last.close,
+        candles[candles.length - 17].close
+      ),
     },
   };
 }
@@ -399,48 +804,111 @@ function analyzeDaily(candles, currentCandle, livePrice) {
   if (!base) return null;
 
   const closes = candles.map((c) => c.close);
+
   const ema9 = calculateEMA(closes, 9);
   const ema21 = calculateEMA(closes, 21);
   const ema50 = calculateEMA(closes, 50);
+
   const last = candles.at(-1);
   const previous5 = candles.slice(-6, -1);
   const previous10 = candles.slice(-11, -1);
-  const avg5Volume = average(previous5.map(getCandleValue));
-  const avg10Volume = average(previous10.map(getCandleValue));
+
+  const avg5Volume = average(
+    previous5.map(getCandleValue)
+  );
+
+  const avg10Volume = average(
+    previous10.map(getCandleValue)
+  );
+
   const dailyVolume = getCandleValue(last);
-  const volumeRatio5 = avg5Volume > 0 ? dailyVolume / avg5Volume : 0;
-  const volumeRatio10 = avg10Volume > 0 ? dailyVolume / avg10Volume : 0;
+
+  const volumeRatio5 =
+    avg5Volume > 0 ? dailyVolume / avg5Volume : 0;
+
+  const volumeRatio10 =
+    avg10Volume > 0 ? dailyVolume / avg10Volume : 0;
+
   const previous20 = candles.slice(-21, -1);
   const previous50 = candles.slice(-51, -1);
-  const resistance20 = previous20.length ? Math.max(...previous20.map((c) => c.high)) : 0;
-  const resistance50 = previous50.length ? Math.max(...previous50.map((c) => c.high)) : 0;
+
+  const resistance20 = previous20.length
+    ? Math.max(...previous20.map((c) => c.high))
+    : 0;
+
+  const resistance50 = previous50.length
+    ? Math.max(...previous50.map((c) => c.high))
+    : 0;
+
   const price = number(livePrice, last.close);
   const currentOpen = number(currentCandle?.open, last.close);
   const currentHigh = number(currentCandle?.high, price);
   const currentLow = number(currentCandle?.low, price);
+
   const currentRange = currentHigh - currentLow;
-  const currentCloseLocation = currentRange > 0 ? clamp((price - currentLow) / currentRange, 0, 1) : 0.5;
+
+  const currentCloseLocation = currentRange > 0
+    ? clamp((price - currentLow) / currentRange, 0, 1)
+    : 0.5;
+
   const dailyReturn = pctChange(price, last.close);
-  const dailyOpenReturn = currentCandle ? pctChange(price, currentOpen) : 0;
+
+  const dailyOpenReturn = currentCandle
+    ? pctChange(price, currentOpen)
+    : 0;
+
   const ema9Value = ema9.at(-1);
   const ema21Value = ema21.at(-1);
   const ema50Value = ema50.length ? ema50.at(-1) : 0;
-  const emaBullish = price > ema9Value && ema9Value > ema21Value;
-  const ema50Bullish = ema50Value > 0 && price > ema50Value;
-  const emaSlope = ema21.at(-1) > ema21.at(-2);
-  const breakout20 = resistance20 > 0 && price > resistance20;
-  const breakout50 = resistance50 > 0 && price > resistance50;
+
+  const emaBullish =
+    price > ema9Value &&
+    ema9Value > ema21Value;
+
+  const ema50Bullish =
+    ema50Value > 0 &&
+    price > ema50Value;
+
+  const emaSlope =
+    ema21.at(-1) > ema21.at(-2);
+
+  const breakout20 =
+    resistance20 > 0 &&
+    price > resistance20;
+
+  const breakout50 =
+    resistance50 > 0 &&
+    price > resistance50;
 
   const nowSeconds = Math.floor(Date.now() / 1000);
-  const dayBucket = Math.floor(nowSeconds / 86400) * 86400;
-  const elapsedSeconds = clamp(nowSeconds - number(currentCandle?.bucketTime, dayBucket), 300, 86400);
-  const dayProgress = clamp(elapsedSeconds / 86400, 0.05, 1);
+
+  const dayBucket =
+    Math.floor(nowSeconds / 86400) * 86400;
+
+  const elapsedSeconds = clamp(
+    nowSeconds - number(
+      currentCandle?.bucketTime,
+      dayBucket
+    ),
+    300,
+    86400
+  );
+
+  const dayProgress = clamp(
+    elapsedSeconds / 86400,
+    0.05,
+    1
+  );
+
   const currentTurnover = number(currentCandle?.turnover);
-  const projectedVolumeRatio = currentTurnover > 0 && avg10Volume > 0
-    ? (currentTurnover / dayProgress) / avg10Volume
-    : 0;
+
+  const projectedVolumeRatio =
+    currentTurnover > 0 && avg10Volume > 0
+      ? (currentTurnover / dayProgress) / avg10Volume
+      : 0;
 
   let score = 50;
+
   if (emaBullish) score += 10;
   if (ema50Bullish) score += 6;
   if (emaSlope) score += 5;
@@ -448,13 +916,24 @@ function analyzeDaily(candles, currentCandle, livePrice) {
   if (base.structure.higherLow) score += 7;
   if (breakout20) score += 12;
   if (breakout50) score += 8;
+
   if (volumeRatio5 >= 1.5) score += 8;
   else if (volumeRatio5 >= 1.15) score += 4;
+
   if (volumeRatio10 >= 1.5) score += 6;
   else if (volumeRatio10 >= 1.15) score += 3;
+
   if (projectedVolumeRatio >= 2) score += 8;
   else if (projectedVolumeRatio >= 1.3) score += 4;
-  if (currentCandle && dailyOpenReturn > 0 && currentCloseLocation >= 0.7) score += 5;
+
+  if (
+    currentCandle &&
+    dailyOpenReturn > 0 &&
+    currentCloseLocation >= 0.7
+  ) {
+    score += 5;
+  }
+
   if (dailyReturn < -5) score -= 8;
 
   return {
@@ -497,30 +976,73 @@ function emptyDailyAnalysis(price = 0) {
 }
 
 function calculateCompression(candles) {
-  if (!candles || candles.length < 40) return { score: 35, ratio: null };
+  if (!candles || candles.length < 40) {
+    return { score: 35, ratio: null };
+  }
 
   const recent = candles.slice(-12);
   const baseline = candles.slice(-36, -12);
-  const recentRange = (Math.max(...recent.map((c) => c.high)) - Math.min(...recent.map((c) => c.low))) /
-    Math.max(average(recent.map((c) => c.close)), 1e-12);
-  const baselineRange = (Math.max(...baseline.map((c) => c.high)) - Math.min(...baseline.map((c) => c.low))) /
-    Math.max(average(baseline.map((c) => c.close)), 1e-12);
-  const ratio = baselineRange > 0 ? recentRange / baselineRange : 1;
 
-  return { score: Math.round(clamp(100 - ratio * 55, 0, 100)), ratio };
+  const recentRange =
+    (
+      Math.max(...recent.map((c) => c.high)) -
+      Math.min(...recent.map((c) => c.low))
+    ) /
+    Math.max(
+      average(recent.map((c) => c.close)),
+      1e-12
+    );
+
+  const baselineRange =
+    (
+      Math.max(...baseline.map((c) => c.high)) -
+      Math.min(...baseline.map((c) => c.low))
+    ) /
+    Math.max(
+      average(baseline.map((c) => c.close)),
+      1e-12
+    );
+
+  const ratio = baselineRange > 0
+    ? recentRange / baselineRange
+    : 1;
+
+  return {
+    score: Math.round(
+      clamp(100 - ratio * 55, 0, 100)
+    ),
+    ratio,
+  };
 }
 
-function calculateRoomToResistance(candles, price, lookback = 30) {
-  const previous = candles.slice(-(lookback + 1), -1);
+function calculateRoomToResistance(
+  candles,
+  price,
+  lookback = 30
+) {
+  const previous = candles.slice(
+    -(lookback + 1),
+    -1
+  );
 
   if (!previous.length || price <= 0) {
-    return { resistance: null, roomPct: null, score: 45 };
+    return {
+      resistance: null,
+      roomPct: null,
+      score: 45,
+    };
   }
 
-  const resistance = Math.max(...previous.map((c) => c.high));
-  const roomPct = resistance > price ? pctChange(resistance, price) : 0;
+  const resistance = Math.max(
+    ...previous.map((c) => c.high)
+  );
+
+  const roomPct = resistance > price
+    ? pctChange(resistance, price)
+    : 0;
 
   let score = 35;
+
   if (roomPct >= 8 && roomPct <= 25) score = 95;
   else if (roomPct > 25 && roomPct <= 45) score = 82;
   else if (roomPct >= 4 && roomPct < 8) score = 75;
@@ -530,20 +1052,52 @@ function calculateRoomToResistance(candles, price, lookback = 30) {
   return { resistance, roomPct, score };
 }
 
-function findRecentBreakoutAge(candles, maxAge = 24, lookback = 12) {
-  if (!candles || candles.length < lookback + 2) return null;
+function findRecentBreakoutAge(
+  candles,
+  maxAge = 24,
+  lookback = 12
+) {
+  if (!candles || candles.length < lookback + 2) {
+    return null;
+  }
 
   const lastIndex = candles.length - 1;
-  const firstIndex = Math.max(lookback + 1, lastIndex - maxAge);
 
-  for (let index = lastIndex; index >= firstIndex; index--) {
+  const firstIndex = Math.max(
+    lookback + 1,
+    lastIndex - maxAge
+  );
+
+  for (
+    let index = lastIndex;
+    index >= firstIndex;
+    index--
+  ) {
     const candle = candles[index];
-    const resistance = Math.max(...candles.slice(index - lookback, index).map((item) => item.high));
-    const previousResistance = Math.max(...candles.slice(index - lookback - 1, index - 1).map((item) => item.high));
-    const previousClose = candles[index - 1]?.close ?? 0;
-    const wasBelowResistance = previousClose <= previousResistance;
 
-    if (candle.close > resistance && candle.close > candle.open && wasBelowResistance) {
+    const resistance = Math.max(
+      ...candles
+        .slice(index - lookback, index)
+        .map((item) => item.high)
+    );
+
+    const previousResistance = Math.max(
+      ...candles
+        .slice(index - lookback - 1, index - 1)
+        .map((item) => item.high)
+    );
+
+    const previousClose =
+      candles[index - 1]?.close ?? 0;
+
+    const wasBelowResistance =
+      previousClose <= previousResistance;
+
+    if (
+      candle.close > resistance &&
+      candle.close > candle.open &&
+      wasBelowResistance
+    ) {
       return lastIndex - index;
     }
   }
@@ -551,18 +1105,52 @@ function findRecentBreakoutAge(candles, maxAge = 24, lookback = 12) {
   return null;
 }
 
-function detectMoveStart(candles15m, candles1h, tf15, tf1h, tf4h, compression) {
-  const age15m = findRecentBreakoutAge(candles15m, 24, 12);
-  const age1h = findRecentBreakoutAge(candles1h, 12, 12);
+/* -------------------------------------------------------------------------- */
+/* MOVE START DETECTION                                                       */
+/* -------------------------------------------------------------------------- */
+
+function detectMoveStart(
+  candles15m,
+  candles1h,
+  tf15,
+  tf1h,
+  tf4h,
+  compression
+) {
+  const age15m = findRecentBreakoutAge(
+    candles15m,
+    24,
+    12
+  );
+
+  const age1h = findRecentBreakoutAge(
+    candles1h,
+    12,
+    12
+  );
+
   const reversal = Boolean(
     tf1h.structure.higherLow &&
-    (tf1h.structure.higherHigh || tf1h.structure.breakout) &&
-    (tf15.structure.higherLow || tf15.structure.breakout)
+    (
+      tf1h.structure.higherHigh ||
+      tf1h.structure.breakout
+    ) &&
+    (
+      tf15.structure.higherLow ||
+      tf15.structure.breakout
+    )
   );
 
   if (age15m !== null && compression.score >= 45) {
-    const status = age15m <= 1 ? (tf1h.structure.breakout ? 'CONFIRMED' : 'EARLY')
-      : age15m <= 4 ? 'EARLY' : 'LATE';
+    const status = age15m <= 1
+      ? (
+          tf1h.structure.breakout
+            ? 'CONFIRMED'
+            : 'EARLY'
+        )
+      : age15m <= 4
+        ? 'EARLY'
+        : 'LATE';
 
     return {
       type: 'COMPRESSION_BREAKOUT',
@@ -575,7 +1163,12 @@ function detectMoveStart(candles15m, candles1h, tf15, tf1h, tf4h, compression) {
 
   if (reversal) {
     const age = age1h ?? 6;
-    const status = age <= 2 && tf1h.structure.breakout ? 'CONFIRMED' : age <= 4 ? 'EARLY' : 'LATE';
+
+    const status = age <= 2 && tf1h.structure.breakout
+      ? 'CONFIRMED'
+      : age <= 4
+        ? 'EARLY'
+        : 'LATE';
 
     return {
       type: 'BULLISH_REVERSAL',
@@ -587,7 +1180,9 @@ function detectMoveStart(candles15m, candles1h, tf15, tf1h, tf4h, compression) {
   }
 
   if (age15m !== null) {
-    const status = age15m <= 2 ? 'WATCHING' : 'LATE';
+    const status = age15m <= 2
+      ? 'WATCHING'
+      : 'LATE';
 
     return {
       type: 'COMPRESSION_BREAKOUT',
@@ -598,7 +1193,13 @@ function detectMoveStart(candles15m, candles1h, tf15, tf1h, tf4h, compression) {
     };
   }
 
-  if (compression.score >= 65 && (tf4h.emaBullish || tf4h.structure.higherLow)) {
+  if (
+    compression.score >= 65 &&
+    (
+      tf4h.emaBullish ||
+      tf4h.structure.higherLow
+    )
+  ) {
     return {
       type: 'COMPRESSION_WATCH',
       label: 'آماده خروج از فشردگی',
@@ -617,83 +1218,279 @@ function detectMoveStart(candles15m, candles1h, tf15, tf1h, tf4h, compression) {
   };
 }
 
+/* -------------------------------------------------------------------------- */
+/* COIN ANALYSIS                                                              */
+/* -------------------------------------------------------------------------- */
+
 function analyzeCoin(data) {
-  const { symbol, candles, dailyCurrent, livePrice, derivatives } = data;
+  const {
+    symbol,
+    candles,
+    dailyCurrent,
+    livePrice,
+    derivatives,
+  } = data;
+
   const tf15 = analyzeTimeframe(candles['15m']);
   const tf1h = analyzeTimeframe(candles['1h']);
   const tf4h = analyzeTimeframe(candles['4h']);
-  const daily = analyzeDaily(candles['1d'], dailyCurrent, livePrice) || emptyDailyAnalysis(livePrice);
+
+  const daily =
+    analyzeDaily(
+      candles['1d'],
+      dailyCurrent,
+      livePrice
+    ) ||
+    emptyDailyAnalysis(livePrice);
 
   if (!tf15 || !tf1h || !tf4h) return null;
 
   const price = number(livePrice, tf15.price);
   const flow = derivatives || analyzeDerivatives([], []);
-  const compression15 = calculateCompression(candles['15m']);
-  const compression1h = calculateCompression(candles['1h']);
-  const compression4h = calculateCompression(candles['4h']);
-  const room4h = calculateRoomToResistance(candles['4h'], price, 30);
-  const room1d = calculateRoomToResistance(candles['1d'], price, 30);
+
+  const compression15 = calculateCompression(
+    candles['15m']
+  );
+
+  const compression1h = calculateCompression(
+    candles['1h']
+  );
+
+  const compression4h = calculateCompression(
+    candles['4h']
+  );
+
+  const room4h = calculateRoomToResistance(
+    candles['4h'],
+    price,
+    30
+  );
+
+  const room1d = calculateRoomToResistance(
+    candles['1d'],
+    price,
+    30
+  );
 
   const structure15 = tf15.structure;
   const structure1h = tf1h.structure;
   const structure4h = tf4h.structure;
-  const dailyBias = daily.emaBullish || daily.ema50Bullish;
-  const trend4h = (tf4h.emaBullish || tf4h.emaSlope) && (structure4h.higherLow || structure4h.higherHigh || structure4h.breakout);
-  const trend1h = (tf1h.emaBullish || tf1h.emaSlope) && (structure1h.higherLow || structure1h.higherHigh || structure1h.breakout);
-  const trend15m = (tf15.emaBullish || tf15.emaSlope) && (structure15.higherLow || structure15.higherHigh || structure15.breakout);
+
+  const dailyBias =
+    daily.emaBullish ||
+    daily.ema50Bullish;
+
+  const trend4h =
+    (tf4h.emaBullish || tf4h.emaSlope) &&
+    (
+      structure4h.higherLow ||
+      structure4h.higherHigh ||
+      structure4h.breakout
+    );
+
+  const trend1h =
+    (tf1h.emaBullish || tf1h.emaSlope) &&
+    (
+      structure1h.higherLow ||
+      structure1h.higherHigh ||
+      structure1h.breakout
+    );
+
+  const trend15m =
+    (tf15.emaBullish || tf15.emaSlope) &&
+    (
+      structure15.higherLow ||
+      structure15.higherHigh ||
+      structure15.breakout
+    );
 
   const recent15 = candles['15m'].slice(-4);
-  const bullish15Count = recent15.filter((c) => c.close > c.open && getCandleStrength(c).closeLocation >= 0.55).length;
+
+  const bullish15Count = recent15.filter(
+    (c) =>
+      c.close > c.open &&
+      getCandleStrength(c).closeLocation >= 0.55
+  ).length;
+
   const recent1h = candles['1h'].slice(-3);
-  const bullish1hCount = recent1h.filter((c) => c.close > c.open && getCandleStrength(c).closeLocation >= 0.5).length;
+
+  const bullish1hCount = recent1h.filter(
+    (c) =>
+      c.close > c.open &&
+      getCandleStrength(c).closeLocation >= 0.5
+  ).length;
+
   const volume15 = tf15.volumeRatio;
   const volume1h = tf1h.volumeRatio;
-  const flowPositive = flow.imbalance > 0.04 && flow.buyRatio > 0.51;
-  const flowStrong = flow.imbalance > 0.13 && flow.buyRatio > 0.56;
-  const oiHealthy = flow.oiChangePct == null || (flow.oiChangePct > 0 && (flow.markChangePct ?? 0) >= 0);
-  const oiDanger = flow.oiChangePct != null && flow.oiChangePct > 0.5 && (flow.markChangePct ?? 0) < -0.35;
-  const resistanceRoom = room4h.roomPct == null || room4h.roomPct >= 2.0;
-  const noHeavyOverhead = room4h.roomPct == null || room4h.roomPct >= 1.0;
-  const excessive15mRun = tf15.returns.return16 > 9;
-  const excessive1hRun = tf1h.returns.return16 > 16;
-  const overheated = excessive15mRun || excessive1hRun || (tf15.returns.return4 > 5.5 && tf15.strength.closeLocation < 0.45);
-  const bearishFlow = flow.imbalance < -0.12 || (flow.buyRatio < 0.43 && flow.dataQuality === 'GOOD');
-  const structuralDamage = (!tf4h.emaBullish && !tf4h.structure.higherLow) || (!tf1h.emaSlope && !tf1h.structure.higherLow && !tf1h.structure.breakout);
+
+  const flowPositive =
+    flow.imbalance > 0.04 &&
+    flow.buyRatio > 0.51;
+
+  const flowStrong =
+    flow.imbalance > 0.13 &&
+    flow.buyRatio > 0.56;
+
+  const oiHealthy =
+    flow.oiChangePct == null ||
+    (
+      flow.oiChangePct > 0 &&
+      (flow.markChangePct ?? 0) >= 0
+    );
+
+  const oiDanger =
+    flow.oiChangePct != null &&
+    flow.oiChangePct > 0.5 &&
+    (flow.markChangePct ?? 0) < -0.35;
+
+  const resistanceRoom =
+    room4h.roomPct == null ||
+    room4h.roomPct >= 2.0;
+
+  const noHeavyOverhead =
+    room4h.roomPct == null ||
+    room4h.roomPct >= 1.0;
+
+  const excessive15mRun =
+    tf15.returns.return16 > 9;
+
+  const excessive1hRun =
+    tf1h.returns.return16 > 16;
+
+  const overheated =
+    excessive15mRun ||
+    excessive1hRun ||
+    (
+      tf15.returns.return4 > 5.5 &&
+      tf15.strength.closeLocation < 0.45
+    );
+
+  const bearishFlow =
+    flow.imbalance < -0.12 ||
+    (
+      flow.buyRatio < 0.43 &&
+      flow.dataQuality === 'GOOD'
+    );
+
+  const structuralDamage =
+    (
+      !tf4h.emaBullish &&
+      !tf4h.structure.higherLow
+    ) ||
+    (
+      !tf1h.emaSlope &&
+      !tf1h.structure.higherLow &&
+      !tf1h.structure.breakout
+    );
 
   const trendScore = clamp(
-    12 + (dailyBias ? 7 : 0) + (trend4h ? 18 : 0) + (trend1h ? 20 : 0) + (trend15m ? 12 : 0) +
-    (structure4h.higherLow ? 5 : 0) + (structure1h.higherLow ? 6 : 0) + (structure15.higherLow ? 5 : 0) +
-    (tf4h.emaSlope ? 4 : 0) + (tf1h.emaSlope ? 4 : 0) + (tf15.emaSlope ? 3 : 0) +
-    (flowPositive ? 5 : 0) + (oiHealthy ? 3 : 0) + (resistanceRoom ? 4 : 0) -
-    (bearishFlow ? 12 : 0) - (oiDanger ? 8 : 0) - (structuralDamage ? 9 : 0) - (overheated ? 12 : 0),
+    12 +
+    (dailyBias ? 7 : 0) +
+    (trend4h ? 18 : 0) +
+    (trend1h ? 20 : 0) +
+    (trend15m ? 12 : 0) +
+    (structure4h.higherLow ? 5 : 0) +
+    (structure1h.higherLow ? 6 : 0) +
+    (structure15.higherLow ? 5 : 0) +
+    (tf4h.emaSlope ? 4 : 0) +
+    (tf1h.emaSlope ? 4 : 0) +
+    (tf15.emaSlope ? 3 : 0) +
+    (flowPositive ? 5 : 0) +
+    (oiHealthy ? 3 : 0) +
+    (resistanceRoom ? 4 : 0) -
+    (bearishFlow ? 12 : 0) -
+    (oiDanger ? 8 : 0) -
+    (structuralDamage ? 9 : 0) -
+    (overheated ? 12 : 0),
     0,
     100
   );
 
-  const compressionReady = compression15.score >= 48 || compression1h.score >= 48 || compression4h.score >= 55;
-  const breakoutFresh = findRecentBreakoutAge(candles['15m'], 8, 12);
-  const breakout1hFresh = findRecentBreakoutAge(candles['1h'], 4, 12);
-  const earlyReversal = structure1h.higherLow && (structure1h.higherHigh || structure1h.breakout) &&
-    (structure15.higherLow || structure15.breakout);
-  const impulseQuality = (bullish15Count >= 2 || bullish1hCount >= 2) && (volume15 >= 1.05 || volume1h >= 1.05 || flowStrong);
-  const startEvidence = breakoutFresh !== null || breakout1hFresh !== null || earlyReversal || (compressionReady && impulseQuality);
-  const continuationEvidence = trend4h && trend1h && (trend15m || earlyReversal) &&
-    (flowPositive || volume15 >= 1.15 || volume1h >= 1.15) && resistanceRoom && !bearishFlow;
+  const compressionReady =
+    compression15.score >= 48 ||
+    compression1h.score >= 48 ||
+    compression4h.score >= 55;
+
+  const breakoutFresh = findRecentBreakoutAge(
+    candles['15m'],
+    8,
+    12
+  );
+
+  const breakout1hFresh = findRecentBreakoutAge(
+    candles['1h'],
+    4,
+    12
+  );
+
+  const earlyReversal =
+    structure1h.higherLow &&
+    (
+      structure1h.higherHigh ||
+      structure1h.breakout
+    ) &&
+    (
+      structure15.higherLow ||
+      structure15.breakout
+    );
+
+  const impulseQuality =
+    (
+      bullish15Count >= 2 ||
+      bullish1hCount >= 2
+    ) &&
+    (
+      volume15 >= 1.05 ||
+      volume1h >= 1.05 ||
+      flowStrong
+    );
+
+  const startEvidence =
+    breakoutFresh !== null ||
+    breakout1hFresh !== null ||
+    earlyReversal ||
+    (
+      compressionReady &&
+      impulseQuality
+    );
+
+  const continuationEvidence =
+    trend4h &&
+    trend1h &&
+    (
+      trend15m ||
+      earlyReversal
+    ) &&
+    (
+      flowPositive ||
+      volume15 >= 1.15 ||
+      volume1h >= 1.15
+    ) &&
+    resistanceRoom &&
+    !bearishFlow;
 
   let moveStatus = 'POTENTIAL';
   let moveType = 'NONE';
   let moveTypeLabel = 'هنوز شروع معتبر شناسایی نشده';
   let moveAgeBars = null;
 
-  if (startEvidence && continuationEvidence && trendScore >= 70 && !overheated && !oiDanger) {
+  if (
+    startEvidence &&
+    continuationEvidence &&
+    trendScore >= 70 &&
+    !overheated &&
+    !oiDanger
+  ) {
     moveStatus = 'CONFIRMED';
-    moveType = breakoutFresh !== null
-      ? 'FRESH_15M_BREAKOUT'
-      : breakout1hFresh !== null
-        ? 'FRESH_1H_BREAKOUT'
-        : earlyReversal
-          ? 'BULLISH_REVERSAL'
-          : 'COMPRESSION_EXPANSION';
+
+    moveType =
+      breakoutFresh !== null
+        ? 'FRESH_15M_BREAKOUT'
+        : breakout1hFresh !== null
+          ? 'FRESH_1H_BREAKOUT'
+          : earlyReversal
+            ? 'BULLISH_REVERSAL'
+            : 'COMPRESSION_EXPANSION';
 
     moveTypeLabel = ({
       FRESH_15M_BREAKOUT: 'شکست تازه ۱۵ دقیقه‌ای',
@@ -702,24 +1499,54 @@ function analyzeCoin(data) {
       COMPRESSION_EXPANSION: 'خروج از تراکم با تقاضا',
     })[moveType];
 
-    moveAgeBars = breakoutFresh ?? (breakout1hFresh != null ? breakout1hFresh * 4 : null);
-  } else if (startEvidence && trendScore >= 58 && !bearishFlow && !structuralDamage) {
+    moveAgeBars =
+      breakoutFresh ??
+      (
+        breakout1hFresh != null
+          ? breakout1hFresh * 4
+          : null
+      );
+  } else if (
+    startEvidence &&
+    trendScore >= 58 &&
+    !bearishFlow &&
+    !structuralDamage &&
+    !overheated &&
+    !oiDanger
+  ) {
     moveStatus = 'EARLY';
-    moveType = earlyReversal ? 'BULLISH_REVERSAL' : 'EARLY_DEMAND';
-    moveTypeLabel = earlyReversal ? 'برگشت اولیه صعودی' : 'تقاضای اولیه در حال شکل‌گیری';
+    moveType = earlyReversal
+      ? 'BULLISH_REVERSAL'
+      : 'EARLY_DEMAND';
+
+    moveTypeLabel = earlyReversal
+      ? 'برگشت اولیه صعودی'
+      : 'تقاضای اولیه در حال شکل‌گیری';
+
     moveAgeBars = breakoutFresh;
-  } else if (compressionReady && trendScore >= 52 && !bearishFlow) {
+  } else if (
+    compressionReady &&
+    trendScore >= 52 &&
+    !bearishFlow
+  ) {
     moveStatus = 'WATCHING';
     moveType = 'PRE_MOVE_SETUP';
     moveTypeLabel = 'آماده‌سازی پیش از حرکت';
   }
 
   const entryScore = clamp(
-    trendScore * 0.38 + (impulseQuality ? 12 : 0) + (flowStrong ? 12 : flowPositive ? 6 : 0) +
-    (bullish15Count >= 2 ? 8 : 0) + (bullish1hCount >= 2 ? 7 : 0) +
-    (breakoutFresh !== null ? 10 : 0) + (breakout1hFresh !== null ? 7 : 0) +
-    (room4h.score * 0.08) + (noHeavyOverhead ? 5 : -8) - (overheated ? 18 : 0) -
-    (bearishFlow ? 18 : 0) - (oiDanger ? 10 : 0),
+    trendScore * 0.38 +
+    (impulseQuality ? 12 : 0) +
+    (flowStrong ? 12 : flowPositive ? 6 : 0) +
+    (bullish15Count >= 2 ? 8 : 0) +
+    (bullish1hCount >= 2 ? 7 : 0) +
+    (breakoutFresh !== null ? 10 : 0) +
+    (breakout1hFresh !== null ? 7 : 0) +
+    (room4h.score * 0.08) +
+    (noHeavyOverhead ? 5 : -8) -
+    (overheated ? 18 : 0) -
+    (bearishFlow ? 18 : 0) -
+    (oiDanger ? 10 : 0),
     0,
     100
   );
@@ -735,49 +1562,96 @@ function analyzeCoin(data) {
   if (trend15m) evidence.push('ساختار کوتاه‌مدت صعودی');
   if (flowPositive) evidence.push('برتری خریداران در معاملات واقعی');
   if (flowStrong) evidence.push('فشار خرید قوی');
-  if (oiHealthy && flow.oiChangePct != null) evidence.push('افزایش OI بدون افت قیمت');
-  if (compressionReady) evidence.push('تراکم/آماده‌سازی پیش از حرکت');
-  if (breakoutFresh !== null) evidence.push('شکست تازه در 15M');
-  if (breakout1hFresh !== null) evidence.push('شکست تازه در 1H');
-  if (bearishFlow) warnings.push('فشار فروش در جریان معاملات');
-  if (oiDanger) warnings.push('افزایش OI همراه با افت قیمت؛ احتمال ورود پوزیشن‌های فروش');
-  if (overheated) warnings.push('حرکت کوتاه‌مدت بیش از حد کشیده شده؛ ورود دیرهنگام پرریسک است');
-  if (!resistanceRoom) warnings.push('مقاومت نزدیک در مسیر قیمت');
-  if (flow.dataQuality === 'LOW') warnings.push('داده مشتقات ناکافی؛ این بخش با امتیاز خنثی محاسبه شد');
+  if (oiHealthy && flow.oiChangePct != null) {
+    evidence.push('افزایش OI بدون افت قیمت');
+  }
+  if (compressionReady) {
+    evidence.push('تراکم/آماده‌سازی پیش از حرکت');
+  }
+  if (breakoutFresh !== null) {
+    evidence.push('شکست تازه در 15M');
+  }
+  if (breakout1hFresh !== null) {
+    evidence.push('شکست تازه در 1H');
+  }
+
+  if (bearishFlow) {
+    warnings.push('فشار فروش در جریان معاملات');
+  }
+
+  if (oiDanger) {
+    warnings.push(
+      'افزایش OI همراه با افت قیمت؛ احتمال ورود پوزیشن‌های فروش'
+    );
+  }
+
+  if (overheated) {
+    warnings.push(
+      'حرکت کوتاه‌مدت بیش از حد کشیده شده؛ ورود دیرهنگام پرریسک است'
+    );
+  }
+
+  if (!resistanceRoom) {
+    warnings.push('مقاومت نزدیک در مسیر قیمت');
+  }
+
+  if (flow.dataQuality === 'LOW') {
+    warnings.push(
+      'داده مشتقات ناکافی؛ این بخش با امتیاز خنثی محاسبه شد'
+    );
+  }
 
   return {
     symbol,
     score: growthScore,
     growthScore,
     moveScore,
-    growthStatus: trendScore >= 75 ? 'HIGH_POTENTIAL' : trendScore >= 60 ? 'WATCHLIST' : 'NORMAL',
+
+    growthStatus:
+      trendScore >= 75
+        ? 'HIGH_POTENTIAL'
+        : trendScore >= 60
+          ? 'WATCHLIST'
+          : 'NORMAL',
+
     moveStatus,
     moveType,
     moveTypeLabel,
     moveAgeBars,
-    moveAgeMinutes: moveAgeBars == null ? null : moveAgeBars * 15,
-    stage: moveStatus === 'CONFIRMED'
-      ? 'موج صعودی تازه با شواهد ادامه‌دار'
-      : moveStatus === 'EARLY'
-        ? 'نشانه‌های اولیه شروع موج'
-        : moveStatus === 'WATCHING'
-          ? 'در حال آماده‌سازی'
-          : 'شرایط کافی برای شروع موج وجود ندارد',
+
+    moveAgeMinutes:
+      moveAgeBars == null
+        ? null
+        : moveAgeBars * 15,
+
+    stage:
+      moveStatus === 'CONFIRMED'
+        ? 'موج صعودی تازه با شواهد ادامه‌دار'
+        : moveStatus === 'EARLY'
+          ? 'نشانه‌های اولیه شروع موج'
+          : moveStatus === 'WATCHING'
+            ? 'در حال آماده‌سازی'
+            : 'شرایط کافی برای شروع موج وجود ندارد',
+
     price,
     livePrice: price,
+
     returns: {
       '15m': tf15.returns.return1,
       '1h': tf1h.returns.return1,
       '4h': tf4h.returns.return1,
       '1d': daily.dailyReturn,
     },
+
     volume: {
       '15m': volume15,
       '1h': volume1h,
       '1d': daily.volumeRatio5,
     },
+
     daily,
     derivatives: flow,
+
     structure: {
       daily: daily.score,
       '4h': Math.round(trend4h ? 85 : 45),
@@ -788,8 +1662,10 @@ function analyzeCoin(data) {
       roomToResistance4hPct: room4h.roomPct,
       roomToResistance1dPct: room1d.roomPct,
     },
+
     evidence,
     warnings,
+
     _analysis: {
       tf15: {
         ema21: tf15.ema21,
@@ -809,20 +1685,30 @@ function analyzeCoin(data) {
   };
 }
 
+/* -------------------------------------------------------------------------- */
+/* TRADE SETUP AND EXIT                                                       */
+/* -------------------------------------------------------------------------- */
+
 function calculateATR(candles, period = 14) {
   if (!candles || candles.length < period + 1) return 0;
 
   const ranges = [];
 
-  for (let i = candles.length - period; i < candles.length; i++) {
+  for (
+    let i = candles.length - period;
+    i < candles.length;
+    i++
+  ) {
     const current = candles[i];
     const previousClose = candles[i - 1].close;
 
-    ranges.push(Math.max(
-      current.high - current.low,
-      Math.abs(current.high - previousClose),
-      Math.abs(current.low - previousClose)
-    ));
+    ranges.push(
+      Math.max(
+        current.high - current.low,
+        Math.abs(current.high - previousClose),
+        Math.abs(current.low - previousClose)
+      )
+    );
   }
 
   return average(ranges);
@@ -841,29 +1727,69 @@ function buildTradeSetup(coin, candles15m) {
   if (!price || !atr) return null;
 
   const ema21 = number(coin._analysis?.tf15?.ema21);
-  const swingPoints = findSwingPoints(candles15m.slice(-60), 2);
-  const validSupports = [ema21, ...swingPoints.lows]
-    .filter((level) => level > 0 && level < price && price - level <= atr * 3.5)
+
+  const swingPoints = findSwingPoints(
+    candles15m.slice(-60),
+    2
+  );
+
+  const validSupports = [
+    ema21,
+    ...swingPoints.lows,
+  ]
+    .filter(
+      (level) =>
+        level > 0 &&
+        level < price &&
+        price - level <= atr * 3.5
+    )
     .sort((a, b) => b - a);
 
-  const support = validSupports[0] || Math.max(0, price - atr * 1.25);
+  const support =
+    validSupports[0] ||
+    Math.max(0, price - atr * 1.25);
+
   const entryLow = support - atr * 0.25;
   const entryHigh = support + atr * 0.18;
-  const structuralLow = swingPoints.lows.filter((level) => level < entryLow).sort((a, b) => b - a)[0];
-  const stopLoss = Math.min(entryLow - atr * 0.35, (structuralLow || entryLow) - atr * 0.25);
-  const risk = Math.max(entryHigh - stopLoss, atr * 0.5);
-  const resistanceLevels = swingPoints.highs.filter((level) => level > entryHigh).sort((a, b) => a - b);
 
-  const target = (multiple, index) => resistanceLevels[index] && resistanceLevels[index] > entryHigh + risk * 0.8
-    ? Math.max(resistanceLevels[index], entryHigh + risk * multiple)
-    : entryHigh + risk * multiple;
+  const structuralLow = swingPoints.lows
+    .filter((level) => level < entryLow)
+    .sort((a, b) => b - a)[0];
+
+  const stopLoss = Math.min(
+    entryLow - atr * 0.35,
+    (structuralLow || entryLow) - atr * 0.25
+  );
+
+  const risk = Math.max(
+    entryHigh - stopLoss,
+    atr * 0.5
+  );
+
+  const resistanceLevels = swingPoints.highs
+    .filter((level) => level > entryHigh)
+    .sort((a, b) => a - b);
+
+  const target = (multiple, index) =>
+    resistanceLevels[index] &&
+    resistanceLevels[index] > entryHigh + risk * 0.8
+      ? Math.max(
+          resistanceLevels[index],
+          entryHigh + risk * multiple
+        )
+      : entryHigh + risk * multiple;
 
   const tp1 = target(1.5, 0);
   const tp2 = target(2.5, 1);
   const tp3 = target(4, 2);
+
   const last5m = coin._candles5m?.at(-1);
   const previous5m = coin._candles5m?.at(-2);
-  const strength5m = last5m ? getCandleStrength(last5m) : null;
+
+  const strength5m = last5m
+    ? getCandleStrength(last5m)
+    : null;
+
   const bouncedFromZone = Boolean(
     last5m &&
     last5m.low <= entryHigh &&
@@ -878,20 +1804,33 @@ function buildTradeSetup(coin, candles15m) {
     entryLow,
     entryHigh,
     entryMid: (entryLow + entryHigh) / 2,
-    confirmation: 'کندل بسته‌شده ۵ دقیقه‌ای باید محدوده ورود را لمس کند، صعودی بسته شود و سقف کندل قبلی را بشکند.',
+
+    confirmation:
+      'کندل بسته‌شده ۵ دقیقه‌ای باید محدوده ورود را لمس کند، صعودی بسته شود و سقف کندل قبلی را بشکند.',
+
     confirmationMet: bouncedFromZone,
     stopLoss,
     tp1,
     tp2,
     tp3,
-    riskReward: Number(((tp1 - entryHigh) / risk).toFixed(2)),
+
+    riskReward: Number(
+      ((tp1 - entryHigh) / risk).toFixed(2)
+    ),
+
     atr,
     support,
   };
 }
 
 function isSameSetup(previous, setup, opportunityType) {
-  if (!previous?.setup || !setup || previous.opportunityType !== opportunityType) return false;
+  if (
+    !previous?.setup ||
+    !setup ||
+    previous.opportunityType !== opportunityType
+  ) {
+    return false;
+  }
 
   const oldMid = number(previous.setup.entryMid);
   const newMid = number(setup.entryMid);
@@ -901,51 +1840,111 @@ function isSameSetup(previous, setup, opportunityType) {
   return Math.abs(newMid - oldMid) / oldMid <= 0.012;
 }
 
-function detectSeriousDecline(candles5m, candles15m, flow) {
-  if (!Array.isArray(candles5m) || candles5m.length < 25 || !Array.isArray(candles15m) || candles15m.length < 25) {
-    return { confirmed: false, reason: null, severity: 'UNKNOWN' };
+function detectSeriousDecline(
+  candles5m,
+  candles15m,
+  flow
+) {
+  if (
+    !Array.isArray(candles5m) ||
+    candles5m.length < 25 ||
+    !Array.isArray(candles15m) ||
+    candles15m.length < 25
+  ) {
+    return {
+      confirmed: false,
+      reason: null,
+      severity: 'UNKNOWN',
+    };
   }
 
   const closes5 = candles5m.map((c) => c.close);
+
   const ema9_5 = calculateEMA(closes5, 9);
   const ema21_5 = calculateEMA(closes5, 21);
+
   const last5 = candles5m.at(-1);
   const prev5 = candles5m.at(-2);
   const last15 = candles15m.at(-1);
-  const ema9_15 = calculateEMA(candles15m.map((c) => c.close), 9);
+
+  const ema9_15 = calculateEMA(
+    candles15m.map((c) => c.close),
+    9
+  );
+
   const strength5 = getCandleStrength(last5);
   const volume5 = getVolumeRatio(candles5m);
 
-  const breakdown5 = last5.close < ema9_5.at(-1) &&
+  const breakdown5 =
+    last5.close < ema9_5.at(-1) &&
     ema9_5.at(-1) < ema21_5.at(-1) &&
     last5.close < prev5.low &&
     strength5.closeLocation <= 0.35;
 
-  const strongSellCandle = last5.close < last5.open &&
+  const strongSellCandle =
+    last5.close < last5.open &&
     strength5.closeLocation <= 0.18 &&
     volume5 >= 1.65;
 
-  const confirm15 = last15.close < ema9_15.at(-1) && last15.close < last15.open;
-  const sellersControl = number(flow?.imbalance) < -0.12 || number(flow?.buyRatio, 0.5) < 0.43;
-  const hardBreakdown = breakdown5 && (confirm15 || sellersControl);
-  const panicSell = strongSellCandle && (sellersControl || confirm15);
+  const confirm15 =
+    last15.close < ema9_15.at(-1) &&
+    last15.close < last15.open;
+
+  const sellersControl =
+    number(flow?.imbalance) < -0.12 ||
+    number(flow?.buyRatio, 0.5) < 0.43;
+
+  const hardBreakdown =
+    breakdown5 &&
+    (confirm15 || sellersControl);
+
+  const panicSell =
+    strongSellCandle &&
+    (sellersControl || confirm15);
 
   return {
     confirmed: hardBreakdown || panicSell,
+
     reason: hardBreakdown
       ? 'شکست ساختار کوتاه‌مدت همراه با تأیید فروش'
       : panicSell
         ? 'کندل فروش قدرتمند با حجم بالا و تأیید فشار فروش'
         : null,
-    severity: hardBreakdown || panicSell ? 'SERIOUS' : breakdown5 || strongSellCandle ? 'WARNING' : 'NORMAL',
+
+    severity:
+      hardBreakdown || panicSell
+        ? 'SERIOUS'
+        : breakdown5 || strongSellCandle
+          ? 'WARNING'
+          : 'NORMAL',
   };
 }
 
-function updateTradeState(coin, setup, previousState, nowMs, candles5m = [], candles15m = []) {
+function updateTradeState(
+  coin,
+  setup,
+  previousState,
+  nowMs,
+  candles5m = [],
+  candles15m = []
+) {
   const opportunityType = coin.opportunityType;
-  const sameSetup = isSameSetup(previousState, setup, opportunityType);
-  const previous = sameSetup ? previousState : null;
-  const price = number(coin.livePrice, coin.price);
+
+  const sameSetup = isSameSetup(
+    previousState,
+    setup,
+    opportunityType
+  );
+
+  const previous = sameSetup
+    ? previousState
+    : null;
+
+  const price = number(
+    coin.livePrice,
+    coin.price
+  );
+
   const now = new Date(nowMs).toISOString();
 
   const statusLabels = {
@@ -969,48 +1968,88 @@ function updateTradeState(coin, setup, previousState, nowMs, candles5m = [], can
     };
   }
 
-  const terminal = new Set(['EXIT_CONFIRMED', 'INVALIDATED', 'EXPIRED']);
-  const maxAgeHours = CONFIG.SETUP_MAX_AGE_HOURS[opportunityType] || 72;
+  const terminal = new Set([
+    'EXIT_CONFIRMED',
+    'INVALIDATED',
+    'EXPIRED',
+  ]);
+
+  const maxAgeHours =
+    CONFIG.SETUP_MAX_AGE_HOURS[opportunityType] || 72;
+
   const createdAt = previous?.createdAt || now;
-  const ageHours = (nowMs - Date.parse(createdAt)) / 3600000;
+
+  const ageHours =
+    (nowMs - Date.parse(createdAt)) / 3600000;
+
   const oldStatus = previous?.status;
+
   let status = previous?.status || 'WAITING';
   let enteredAt = previous?.enteredAt || null;
-  let entryPrice = number(previous?.entryPrice, 0) || null;
+
+  let entryPrice =
+    number(previous?.entryPrice, 0) || null;
+
   let exitReason = previous?.exitReason || null;
+
+  const decline = detectSeriousDecline(
+    candles5m,
+    candles15m,
+    coin.derivatives
+  );
 
   if (previous && terminal.has(oldStatus)) {
     status = oldStatus;
   } else if (ageHours > maxAgeHours) {
     status = 'EXPIRED';
     exitReason = 'عمر setup از محدوده مجاز گذشت';
-  } else if (price <= setup.stopLoss && (oldStatus === 'ENTRY_CONFIRMED' || oldStatus === 'NEAR_EXIT')) {
+  } else if (
+    price <= setup.stopLoss &&
+    (
+      oldStatus === 'ENTRY_CONFIRMED' ||
+      oldStatus === 'NEAR_EXIT'
+    )
+  ) {
     status = 'EXIT_CONFIRMED';
     exitReason = 'حد ضرر معامله فعال لمس شد';
   } else if (
-    (oldStatus === 'ENTRY_CONFIRMED' || oldStatus === 'NEAR_EXIT') &&
-    detectSeriousDecline(candles5m, candles15m, coin.derivatives).confirmed
+    (
+      oldStatus === 'ENTRY_CONFIRMED' ||
+      oldStatus === 'NEAR_EXIT'
+    ) &&
+    decline.confirmed
   ) {
     status = 'EXIT_CONFIRMED';
-    exitReason = detectSeriousDecline(candles5m, candles15m, coin.derivatives).reason;
+    exitReason = decline.reason;
   } else if (price <= setup.stopLoss) {
     status = 'INVALIDATED';
     exitReason = 'شکست حد ضرر ساختاری پیش از ورود';
-  } else if (oldStatus === 'ENTRY_CONFIRMED' || oldStatus === 'NEAR_EXIT') {
+  } else if (
+    oldStatus === 'ENTRY_CONFIRMED' ||
+    oldStatus === 'NEAR_EXIT'
+  ) {
     const nearTarget = price >= setup.tp1 * 0.985;
-    const nearStop = price <= setup.stopLoss + setup.atr * 0.25;
+
+    const nearStop =
+      price <= setup.stopLoss + setup.atr * 0.25;
 
     if (price >= setup.tp1) {
       status = 'EXIT_CONFIRMED';
       exitReason = 'هدف اول لمس شد';
     } else if (nearTarget || nearStop) {
       status = 'NEAR_EXIT';
-      exitReason = nearTarget ? 'قیمت به هدف اول نزدیک شده' : 'قیمت به حد ضرر نزدیک شده';
+
+      exitReason = nearTarget
+        ? 'قیمت به هدف اول نزدیک شده'
+        : 'قیمت به حد ضرر نزدیک شده';
     } else {
       status = 'ENTRY_CONFIRMED';
       exitReason = null;
     }
-  } else if (setup.confirmationMet && price > setup.entryHigh) {
+  } else if (
+    setup.confirmationMet &&
+    price > setup.entryHigh
+  ) {
     status = 'ENTRY_CONFIRMED';
     enteredAt = now;
     entryPrice = price;
@@ -1034,44 +2073,41 @@ function updateTradeState(coin, setup, previousState, nowMs, candles5m = [], can
     enteredAt,
     entryPrice,
     exitReason,
-    ageHours: Number(Math.max(0, ageHours).toFixed(1)),
+    ageHours: Number(
+      Math.max(0, ageHours).toFixed(1)
+    ),
   };
 }
 
-function attachTradeLifecycle(coin, candles15m, candles5m, previousStates, nowMs) {
-  coin.opportunityType = classifyOpportunity(coin);
-  coin._candles5m = candles5m;
-
-  const setup = buildTradeSetup(coin, candles15m);
-  const tradeState = updateTradeState(coin, setup, previousStates[coin.symbol], nowMs);
-
-  coin.tradeStatus = tradeState.status;
-  coin.tradeStatusLabel = tradeState.statusLabel;
-  coin.tradeSetup = tradeState.setup;
-  coin.tradeState = tradeState;
-
-  delete coin._candles5m;
-  delete coin._analysis;
-
-  return coin;
-}
+/* -------------------------------------------------------------------------- */
+/* TELEGRAM                                                                   */
+/* -------------------------------------------------------------------------- */
 
 async function sendTelegram(message) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = process.env.TELEGRAM_CHAT_ID;
 
-  if (!token || !chatId) throw new Error('TELEGRAM_BOT_TOKEN یا TELEGRAM_CHAT_ID تنظیم نشده است.');
+  if (!token || !chatId) {
+    throw new Error(
+      'TELEGRAM_BOT_TOKEN یا TELEGRAM_CHAT_ID تنظیم نشده است.'
+    );
+  }
 
-  const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text: message,
-      disable_web_page_preview: true,
-    }),
-    signal: AbortSignal.timeout(15000),
-  });
+  const response = await fetch(
+    `https://api.telegram.org/bot${token}/sendMessage`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: message,
+        disable_web_page_preview: true,
+      }),
+      signal: AbortSignal.timeout(15000),
+    }
+  );
 
   const raw = await response.text();
   let result;
@@ -1084,20 +2120,27 @@ async function sendTelegram(message) {
 
   if (!response.ok || !result?.ok) {
     const error = new Error(
-      result?.description || `Telegram HTTP ${response.status}: ${raw.slice(0, 160) || 'empty response'}`
+      result?.description ||
+      `Telegram HTTP ${response.status}: ${raw.slice(0, 160) || 'empty response'}`
     );
+
     error.retryAfter = result?.parameters?.retry_after;
     throw error;
   }
 }
 
 function splitTelegramMessage(text, maxLength) {
-  const blocks = text.split('\n\n').filter(Boolean);
+  const blocks = text
+    .split('\n\n')
+    .filter(Boolean);
+
   const messages = [];
   let current = '';
 
   for (const block of blocks) {
-    const candidate = current ? `${current}\n\n${block}` : block;
+    const candidate = current
+      ? `${current}\n\n${block}`
+      : block;
 
     if (candidate.length <= maxLength) {
       current = candidate;
@@ -1115,7 +2158,9 @@ function splitTelegramMessage(text, maxLength) {
     }
 
     for (const line of block.split('\n')) {
-      const next = current ? `${current}\n${line}` : line;
+      const next = current
+        ? `${current}\n${line}`
+        : line;
 
       if (next.length > maxLength && current) {
         messages.push(current);
@@ -1132,10 +2177,14 @@ function splitTelegramMessage(text, maxLength) {
 }
 
 async function sendReports(report) {
-  const messages = splitTelegramMessage(report, CONFIG.TELEGRAM_MAX_LENGTH - 50);
+  const messages = splitTelegramMessage(
+    report,
+    CONFIG.TELEGRAM_MAX_LENGTH - 50
+  );
 
   for (let i = 0; i < messages.length; i++) {
-    const payload = `📄 گزارش ${i + 1}/${messages.length}\n\n${messages[i]}`;
+    const payload =
+      `📄 گزارش ${i + 1}/${messages.length}\n\n${messages[i]}`;
 
     try {
       await sendTelegram(payload);
@@ -1146,58 +2195,131 @@ async function sendReports(report) {
       await sendTelegram(payload);
     }
 
-    if (i < messages.length - 1) await sleep(CONFIG.TELEGRAM_DELAY);
+    if (i < messages.length - 1) {
+      await sleep(CONFIG.TELEGRAM_DELAY);
+    }
   }
 }
 
-/**
- * Independent final ranking.
- * Storage does not decide which coins are eligible for the report.
- */
+/* -------------------------------------------------------------------------- */
+/* ACTIVE LIST RANKING                                                        */
+/* -------------------------------------------------------------------------- */
+
+function isActiveCandidate(coin) {
+  if (!coin) return false;
+
+  if (
+    coin.moveStatus !== 'CONFIRMED' &&
+    coin.moveStatus !== 'EARLY'
+  ) {
+    return false;
+  }
+
+  if (
+    !Number.isFinite(Number(coin.moveScore)) ||
+    Number(coin.moveScore) < 65
+  ) {
+    return false;
+  }
+
+  if (
+    !Number.isFinite(Number(coin.growthScore)) ||
+    Number(coin.growthScore) < 58
+  ) {
+    return false;
+  }
+
+  const warnings = coin.warnings || [];
+
+  // حرکت بیش‌ازحد کشیده یا فشار فروش، فرصت فعال محسوب نمی‌شود.
+  if (
+    warnings.some((warning) =>
+      warning.includes('فشار فروش') ||
+      warning.includes('بیش از حد کشیده')
+    )
+  ) {
+    return false;
+  }
+
+  // حرکت‌های قدیمی وارد فهرست فعال نمی‌شوند.
+  if (
+    coin.moveAgeMinutes != null &&
+    coin.moveAgeMinutes > CONFIG.MAX_ACTIVE_AGE_MINUTES
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function calculateActivePriority(coin) {
+  const age = coin.moveAgeMinutes;
+
+  const freshness = age == null
+    ? 65
+    : clamp(
+        100 -
+        (age / CONFIG.MAX_ACTIVE_AGE_MINUTES) * 100,
+        0,
+        100
+      );
+
+  return (
+    number(coin.moveScore) * 0.55 +
+    number(coin.growthScore) * 0.35 +
+    freshness * 0.10
+  );
+}
+
 function assignIndependentRanks(candidates) {
   for (const coin of candidates) {
     coin.growthRank = null;
     coin.moveRank = null;
+    coin.activeRank = null;
   }
 
-  const growthRanked = candidates
-    .filter((coin) =>
-      Number.isFinite(Number(coin.growthScore)) &&
-      Number(coin.growthScore) >= 75 &&
-      coin.growthStatus === 'HIGH_POTENTIAL'
-    )
+  // فقط یک فهرست فعال وجود دارد؛ حداکثر ۱۰ ارز.
+  const activeRanked = candidates
+    .filter(isActiveCandidate)
     .sort((a, b) =>
-      number(b.growthScore) - number(a.growthScore) ||
-      number(b.moveScore) - number(a.moveScore)
+      calculateActivePriority(b) -
+      calculateActivePriority(a)
     )
     .slice(0, CONFIG.TOP_COUNT);
 
-  growthRanked.forEach((coin, index) => {
-    coin.growthRank = index + 1;
+  const growthRanked = [];
+  const moveRanked = [];
+
+  activeRanked.forEach((coin, index) => {
+    coin.activeRank = index + 1;
+
+    // تقسیم گزارش به دو بخش قبلی، بدون تکرار ارزها.
+    if (coin.growthScore >= 75) {
+      coin.growthRank = growthRanked.length + 1;
+      growthRanked.push(coin);
+    } else {
+      coin.moveRank = moveRanked.length + 1;
+      moveRanked.push(coin);
+    }
   });
 
-  const moveRanked = candidates
-    .filter((coin) =>
-      (coin.moveStatus === 'CONFIRMED' || coin.moveStatus === 'EARLY') &&
-      Number.isFinite(Number(coin.moveScore)) &&
-      Number(coin.moveScore) >= 65 &&
-      Number.isFinite(Number(coin.growthScore)) &&
-      Number(coin.growthScore) >= 58
-    )
-    .sort((a, b) =>
-      number(b.moveScore) - number(a.moveScore) ||
-      number(b.growthScore) - number(a.growthScore)
-    )
-    .slice(0, CONFIG.TOP_COUNT);
-
-  moveRanked.forEach((coin, index) => {
-    coin.moveRank = index + 1;
-  });
-
-  return { growthRanked, moveRanked };
+  return {
+    activeRanked,
+    growthRanked,
+    moveRanked,
+  };
 }
 
-function buildReport(candidates, stats, duration, rankChanges = null) {
+/* -------------------------------------------------------------------------- */
+/* REPORT                                                                     */
+/* -------------------------------------------------------------------------- */
+
+function buildReport(
+  candidates,
+  stats,
+  duration,
+  rankChanges = null
+) {
   const growth = candidates
     .filter((coin) =>
       Number.isInteger(coin.growthRank) &&
@@ -1214,12 +2336,15 @@ function buildReport(candidates, stats, duration, rankChanges = null) {
     )
     .sort((a, b) => a.moveRank - b.moveRank);
 
+  const activeCount = growth.length + early.length;
+
   const rankIcon = (changes, key, symbol) => {
     const item = changes?.[symbol]?.[key];
 
     if (!item || item.status === 'NEW') return '🆕';
     if (item.change > 0) return `🟢↑${item.change}`;
     if (item.change < 0) return `🔴↓${Math.abs(item.change)}`;
+
     return '➖';
   };
 
@@ -1238,13 +2363,25 @@ function buildReport(candidates, stats, duration, rankChanges = null) {
     LATE: 'حرکت انجام‌شده',
   }[coin.moveStatus] || coin.moveStatus);
 
-  // هر ارز دقیقاً دو خط در گزارش تلگرام دارد.
   const makeCoinBlock = (coin, rank, kind) => {
     const isGrowth = kind === 'growth';
-    const score = isGrowth ? coin.growthScore : coin.moveScore;
-    const rankChange = rankIcon(rankChanges, isGrowth ? 'growth' : 'move', coin.symbol);
-    const status = isGrowth ? statusLabel(coin) : moveLabel(coin);
+
+    const score = isGrowth
+      ? coin.growthScore
+      : coin.moveScore;
+
+    const rankChange = rankIcon(
+      rankChanges,
+      isGrowth ? 'growth' : 'move',
+      coin.symbol
+    );
+
+    const status = isGrowth
+      ? statusLabel(coin)
+      : moveLabel(coin);
+
     const setup = coin.tradeSetup;
+
     const entry = setup
       ? ` | ورود ${formatPrice(setup.entryLow)}-${formatPrice(setup.entryHigh)}`
       : '';
@@ -1262,28 +2399,43 @@ function buildReport(candidates, stats, duration, rankChanges = null) {
     `📌 بازارهای بررسی‌شده: ${candidates.length}`,
     `📊 قرارداد فعال: ${stats.active} | نقدشونده: ${stats.liquid}`,
     `🔍 بررسی موفق: ${stats.success} | خطا: ${stats.errors}`,
+    `⚡ فهرست فعال: ${activeCount} از ${CONFIG.TOP_COUNT}`,
     `⏱ زمان اسکن: ${(duration / 1000).toFixed(1)} ثانیه`,
     '📄 جزئیات کامل تمام موارد رتبه‌بندی‌شده در فایل market-report.html',
     '━━━━━━━━━━━━━━━━━━',
   ].join('\n')];
 
-  blocks.push(`🧱 روندهای صعودی باکیفیت (${growth.length})\n━━━━━━━━━━━━━━━━━━`);
+  blocks.push(
+    `🧱 روندهای صعودی باکیفیت (${growth.length})\n━━━━━━━━━━━━━━━━━━`
+  );
 
-  if (!growth.length) blocks.push('موردی در فهرست روند صعودی باکیفیت نیست.');
+  if (!growth.length) {
+    blocks.push('موردی در فهرست روند صعودی باکیفیت نیست.');
+  }
 
   growth.forEach((coin, index) => {
-    blocks.push(makeCoinBlock(coin, index + 1, 'growth'));
+    blocks.push(
+      makeCoinBlock(coin, index + 1, 'growth')
+    );
   });
 
-  blocks.push(`⚡ بهترین فرصت‌های ورود (${early.length})\n━━━━━━━━━━━━━━━━━━`);
+  blocks.push(
+    `⚡ بهترین فرصت‌های ورود (${early.length})\n━━━━━━━━━━━━━━━━━━`
+  );
 
-  if (!early.length) blocks.push('هنوز ارز واجد شرایط ورود وجود ندارد.');
+  if (!early.length) {
+    blocks.push('هنوز ارز واجد شرایط ورود وجود ندارد.');
+  }
 
   early.forEach((coin, index) => {
-    blocks.push(makeCoinBlock(coin, index + 1, 'move'));
+    blocks.push(
+      makeCoinBlock(coin, index + 1, 'move')
+    );
   });
 
-  blocks.push('━━━━━━━━━━━━━━━━━━\nℹ️ رتبه‌بندی نشان‌دهنده کیفیت شرایط است و تضمین رشد یا توصیه قطعی ورود نیست.');
+  blocks.push(
+    '━━━━━━━━━━━━━━━━━━\nℹ️ رتبه‌بندی نشان‌دهنده کیفیت شرایط است و تضمین رشد یا توصیه قطعی ورود نیست.'
+  );
 
   return blocks.join('\n\n');
 }
@@ -1302,7 +2454,10 @@ function escapeHtml(value) {
 }
 
 function displayNumber(value, digits = 2, suffix = '') {
-  if (value == null || !Number.isFinite(Number(value))) return 'نامشخص';
+  if (value == null || !Number.isFinite(Number(value))) {
+    return 'نامشخص';
+  }
+
   return `${Number(value).toFixed(digits)}${suffix}`;
 }
 
@@ -1330,15 +2485,29 @@ function buildCoinHtml(coin, rank, category) {
   const state = coin.tradeState || {};
   const returns = coin.returns || {};
   const volume = coin.volume || {};
+
   const isGrowth = category === 'growth';
 
-  const title = isGrowth ? 'روند صعودی باکیفیت' : 'فرصت ورود';
-  const rankValue = isGrowth ? coin.growthRank : coin.moveRank;
-  const score = isGrowth ? coin.growthScore : coin.moveScore;
+  const rankValue = isGrowth
+    ? coin.growthRank
+    : coin.moveRank;
+
+  const score = isGrowth
+    ? coin.growthScore
+    : coin.moveScore;
 
   const status = isGrowth
-    ? ({ HIGH_POTENTIAL: 'روند صعودی باکیفیت', WATCHLIST: 'در فهرست بررسی', NORMAL: 'عادی' }[coin.growthStatus] || coin.growthStatus)
-    : ({ CONFIRMED: 'تأییدشده', EARLY: 'شروع اولیه', WATCHING: 'در حال آماده‌سازی', POTENTIAL: 'بدون تأیید' }[coin.moveStatus] || coin.moveStatus);
+    ? ({
+        HIGH_POTENTIAL: 'روند صعودی باکیفیت',
+        WATCHLIST: 'در فهرست بررسی',
+        NORMAL: 'عادی',
+      }[coin.growthStatus] || coin.growthStatus)
+    : ({
+        CONFIRMED: 'تأییدشده',
+        EARLY: 'شروع اولیه',
+        WATCHING: 'در حال آماده‌سازی',
+        POTENTIAL: 'بدون تأیید',
+      }[coin.moveStatus] || coin.moveStatus);
 
   const returnRows = [
     htmlRow('بازده ۱۵ دقیقه', displayNumber(returns['15m'], 2, '%')),
@@ -1398,30 +2567,32 @@ function buildCoinHtml(coin, rank, category) {
     htmlRow('بازده از بازشدن کندل روزانه', displayNumber(daily.dailyOpenReturn, 2, '%')),
   ].join('');
 
-  const tradeRows = setup ? [
-    htmlRow('نوع فرصت', coin.opportunityType || '-'),
-    htmlRow('وضعیت معامله', coin.tradeStatusLabel || coin.tradeStatus || '-'),
-    htmlRow('محدوده ورود پایین', formatPrice(setup.entryLow)),
-    htmlRow('محدوده ورود بالا', formatPrice(setup.entryHigh)),
-    htmlRow('نقطه میانی ورود', formatPrice(setup.entryMid)),
-    htmlRow('تأیید ۵ دقیقه', setup.confirmationMet ? 'تأیید شده' : 'تأیید نشده'),
-    htmlRow('شرط تأیید ورود', setup.confirmation || '-'),
-    htmlRow('حد ضرر', formatPrice(setup.stopLoss)),
-    htmlRow('هدف اول TP1', formatPrice(setup.tp1)),
-    htmlRow('هدف دوم TP2', formatPrice(setup.tp2)),
-    htmlRow('هدف سوم TP3', formatPrice(setup.tp3)),
-    htmlRow('نسبت ریسک به بازده', displayNumber(setup.riskReward, 2, 'R')),
-    htmlRow('ATR', formatPrice(setup.atr)),
-    htmlRow('حمایت محاسبه‌شده', formatPrice(setup.support)),
-    htmlRow('دلیل خروج', state.exitReason || 'ندارد'),
-    htmlRow('قیمت ورود ثبت‌شده', state.entryPrice ? formatPrice(state.entryPrice) : 'ثبت نشده'),
-    htmlRow('زمان ایجاد موقعیت', state.createdAt || 'نامشخص'),
-    htmlRow('زمان آخرین به‌روزرسانی', state.updatedAt || 'نامشخص'),
-    htmlRow('عمر موقعیت به ساعت', displayNumber(state.ageHours, 1)),
-  ].join('') : [
-    htmlRow('وضعیت معامله', coin.tradeStatusLabel || coin.tradeStatus || 'نامشخص'),
-    htmlRow('اطلاعات setup', 'برای این ارز محدوده معاملاتی محاسبه نشده است'),
-  ].join('');
+  const tradeRows = setup
+    ? [
+        htmlRow('نوع فرصت', coin.opportunityType || '-'),
+        htmlRow('وضعیت معامله', coin.tradeStatusLabel || coin.tradeStatus || '-'),
+        htmlRow('محدوده ورود پایین', formatPrice(setup.entryLow)),
+        htmlRow('محدوده ورود بالا', formatPrice(setup.entryHigh)),
+        htmlRow('نقطه میانی ورود', formatPrice(setup.entryMid)),
+        htmlRow('تأیید ۵ دقیقه', setup.confirmationMet ? 'تأیید شده' : 'تأیید نشده'),
+        htmlRow('شرط تأیید ورود', setup.confirmation || '-'),
+        htmlRow('حد ضرر', formatPrice(setup.stopLoss)),
+        htmlRow('هدف اول TP1', formatPrice(setup.tp1)),
+        htmlRow('هدف دوم TP2', formatPrice(setup.tp2)),
+        htmlRow('هدف سوم TP3', formatPrice(setup.tp3)),
+        htmlRow('نسبت ریسک به بازده', displayNumber(setup.riskReward, 2, 'R')),
+        htmlRow('ATR', formatPrice(setup.atr)),
+        htmlRow('حمایت محاسبه‌شده', formatPrice(setup.support)),
+        htmlRow('دلیل خروج', state.exitReason || 'ندارد'),
+        htmlRow('قیمت ورود ثبت‌شده', state.entryPrice ? formatPrice(state.entryPrice) : 'ثبت نشده'),
+        htmlRow('زمان ایجاد موقعیت', state.createdAt || 'نامشخص'),
+        htmlRow('زمان آخرین به‌روزرسانی', state.updatedAt || 'نامشخص'),
+        htmlRow('عمر موقعیت به ساعت', displayNumber(state.ageHours, 1)),
+      ].join('')
+    : [
+        htmlRow('وضعیت معامله', coin.tradeStatusLabel || coin.tradeStatus || 'نامشخص'),
+        htmlRow('اطلاعات setup', 'برای این ارز محدوده معاملاتی محاسبه نشده است'),
+      ].join('');
 
   const eventRows = [
     htmlRow('وضعیت حرکت', coin.moveStatus || '-'),
@@ -1503,21 +2674,40 @@ function buildCoinHtml(coin, rank, category) {
   `;
 }
 
-function buildHtmlReport(candidates, stats, duration, generatedAt) {
+function buildHtmlReport(
+  candidates,
+  stats,
+  duration,
+  generatedAt
+) {
   const growth = candidates
-    .filter((coin) => Number.isInteger(coin.growthRank) && coin.growthRank > 0)
+    .filter((coin) =>
+      Number.isInteger(coin.growthRank) &&
+      coin.growthRank > 0
+    )
     .sort((a, b) => a.growthRank - b.growthRank);
 
   const entries = candidates
-    .filter((coin) => Number.isInteger(coin.moveRank) && coin.moveRank > 0)
+    .filter((coin) =>
+      Number.isInteger(coin.moveRank) &&
+      coin.moveRank > 0
+    )
     .sort((a, b) => a.moveRank - b.moveRank);
 
   const growthHtml = growth.length
-    ? growth.map((coin, index) => buildCoinHtml(coin, index + 1, 'growth')).join('\n')
+    ? growth
+        .map((coin, index) =>
+          buildCoinHtml(coin, index + 1, 'growth')
+        )
+        .join('\n')
     : '<p class="empty">در این اسکن موردی واجد شرایط این دسته نبود.</p>';
 
   const entriesHtml = entries.length
-    ? entries.map((coin, index) => buildCoinHtml(coin, index + 1, 'move')).join('\n')
+    ? entries
+        .map((coin, index) =>
+          buildCoinHtml(coin, index + 1, 'move')
+        )
+        .join('\n')
     : '<p class="empty">در این اسکن فرصت ورود واجد شرایطی پیدا نشد.</p>';
 
   return `<!DOCTYPE html>
@@ -1721,16 +2911,35 @@ footer {
 </html>`;
 }
 
-async function saveHtmlReport(candidates, stats, duration) {
-  const generatedAt = new Date().toLocaleString('fa-IR', {
-    dateStyle: 'full',
-    timeStyle: 'medium',
-  });
+async function saveHtmlReport(
+  candidates,
+  stats,
+  duration
+) {
+  const generatedAt = new Date().toLocaleString(
+    'fa-IR',
+    {
+      dateStyle: 'full',
+      timeStyle: 'medium',
+    }
+  );
 
-  const html = buildHtmlReport(candidates, stats, duration, generatedAt);
-  await writeFile(CONFIG.HTML_REPORT_FILE, html, 'utf8');
+  const html = buildHtmlReport(
+    candidates,
+    stats,
+    duration,
+    generatedAt
+  );
 
-  console.log(`📄 HTML report saved: ${CONFIG.HTML_REPORT_FILE}`);
+  await writeFile(
+    CONFIG.HTML_REPORT_FILE,
+    html,
+    'utf8'
+  );
+
+  console.log(
+    `📄 HTML report saved: ${CONFIG.HTML_REPORT_FILE}`
+  );
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1743,127 +2952,211 @@ async function main() {
 
   console.log('\n🚀 GATE.IO SUSTAINED BULLISH MOVE RADAR');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log('🎯 Sustained bullish trend quality + timely entry readiness');
+  console.log('🎯 Fresh bullish move detection + timely entry readiness');
   console.log('🛑 Exit requires serious short-term structure breakdown with selling confirmation.');
 
-  // marketStorage.js فقط saveMarketSnapshot را export می‌کند.
-  const previousTradeStates = {};
+  // بازیابی حافظه معاملات و Watchlist از اجرای قبلی
+  const previousMemory = await loadScannerMemory();
+
+  const previousTradeStates =
+    previousMemory.tradeStates || {};
 
   const [contracts, tickers] = await Promise.all([
     getContracts(),
     getTickers(),
   ]);
 
-  if (!Array.isArray(contracts) || !Array.isArray(tickers)) {
-    throw new Error('داده قراردادها یا تیکرهای Gate.io معتبر نیست.');
+  if (
+    !Array.isArray(contracts) ||
+    !Array.isArray(tickers)
+  ) {
+    throw new Error(
+      'داده قراردادها یا تیکرهای Gate.io معتبر نیست.'
+    );
   }
 
-  const tickerMap = new Map(tickers.map((ticker) => [ticker.contract, ticker]));
-  const activeContracts = contracts.filter((contract) =>
-    contract?.name &&
-    contract.in_delisting !== true &&
-    tickerMap.has(contract.name)
+  const tickerMap = new Map(
+    tickers.map((ticker) => [
+      ticker.contract,
+      ticker,
+    ])
   );
 
-  const liquidMarkets = activeContracts.map((contract) => {
-    const ticker = tickerMap.get(contract.name);
+  const activeContracts = contracts.filter(
+    (contract) =>
+      contract?.name &&
+      contract.in_delisting !== true &&
+      tickerMap.has(contract.name)
+  );
 
-    return {
-      symbol: contract.name,
-      ticker,
-      contract,
-      quoteVolume: number(ticker.volume_24h_quote),
-      lastPrice: number(ticker.last),
-    };
-  }).filter((market) =>
-    market.lastPrice > 0 &&
-    market.quoteVolume >= CONFIG.MIN_QUOTE_VOLUME_24H
-  ).sort((a, b) => b.quoteVolume - a.quoteVolume);
+  const liquidMarkets = activeContracts
+    .map((contract) => {
+      const ticker = tickerMap.get(contract.name);
 
-  console.log(`📊 Active contracts: ${activeContracts.length}`);
-  console.log(`💧 Liquid contracts: ${liquidMarkets.length}`);
+      return {
+        symbol: contract.name,
+        ticker,
+        contract,
+        quoteVolume: number(ticker.volume_24h_quote),
+        lastPrice: number(ticker.last),
+      };
+    })
+    .filter(
+      (market) =>
+        market.lastPrice > 0 &&
+        market.quoteVolume >= CONFIG.MIN_QUOTE_VOLUME_24H
+    )
+    .sort(
+      (a, b) => b.quoteVolume - a.quoteVolume
+    );
+
+  console.log(
+    `📊 Active contracts: ${activeContracts.length}`
+  );
+
+  console.log(
+    `💧 Liquid contracts: ${liquidMarkets.length}`
+  );
+
   console.log('🔍 Scanning all liquid contracts...\n');
 
   let success = 0;
   let errors = 0;
 
-  const analyzed = await mapLimit(liquidMarkets, CONFIG.CONCURRENCY, async (market) => {
-    const [
-      candles5mData,
-      candles15mData,
-      candles1h,
-      candles4h,
-      candles1dData,
-      tradesResult,
-      statsResult,
-    ] = await Promise.all([
-      getCandles(market.symbol, '5m', CONFIG.TIMEFRAMES['5m'].limit, true)
-        .catch(() => ({ closed: [], current: null })),
-      getCandles(market.symbol, '15m', CONFIG.TIMEFRAMES['15m'].limit, true),
-      getCandles(market.symbol, '1h', CONFIG.TIMEFRAMES['1h'].limit),
-      getCandles(market.symbol, '4h', CONFIG.TIMEFRAMES['4h'].limit),
-      getCandles(market.symbol, '1d', CONFIG.TIMEFRAMES['1d'].limit, true),
-      getRecentTrades(market.symbol).catch(() => []),
-      getContractStats(market.symbol).catch(() => []),
-    ]);
+  const analyzedSymbols = new Set();
 
-    const candles5m = candles5mData.closed;
-    const candles15m = candles15mData.closed;
-    const candles1d = candles1dData.closed;
+  const analyzed = await mapLimit(
+    liquidMarkets,
+    CONFIG.CONCURRENCY,
+    async (market) => {
+      const [
+        candles5mData,
+        candles15mData,
+        candles1h,
+        candles4h,
+        candles1dData,
+        tradesResult,
+        statsResult,
+      ] = await Promise.all([
+        getCandles(
+          market.symbol,
+          '5m',
+          CONFIG.TIMEFRAMES['5m'].limit,
+          true
+        ).catch(() => ({
+          closed: [],
+          current: null,
+        })),
 
-    if (candles15m.length < 30 || candles1h.length < 30 || candles4h.length < 30) {
-      throw new Error('کندل کافی برای تحلیل تایم‌فریم‌ها دریافت نشد.');
+        getCandles(
+          market.symbol,
+          '15m',
+          CONFIG.TIMEFRAMES['15m'].limit,
+          true
+        ),
+
+        getCandles(
+          market.symbol,
+          '1h',
+          CONFIG.TIMEFRAMES['1h'].limit
+        ),
+
+        getCandles(
+          market.symbol,
+          '4h',
+          CONFIG.TIMEFRAMES['4h'].limit
+        ),
+
+        getCandles(
+          market.symbol,
+          '1d',
+          CONFIG.TIMEFRAMES['1d'].limit,
+          true
+        ),
+
+        getRecentTrades(
+          market.symbol
+        ).catch(() => []),
+
+        getContractStats(
+          market.symbol
+        ).catch(() => []),
+      ]);
+
+      const candles5m = candles5mData.closed;
+      const candles15m = candles15mData.closed;
+      const candles1d = candles1dData.closed;
+
+      if (
+        candles15m.length < 30 ||
+        candles1h.length < 30 ||
+        candles4h.length < 30
+      ) {
+        throw new Error(
+          'کندل کافی برای تحلیل تایم‌فریم‌ها دریافت نشد.'
+        );
+      }
+
+      success++;
+      analyzedSymbols.add(market.symbol);
+
+      const derivatives = analyzeDerivatives(
+        tradesResult,
+        statsResult,
+        market.contract?.quanto_multiplier
+      );
+
+      const candidate = analyzeCoin({
+        symbol: market.symbol,
+
+        candles: {
+          '15m': candles15m,
+          '1h': candles1h,
+          '4h': candles4h,
+          '1d': candles1d,
+        },
+
+        dailyCurrent: candles1dData.current,
+        livePrice: market.lastPrice,
+        derivatives,
+      });
+
+      if (!candidate) return null;
+
+      candidate.livePrice = market.lastPrice;
+      candidate.live15m = candles15mData.current;
+      candidate.live1d = candles1dData.current;
+
+      candidate.opportunityType =
+        classifyOpportunity(candidate);
+
+      candidate._candles5m = candles5m;
+
+      const setup = buildTradeSetup(
+        candidate,
+        candles15m
+      );
+
+      const tradeState = updateTradeState(
+        candidate,
+        setup,
+        previousTradeStates[market.symbol],
+        nowMs,
+        candles5m,
+        candles15m
+      );
+
+      candidate.tradeStatus = tradeState.status;
+      candidate.tradeStatusLabel = tradeState.statusLabel;
+      candidate.tradeSetup = tradeState.setup;
+      candidate.tradeState = tradeState;
+
+      delete candidate._analysis;
+      delete candidate._candles5m;
+
+      return candidate;
     }
-
-    success++;
-
-    const derivatives = analyzeDerivatives(
-      tradesResult,
-      statsResult,
-      market.contract?.quanto_multiplier
-    );
-
-    const candidate = analyzeCoin({
-      symbol: market.symbol,
-      candles: {
-        '15m': candles15m,
-        '1h': candles1h,
-        '4h': candles4h,
-        '1d': candles1d,
-      },
-      dailyCurrent: candles1dData.current,
-      livePrice: market.lastPrice,
-      derivatives,
-    });
-
-    if (!candidate) return null;
-
-    candidate.livePrice = market.lastPrice;
-    candidate.live15m = candles15mData.current;
-    candidate.live1d = candles1dData.current;
-    candidate.opportunityType = classifyOpportunity(candidate);
-    candidate._candles5m = candles5m;
-
-    const setup = buildTradeSetup(candidate, candles15m);
-    const tradeState = updateTradeState(
-      candidate,
-      setup,
-      previousTradeStates[market.symbol],
-      nowMs,
-      candles5m,
-      candles15m
-    );
-
-    candidate.tradeStatus = tradeState.status;
-    candidate.tradeStatusLabel = tradeState.statusLabel;
-    candidate.tradeSetup = tradeState.setup;
-    candidate.tradeState = tradeState;
-
-    delete candidate._analysis;
-    delete candidate._candles5m;
-
-    return candidate;
-  });
+  );
 
   const candidates = [];
 
@@ -1873,27 +3166,63 @@ async function main() {
       continue;
     }
 
-    if (result) candidates.push(result);
+    if (result) {
+      candidates.push(result);
+    }
   }
 
   let rankChanges = null;
 
   try {
-    // امضای تابع storage فقط یک آرگومان دارد.
-    const storageResult = await saveMarketSnapshot(candidates);
-    rankChanges = storageResult?.rankChanges ?? null;
+    // Storage موجود بدون تغییر باقی می‌ماند.
+    const storageResult =
+      await saveMarketSnapshot(candidates);
+
+    rankChanges =
+      storageResult?.rankChanges ?? null;
 
     console.log('\n💾 MARKET DATA SAVED');
-    console.log('📊 Market snapshot saved successfully.');
+    console.log(
+      '📊 Market snapshot saved successfully.'
+    );
   } catch (storageError) {
-    console.error('⚠️ MARKET STORAGE FAILED:', storageError);
+    console.error(
+      '⚠️ MARKET STORAGE FAILED:',
+      storageError
+    );
   }
 
-  // رتبه‌بندی نهایی مستقل از خروجی storage انجام می‌شود.
-  const { growthRanked, moveRanked } = assignIndependentRanks(candidates);
+  // یک فهرست فعال با سقف ۱۰ ارز
+  const {
+    activeRanked,
+    growthRanked,
+    moveRanked,
+  } = assignIndependentRanks(candidates);
 
-  const rankedCandidates = candidates;
+  // به‌روزرسانی Watchlist و وضعیت معاملات
+  const updatedMemory = updateScannerMemory(
+    previousMemory,
+    candidates,
+    activeRanked,
+    analyzedSymbols,
+    nowMs
+  );
+
+  try {
+    await saveScannerMemory(updatedMemory);
+
+    console.log(
+      `💾 Scanner memory saved | Watchlist: ${Object.keys(updatedMemory.watchlist).length} | Trade states: ${Object.keys(updatedMemory.tradeStates).length}`
+    );
+  } catch (memoryError) {
+    console.error(
+      '⚠️ SCANNER MEMORY SAVE FAILED:',
+      memoryError
+    );
+  }
+
   const duration = Date.now() - startedAt;
+
   const stats = {
     active: activeContracts.length,
     liquid: liquidMarkets.length,
@@ -1902,8 +3231,21 @@ async function main() {
   };
 
   console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log('🏆 QUALIFIED SUSTAINED BULLISH TRENDS');
-  console.log(`Qualified bullish trends: ${growthRanked.length}`);
+  console.log('🏆 ACTIVE BULLISH OPPORTUNITIES');
+  console.log(
+    `Active opportunities: ${activeRanked.length}/${CONFIG.TOP_COUNT}`
+  );
+
+  activeRanked.forEach((coin) => {
+    console.log(
+      `${coin.activeRank}. ${coin.symbol} | Growth ${coin.growthScore}/100 | Move ${coin.moveScore}/100 | ${coin.moveStatus} | ${coin.moveTypeLabel}`
+    );
+  });
+
+  console.log('\n🧱 QUALIFIED BULLISH TRENDS');
+  console.log(
+    `Qualified bullish trends: ${growthRanked.length}`
+  );
 
   growthRanked.forEach((coin) => {
     console.log(
@@ -1912,7 +3254,9 @@ async function main() {
   });
 
   console.log('\n⚡ QUALIFIED ENTRY OPPORTUNITIES');
-  console.log(`Qualified entry opportunities: ${moveRanked.length}`);
+  console.log(
+    `Qualified entry opportunities: ${moveRanked.length}`
+  );
 
   moveRanked.forEach((coin) => {
     console.log(
@@ -1921,22 +3265,47 @@ async function main() {
   });
 
   console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log(`Analyzed candidates: ${rankedCandidates.length}`);
-  console.log(`Successful analyses: ${success}`);
+  console.log(
+    `Analyzed candidates: ${candidates.length}`
+  );
+  console.log(
+    `Successful analyses: ${success}`
+  );
   console.log(`Errors: ${errors}`);
-  console.log(`Duration: ${(duration / 1000).toFixed(1)}s`);
+  console.log(
+    `Watchlist monitored internally: ${Object.keys(updatedMemory.watchlist).length}`
+  );
+  console.log(
+    `Duration: ${(duration / 1000).toFixed(1)}s`
+  );
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
   // گزارش HTML مستقل از ارسال تلگرام ساخته می‌شود.
   try {
-    await saveHtmlReport(rankedCandidates, stats, duration);
+    await saveHtmlReport(
+      candidates,
+      stats,
+      duration
+    );
   } catch (htmlError) {
-    console.error('⚠️ HTML REPORT FAILED:', htmlError);
+    console.error(
+      '⚠️ HTML REPORT FAILED:',
+      htmlError
+    );
   }
 
-  await sendReports(buildReport(rankedCandidates, stats, duration, rankChanges));
+  await sendReports(
+    buildReport(
+      candidates,
+      stats,
+      duration,
+      rankChanges
+    )
+  );
 
-  console.log('✅ Telegram report sent successfully.');
+  console.log(
+    '✅ Telegram report sent successfully.'
+  );
 }
 
 main().catch((error) => {
