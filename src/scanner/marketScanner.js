@@ -7,6 +7,7 @@
  */
 
 import 'dotenv/config';
+import { writeFile } from 'node:fs/promises';
 import { saveMarketSnapshot } from '../storage/marketStorage.js';
 
 const CONFIG = {
@@ -33,6 +34,7 @@ const CONFIG = {
   MAX_RETURN_4H: 12,
   NEAR_ENTRY_ATR: 1.25,
   SETUP_MAX_AGE_HOURS: { SWING: 240, 'SHORT-TERM': 72, SCALP: 24 },
+  HTML_REPORT_FILE: 'market-report.html',
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -60,12 +62,14 @@ const getCandleValue = (candle) => candle.turnover > 0 ? candle.turnover : candl
 
 async function fetchJSON(url) {
   let lastError;
+
   for (let attempt = 1; attempt <= CONFIG.RETRIES; attempt++) {
     try {
       const response = await fetch(url, {
         headers: { Accept: 'application/json' },
         signal: AbortSignal.timeout(CONFIG.REQUEST_TIMEOUT),
       });
+
       if (!response.ok) {
         const body = await response.text();
         const error = new Error(`HTTP ${response.status}: ${body.slice(0, 200)}`);
@@ -73,12 +77,21 @@ async function fetchJSON(url) {
         error.retryAfter = number(response.headers.get('Retry-After'), 0);
         throw error;
       }
+
       return await response.json();
     } catch (error) {
       lastError = error;
-      if (attempt < CONFIG.RETRIES) await sleep(error.status === 429 ? Math.max(error.retryAfter * 1000, 1800 * (2 ** (attempt - 1))) + Math.floor(Math.random() * 500) : 700 * attempt);
+
+      if (attempt < CONFIG.RETRIES) {
+        await sleep(
+          error.status === 429
+            ? Math.max(error.retryAfter * 1000, 1800 * (2 ** (attempt - 1))) + Math.floor(Math.random() * 500)
+            : 700 * attempt
+        );
+      }
     }
   }
+
   throw lastError;
 }
 
@@ -107,6 +120,7 @@ async function getContractStats(contract) {
 function analyzeDerivatives(trades, stats, contractMultiplier = 1) {
   const nowSeconds = Date.now() / 1000;
   const multiplier = number(contractMultiplier) > 0 ? number(contractMultiplier) : 1;
+
   const validTrades = Array.isArray(trades)
     ? trades.filter((trade) => {
       if (!trade || trade.is_internal === true || number(trade.size) === 0 || number(trade.price) <= 0) return false;
@@ -150,6 +164,7 @@ function analyzeDerivatives(trades, stats, contractMultiplier = 1) {
   const longLiqTotal = points.reduce((sum, item) => sum + item.longLiq, 0);
   const latestStats = points.at(-1);
   const statsTakerTotal = number(latestStats?.takerLong) + number(latestStats?.takerShort);
+
   const statsTakerImbalance = statsTakerTotal > 0
     ? (number(latestStats?.takerLong) - number(latestStats?.takerShort)) / statsTakerTotal
     : null;
@@ -158,7 +173,6 @@ function analyzeDerivatives(trades, stats, contractMultiplier = 1) {
     ? imbalance
     : clamp(imbalance * 0.70 + statsTakerImbalance * 0.30, -1, 1);
 
-  // Missing derivatives data is neutral, never a bullish assumption.
   let flowScore = clamp(50 + combinedImbalance * 65, 0, 100);
   let oiScore = 50;
 
@@ -169,7 +183,6 @@ function analyzeDerivatives(trades, stats, contractMultiplier = 1) {
     else oiScore = clamp(50 + oiChangePct * 2, 0, 100);
   }
 
-  // Large short liquidations can inflate buy flow; reduce its directional value.
   const liquidationDistortion = shortLiqTotal > 0 && totalNotional > 0
     ? clamp(shortLiqTotal / totalNotional, 0, 1)
     : 0;
@@ -1138,15 +1151,8 @@ async function sendReports(report) {
 }
 
 /**
- * Final candidate selection.
- *
- * growthRank:
- *   Only high-quality sustained trends are eligible.
- *
- * moveRank:
- *   Only confirmed/early starts with sufficient entry score are eligible.
- *
- * A missing rank is never interpreted as rank zero.
+ * Independent final ranking.
+ * Storage does not decide which coins are eligible for the report.
  */
 function assignIndependentRanks(candidates) {
   for (const coin of candidates) {
@@ -1208,111 +1214,528 @@ function buildReport(candidates, stats, duration, rankChanges = null) {
     )
     .sort((a, b) => a.moveRank - b.moveRank);
 
-  const blocks = [[
-    '🚀 GATE.IO | SUSTAINED BULLISH MOVE RADAR',
-    '━━━━━━━━━━━━━━━━━━',
-    '🎯 هدف: شکار شروع موج صعودی پیوسته و ورود در زمان مناسب',
-    '🧱 رتبه روند: کیفیت و پیوستگی ساختار صعودی | ⚡ رتبه ورود: تازگی حرکت + تقاضا + جریان معاملات',
-    '🛑 خروج: اولین شکست جدی ساختار کوتاه‌مدت با تأیید فشار فروش؛ کندل قرمز منفرد کافی نیست.',
-    `📌 بازارهای بررسی‌شده: ${candidates.length}`,
-    `📊 قرارداد فعال: ${stats.active} | نقدشونده: ${stats.liquid}`,
-    `🔍 بررسی موفق: ${stats.success} | خطا: ${stats.errors}`,
-    `⏱ زمان اسکن: ${(duration / 1000).toFixed(1)} ثانیه`,
-    '━━━━━━━━━━━━━━━━━━',
-  ].join('\n')];
-
   const rankIcon = (changes, key, symbol) => {
     const item = changes?.[symbol]?.[key];
 
     if (!item || item.status === 'NEW') return '🆕';
     if (item.change > 0) return `🟢↑${item.change}`;
     if (item.change < 0) return `🔴↓${Math.abs(item.change)}`;
-
     return '➖';
   };
 
   const statusLabel = (coin) => ({
-    HIGH_POTENTIAL: '🟢 روند صعودی باکیفیت',
-    WATCHLIST: '🟡 روند در حال شکل‌گیری',
-    NORMAL: '⚪ شرایط ناکافی',
+    HIGH_POTENTIAL: 'روند باکیفیت',
+    WATCHLIST: 'روند در حال شکل‌گیری',
+    NORMAL: 'شرایط ناکافی',
   }[coin.growthStatus] || coin.growthStatus);
 
   const moveLabel = (coin) => ({
-    CONFIRMED: '🟢 موج صعودی پیوسته تأیید شد',
-    EARLY: '🔵 نشانه‌های شروع موج',
-    WATCHING: '🟡 آماده‌سازی',
-    POTENTIAL: '⚪ بدون تأیید شروع',
-    INVALIDATED: '🔴 ابطال‌شده',
-    LATE: '🟠 حرکت انجام‌شده',
+    CONFIRMED: 'موج تأییدشده',
+    EARLY: 'شروع اولیه',
+    WATCHING: 'آماده‌سازی',
+    POTENTIAL: 'بدون تأیید شروع',
+    INVALIDATED: 'ابطال‌شده',
+    LATE: 'حرکت انجام‌شده',
   }[coin.moveStatus] || coin.moveStatus);
 
+  // هر ارز دقیقاً دو خط در گزارش تلگرام دارد.
   const makeCoinBlock = (coin, rank, kind) => {
     const isGrowth = kind === 'growth';
     const score = isGrowth ? coin.growthScore : coin.moveScore;
     const rankChange = rankIcon(rankChanges, isGrowth ? 'growth' : 'move', coin.symbol);
+    const status = isGrowth ? statusLabel(coin) : moveLabel(coin);
+    const setup = coin.tradeSetup;
+    const entry = setup
+      ? ` | ورود ${formatPrice(setup.entryLow)}-${formatPrice(setup.entryHigh)}`
+      : '';
 
-    const lines = [
-      `${rank}. ${coin.symbol} ${rankChange} | امتیاز ${score}/100`,
-      isGrowth
-        ? `🧱 استعداد: ${statusLabel(coin)} | رتبه شروع: ${coin.moveRank ?? '-'} | امتیاز شروع: ${coin.moveScore ?? '-'}`
-        : `⚡ وضعیت حرکت: ${moveLabel(coin)} | نوع: ${coin.moveTypeLabel} | رتبه استعداد: ${coin.growthRank ?? '-'} | امتیاز استعداد: ${coin.growthScore ?? '-'}`,
-      `💰 قیمت: ${formatPrice(number(coin.livePrice, coin.price))}`,
-      `📈 بازده: 15M ${number(coin.returns['15m']).toFixed(2)}% | 1H ${number(coin.returns['1h']).toFixed(2)}% | 4H ${number(coin.returns['4h']).toFixed(2)}% | 1D ${number(coin.returns['1d']).toFixed(2)}%`,
-      `📐 ساختار: 1D ${coin.structure.daily} | 4H ${coin.structure['4h']} | فشردگی 4H ${coin.structure.compression4h} | فضای مقاومت ${coin.structure.roomToResistance4hPct == null ? 'نامشخص' : `${coin.structure.roomToResistance4hPct.toFixed(1)}%`}`,
-      `🧾 جریان معاملات: خرید ${(coin.derivatives.buyRatio * 100).toFixed(1)}% | عدم‌تعادل ${(coin.derivatives.imbalance * 100).toFixed(1)}% | OI ${coin.derivatives.oiChangePct == null ? 'N/A' : `${coin.derivatives.oiChangePct.toFixed(2)}%`} | کیفیت داده ${coin.derivatives.dataQuality}`,
-      coin.growthEvent
-        ? `🕒 رویداد: ${coin.growthEvent.status} | عمر ${coin.growthEvent.ageMinutes ?? '-'} دقیقه | تغییر از شروع ${coin.growthEvent.gainPct ?? 0}%`
-        : null,
-    ].filter(Boolean);
-
-    if (coin.tradeStatus) {
-      lines.push(`📍 وضعیت معامله: ${coin.tradeStatusLabel || coin.tradeStatus}`);
-    }
-
-    if (coin.tradeStatus === 'EXIT_CONFIRMED') {
-      lines.push(`🚨 خروج: ${coin.tradeState?.exitReason || 'ریزش جدی تأیید شد'}`);
-    }
-
-    if (coin.tradeSetup) {
-      lines.push(`🎯 محدوده ورود: ${formatPrice(coin.tradeSetup.entryLow)} تا ${formatPrice(coin.tradeSetup.entryHigh)} | تأیید 5M: ${coin.tradeSetup.confirmationMet ? 'دریافت شد' : 'دریافت نشده'}`);
-      lines.push(`🛑 حد ضرر: ${formatPrice(coin.tradeSetup.stopLoss)} | TP1 ${formatPrice(coin.tradeSetup.tp1)} | RR ${coin.tradeSetup.riskReward}R`);
-    }
-
-    if (coin.evidence?.length) {
-      lines.push(`✔️ شواهد: ${coin.evidence.slice(0, 5).join('، ')}`);
-    }
-
-    if (coin.warnings?.length) {
-      lines.push(`⚠️ هشدار: ${coin.warnings.slice(0, 3).join('، ')}`);
-    }
-
-    return lines.join('\n');
+    return [
+      `${rank}. ${coin.symbol} ${rankChange} | امتیاز ${score}/100 | ${status}`,
+      `💰 ${formatPrice(number(coin.livePrice, coin.price))}${entry} | معامله: ${coin.tradeStatusLabel || coin.tradeStatus || 'نامشخص'}`,
+    ].join('\n');
   };
 
-  blocks.push(`🧱 رتبه‌بندی اول: کیفیت روند صعودی (${growth.length} مورد)\n━━━━━━━━━━━━━━━━━━`);
+  const blocks = [[
+    '🚀 GATE.IO | SUSTAINED BULLISH MOVE RADAR',
+    '━━━━━━━━━━━━━━━━━━',
+    '🎯 شناسایی روند صعودی پیوسته و زمان مناسب ورود',
+    `📌 بازارهای بررسی‌شده: ${candidates.length}`,
+    `📊 قرارداد فعال: ${stats.active} | نقدشونده: ${stats.liquid}`,
+    `🔍 بررسی موفق: ${stats.success} | خطا: ${stats.errors}`,
+    `⏱ زمان اسکن: ${(duration / 1000).toFixed(1)} ثانیه`,
+    '📄 جزئیات کامل تمام موارد رتبه‌بندی‌شده در فایل market-report.html',
+    '━━━━━━━━━━━━━━━━━━',
+  ].join('\n')];
 
-  if (!growth.length) {
-    blocks.push('موردی در فهرست روند صعودی باکیفیت نیست.');
-  }
+  blocks.push(`🧱 روندهای صعودی باکیفیت (${growth.length})\n━━━━━━━━━━━━━━━━━━`);
+
+  if (!growth.length) blocks.push('موردی در فهرست روند صعودی باکیفیت نیست.');
 
   growth.forEach((coin, index) => {
     blocks.push(makeCoinBlock(coin, index + 1, 'growth'));
   });
 
-  blocks.push(`⚡ رتبه‌بندی دوم: بهترین زمان ورود (${early.length} مورد)\n━━━━━━━━━━━━━━━━━━`);
+  blocks.push(`⚡ بهترین فرصت‌های ورود (${early.length})\n━━━━━━━━━━━━━━━━━━`);
 
-  if (!early.length) {
-    blocks.push('هنوز ارز واجد شرایط ورود وجود ندارد.');
-  }
+  if (!early.length) blocks.push('هنوز ارز واجد شرایط ورود وجود ندارد.');
 
   early.forEach((coin, index) => {
     blocks.push(makeCoinBlock(coin, index + 1, 'move'));
   });
 
-  blocks.push('━━━━━━━━━━━━━━━━━━\nℹ️ این رتبه‌بندی احتمال و کیفیت شرایط را نشان می‌دهد، نه تضمین رشد یا توصیه ورود.');
+  blocks.push('━━━━━━━━━━━━━━━━━━\nℹ️ رتبه‌بندی نشان‌دهنده کیفیت شرایط است و تضمین رشد یا توصیه قطعی ورود نیست.');
 
   return blocks.join('\n\n');
 }
+
+/* -------------------------------------------------------------------------- */
+/* HTML REPORT                                                                */
+/* -------------------------------------------------------------------------- */
+
+function escapeHtml(value) {
+  return String(value ?? '-')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function displayNumber(value, digits = 2, suffix = '') {
+  if (value == null || !Number.isFinite(Number(value))) return 'نامشخص';
+  return `${Number(value).toFixed(digits)}${suffix}`;
+}
+
+function yesNo(value) {
+  return value ? 'بله' : 'خیر';
+}
+
+function htmlRow(label, value) {
+  return `<div class="detail-row"><span class="detail-label">${escapeHtml(label)}</span><span class="detail-value">${escapeHtml(value)}</span></div>`;
+}
+
+function htmlList(items, emptyText = 'موردی ثبت نشده است') {
+  if (!Array.isArray(items) || !items.length) {
+    return `<p class="muted">${escapeHtml(emptyText)}</p>`;
+  }
+
+  return `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`;
+}
+
+function buildCoinHtml(coin, rank, category) {
+  const d = coin.derivatives || {};
+  const s = coin.structure || {};
+  const daily = coin.daily || {};
+  const setup = coin.tradeSetup;
+  const state = coin.tradeState || {};
+  const returns = coin.returns || {};
+  const volume = coin.volume || {};
+  const isGrowth = category === 'growth';
+
+  const title = isGrowth ? 'روند صعودی باکیفیت' : 'فرصت ورود';
+  const rankValue = isGrowth ? coin.growthRank : coin.moveRank;
+  const score = isGrowth ? coin.growthScore : coin.moveScore;
+
+  const status = isGrowth
+    ? ({ HIGH_POTENTIAL: 'روند صعودی باکیفیت', WATCHLIST: 'در فهرست بررسی', NORMAL: 'عادی' }[coin.growthStatus] || coin.growthStatus)
+    : ({ CONFIRMED: 'تأییدشده', EARLY: 'شروع اولیه', WATCHING: 'در حال آماده‌سازی', POTENTIAL: 'بدون تأیید' }[coin.moveStatus] || coin.moveStatus);
+
+  const returnRows = [
+    htmlRow('بازده ۱۵ دقیقه', displayNumber(returns['15m'], 2, '%')),
+    htmlRow('بازده ۱ ساعت', displayNumber(returns['1h'], 2, '%')),
+    htmlRow('بازده ۴ ساعت', displayNumber(returns['4h'], 2, '%')),
+    htmlRow('بازده روزانه', displayNumber(returns['1d'], 2, '%')),
+  ].join('');
+
+  const volumeRows = [
+    htmlRow('نسبت حجم ۱۵ دقیقه', displayNumber(volume['15m'], 2, 'x')),
+    htmlRow('نسبت حجم ۱ ساعت', displayNumber(volume['1h'], 2, 'x')),
+    htmlRow('نسبت حجم روزانه', displayNumber(volume['1d'], 2, 'x')),
+  ].join('');
+
+  const structureRows = [
+    htmlRow('امتیاز ساختار روزانه', s.daily ?? '-'),
+    htmlRow('امتیاز ساختار ۴ ساعته', s['4h'] ?? '-'),
+    htmlRow('امتیاز ساختار ۱ ساعته', s['1h'] ?? '-'),
+    htmlRow('امتیاز ساختار ۱۵ دقیقه', s['15m'] ?? '-'),
+    htmlRow('فشردگی ۴ ساعته', s.compression4h ?? '-'),
+    htmlRow('فشردگی ۱ ساعته', s.compression1h ?? '-'),
+    htmlRow('فضای مقاومت ۴ ساعته', displayNumber(s.roomToResistance4hPct, 2, '%')),
+    htmlRow('فضای مقاومت روزانه', displayNumber(s.roomToResistance1dPct, 2, '%')),
+  ].join('');
+
+  const derivativeRows = [
+    htmlRow('نسبت خرید', displayNumber(number(d.buyRatio) * 100, 2, '%')),
+    htmlRow('عدم‌تعادل جریان معاملات', displayNumber(number(d.imbalance) * 100, 2, '%')),
+    htmlRow('عدم‌تعادل خام معاملات', displayNumber(number(d.rawTradeImbalance) * 100, 2, '%')),
+    htmlRow('عدم‌تعادل تیکر', displayNumber(d.statsTakerImbalance == null ? null : d.statsTakerImbalance * 100, 2, '%')),
+    htmlRow('امتیاز جریان معاملات', d.flowScore ?? '-'),
+    htmlRow('تعداد معاملات بررسی‌شده', d.tradeCount ?? 0),
+    htmlRow('ارزش خرید', displayNumber(d.buyNotional, 2)),
+    htmlRow('ارزش فروش', displayNumber(d.sellNotional, 2)),
+    htmlRow('تغییر OI', displayNumber(d.oiChangePct, 2, '%')),
+    htmlRow('تغییر قیمت مارک', displayNumber(d.markChangePct, 2, '%')),
+    htmlRow('امتیاز OI', d.oiScore ?? '-'),
+    htmlRow('مقدار Open Interest', displayNumber(d.openInterest, 2)),
+    htmlRow('لیکوییدیشن شورت', displayNumber(d.shortLiquidations, 2)),
+    htmlRow('لیکوییدیشن لانگ', displayNumber(d.longLiquidations, 2)),
+    htmlRow('کیفیت داده مشتقات', d.dataQuality || 'نامشخص'),
+    htmlRow('تعداد نقاط آماری OI', d.statsPoints ?? 0),
+  ].join('');
+
+  const dailyRows = [
+    htmlRow('امتیاز روزانه', daily.score ?? '-'),
+    htmlRow('EMA روزانه صعودی', yesNo(daily.emaBullish)),
+    htmlRow('قیمت بالای EMA50', yesNo(daily.ema50Bullish)),
+    htmlRow('شیب EMA21 صعودی', yesNo(daily.emaSlope)),
+    htmlRow('Higher High روزانه', yesNo(daily.higherHigh)),
+    htmlRow('Higher Low روزانه', yesNo(daily.higherLow)),
+    htmlRow('شکست مقاومت ۲۰ روزه', yesNo(daily.breakout20)),
+    htmlRow('شکست مقاومت ۵۰ روزه', yesNo(daily.breakout50)),
+    htmlRow('نسبت حجم ۵ روزه', displayNumber(daily.volumeRatio5, 2, 'x')),
+    htmlRow('نسبت حجم ۱۰ روزه', displayNumber(daily.volumeRatio10, 2, 'x')),
+    htmlRow('حجم پیش‌بینی‌شده روزانه', displayNumber(daily.projectedVolumeRatio, 2, 'x')),
+    htmlRow('بازده از بازشدن کندل روزانه', displayNumber(daily.dailyOpenReturn, 2, '%')),
+  ].join('');
+
+  const tradeRows = setup ? [
+    htmlRow('نوع فرصت', coin.opportunityType || '-'),
+    htmlRow('وضعیت معامله', coin.tradeStatusLabel || coin.tradeStatus || '-'),
+    htmlRow('محدوده ورود پایین', formatPrice(setup.entryLow)),
+    htmlRow('محدوده ورود بالا', formatPrice(setup.entryHigh)),
+    htmlRow('نقطه میانی ورود', formatPrice(setup.entryMid)),
+    htmlRow('تأیید ۵ دقیقه', setup.confirmationMet ? 'تأیید شده' : 'تأیید نشده'),
+    htmlRow('شرط تأیید ورود', setup.confirmation || '-'),
+    htmlRow('حد ضرر', formatPrice(setup.stopLoss)),
+    htmlRow('هدف اول TP1', formatPrice(setup.tp1)),
+    htmlRow('هدف دوم TP2', formatPrice(setup.tp2)),
+    htmlRow('هدف سوم TP3', formatPrice(setup.tp3)),
+    htmlRow('نسبت ریسک به بازده', displayNumber(setup.riskReward, 2, 'R')),
+    htmlRow('ATR', formatPrice(setup.atr)),
+    htmlRow('حمایت محاسبه‌شده', formatPrice(setup.support)),
+    htmlRow('دلیل خروج', state.exitReason || 'ندارد'),
+    htmlRow('قیمت ورود ثبت‌شده', state.entryPrice ? formatPrice(state.entryPrice) : 'ثبت نشده'),
+    htmlRow('زمان ایجاد موقعیت', state.createdAt || 'نامشخص'),
+    htmlRow('زمان آخرین به‌روزرسانی', state.updatedAt || 'نامشخص'),
+    htmlRow('عمر موقعیت به ساعت', displayNumber(state.ageHours, 1)),
+  ].join('') : [
+    htmlRow('وضعیت معامله', coin.tradeStatusLabel || coin.tradeStatus || 'نامشخص'),
+    htmlRow('اطلاعات setup', 'برای این ارز محدوده معاملاتی محاسبه نشده است'),
+  ].join('');
+
+  const eventRows = [
+    htmlRow('وضعیت حرکت', coin.moveStatus || '-'),
+    htmlRow('نوع حرکت', coin.moveType || '-'),
+    htmlRow('شرح حرکت', coin.moveTypeLabel || '-'),
+    htmlRow('مرحله فعلی', coin.stage || '-'),
+    htmlRow('سن حرکت به کندل', coin.moveAgeBars ?? 'نامشخص'),
+    htmlRow('سن حرکت به دقیقه', coin.moveAgeMinutes ?? 'نامشخص'),
+    htmlRow('امتیاز روند', coin.growthScore ?? '-'),
+    htmlRow('امتیاز ورود', coin.moveScore ?? '-'),
+    htmlRow('رتبه روند', coin.growthRank ?? 'رتبه ندارد'),
+    htmlRow('رتبه ورود', coin.moveRank ?? 'رتبه ندارد'),
+  ].join('');
+
+  return `
+    <details class="coin-card" open>
+      <summary>
+        <span class="coin-rank">#${escapeHtml(rankValue ?? rank)}</span>
+        <span class="coin-symbol">${escapeHtml(coin.symbol)}</span>
+        <span class="coin-price">${escapeHtml(formatPrice(number(coin.livePrice, coin.price)))}</span>
+        <span class="coin-score">${escapeHtml(score)}/100</span>
+        <span class="coin-status">${escapeHtml(status)}</span>
+      </summary>
+
+      <div class="coin-content">
+        <div class="quick-grid">
+          <div class="quick-item"><span>قیمت فعلی</span><strong>${escapeHtml(formatPrice(number(coin.livePrice, coin.price)))}</strong></div>
+          <div class="quick-item"><span>امتیاز روند</span><strong>${escapeHtml(coin.growthScore)}/100</strong></div>
+          <div class="quick-item"><span>امتیاز ورود</span><strong>${escapeHtml(coin.moveScore)}/100</strong></div>
+          <div class="quick-item"><span>وضعیت معامله</span><strong>${escapeHtml(coin.tradeStatusLabel || coin.tradeStatus || '-')}</strong></div>
+        </div>
+
+        <section class="detail-section">
+          <h3>۱. وضعیت حرکت و رتبه‌بندی</h3>
+          <div class="detail-grid">${eventRows}</div>
+        </section>
+
+        <section class="detail-section">
+          <h3>۲. بازده تایم‌فریم‌ها</h3>
+          <div class="detail-grid">${returnRows}</div>
+        </section>
+
+        <section class="detail-section">
+          <h3>۳. ساختار بازار و فشردگی</h3>
+          <div class="detail-grid">${structureRows}</div>
+        </section>
+
+        <section class="detail-section">
+          <h3>۴. حجم معاملات</h3>
+          <div class="detail-grid">${volumeRows}</div>
+        </section>
+
+        <section class="detail-section">
+          <h3>۵. جریان معاملات و مشتقات</h3>
+          <div class="detail-grid">${derivativeRows}</div>
+        </section>
+
+        <section class="detail-section">
+          <h3>۶. وضعیت تایم‌فریم روزانه</h3>
+          <div class="detail-grid">${dailyRows}</div>
+        </section>
+
+        <section class="detail-section">
+          <h3>۷. محدوده ورود، حد ضرر و اهداف</h3>
+          <div class="detail-grid">${tradeRows}</div>
+        </section>
+
+        <section class="detail-section">
+          <h3>۸. شواهد صعود</h3>
+          ${htmlList(coin.evidence)}
+        </section>
+
+        <section class="detail-section warning-section">
+          <h3>۹. هشدارها و ریسک‌ها</h3>
+          ${htmlList(coin.warnings, 'هشدار مشخصی ثبت نشده است')}
+        </section>
+      </div>
+    </details>
+  `;
+}
+
+function buildHtmlReport(candidates, stats, duration, generatedAt) {
+  const growth = candidates
+    .filter((coin) => Number.isInteger(coin.growthRank) && coin.growthRank > 0)
+    .sort((a, b) => a.growthRank - b.growthRank);
+
+  const entries = candidates
+    .filter((coin) => Number.isInteger(coin.moveRank) && coin.moveRank > 0)
+    .sort((a, b) => a.moveRank - b.moveRank);
+
+  const growthHtml = growth.length
+    ? growth.map((coin, index) => buildCoinHtml(coin, index + 1, 'growth')).join('\n')
+    : '<p class="empty">در این اسکن موردی واجد شرایط این دسته نبود.</p>';
+
+  const entriesHtml = entries.length
+    ? entries.map((coin, index) => buildCoinHtml(coin, index + 1, 'move')).join('\n')
+    : '<p class="empty">در این اسکن فرصت ورود واجد شرایطی پیدا نشد.</p>';
+
+  return `<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark">
+<title>Gate.io Sustained Bullish Move Radar</title>
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #0b1020;
+  --panel: #121a2d;
+  --panel2: #19243b;
+  --border: #293650;
+  --text: #e8eefc;
+  --muted: #9baac5;
+  --green: #37d69a;
+  --blue: #62a9ff;
+  --yellow: #f4c96b;
+  --red: #ff7777;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: 24px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Tahoma, Arial, sans-serif;
+  line-height: 1.8;
+}
+.container { max-width: 1100px; margin: auto; }
+header {
+  background: linear-gradient(135deg, #172746, #142033);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 24px;
+  margin-bottom: 22px;
+}
+h1 { margin: 0 0 8px; font-size: 23px; }
+.subtitle { color: var(--muted); font-size: 13px; }
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+  margin-top: 20px;
+}
+.stat {
+  background: rgba(8, 15, 30, .55);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+}
+.stat span { display: block; color: var(--muted); font-size: 12px; }
+.stat strong { font-size: 19px; }
+.section {
+  margin: 24px 0;
+  padding: 18px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+}
+.section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 0 16px;
+  font-size: 19px;
+}
+.count {
+  background: var(--panel2);
+  color: var(--muted);
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+}
+.coin-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin: 12px 0;
+  overflow: hidden;
+  background: #0f1729;
+}
+.coin-card summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 13px 15px;
+  background: #172239;
+}
+.coin-card summary::-webkit-details-marker { display: none; }
+.coin-card summary::before {
+  content: '＋';
+  color: var(--muted);
+  font-size: 16px;
+}
+.coin-card[open] summary::before { content: '−'; }
+.coin-rank { color: var(--yellow); font-weight: bold; }
+.coin-symbol { font-weight: bold; direction: ltr; }
+.coin-price { color: var(--green); direction: ltr; }
+.coin-score { color: var(--blue); font-weight: bold; }
+.coin-status { color: var(--muted); font-size: 12px; }
+.coin-content { padding: 15px; }
+.quick-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 9px;
+  margin-bottom: 18px;
+}
+.quick-item {
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+}
+.quick-item span { display: block; color: var(--muted); font-size: 11px; }
+.quick-item strong { display: block; overflow-wrap: anywhere; }
+.detail-section {
+  border-top: 1px solid var(--border);
+  padding: 13px 0;
+}
+.detail-section h3 { margin: 0 0 10px; font-size: 14px; color: var(--blue); }
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 7px;
+}
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  background: #151f33;
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 12px;
+}
+.detail-label { color: var(--muted); }
+.detail-value { text-align: left; direction: ltr; overflow-wrap: anywhere; }
+ul { margin: 5px 0; padding-right: 22px; }
+li { margin: 4px 0; font-size: 13px; }
+.warning-section h3 { color: var(--red); }
+.warning-section li { color: #ffc0a8; }
+.muted, .empty { color: var(--muted); font-size: 13px; }
+.empty {
+  padding: 16px;
+  background: #151f33;
+  border-radius: 10px;
+}
+footer {
+  text-align: center;
+  color: var(--muted);
+  font-size: 11px;
+  padding: 20px 0;
+}
+@media (max-width: 600px) {
+  body { padding: 10px; }
+  header, .section { padding: 13px; }
+  h1 { font-size: 18px; }
+  .coin-card summary { gap: 7px; padding: 11px; }
+  .detail-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="container">
+<header>
+  <h1>🚀 گزارش تحلیل بازار Gate.io</h1>
+  <div class="subtitle">Sustained Bullish Move Radar | گزارش کامل جزئیات ارزهای رتبه‌بندی‌شده</div>
+  <div class="stats">
+    <div class="stat"><span>زمان تولید گزارش</span><strong>${escapeHtml(generatedAt)}</strong></div>
+    <div class="stat"><span>بازارهای بررسی‌شده</span><strong>${candidates.length}</strong></div>
+    <div class="stat"><span>قراردادهای فعال</span><strong>${stats.active}</strong></div>
+    <div class="stat"><span>بازارهای نقدشونده</span><strong>${stats.liquid}</strong></div>
+    <div class="stat"><span>تحلیل موفق</span><strong>${stats.success}</strong></div>
+    <div class="stat"><span>خطاها</span><strong>${stats.errors}</strong></div>
+    <div class="stat"><span>زمان اسکن</span><strong>${(duration / 1000).toFixed(1)}s</strong></div>
+  </div>
+</header>
+
+<section class="section">
+  <h2 class="section-title">🧱 روندهای صعودی باکیفیت <span class="count">${growth.length} ارز</span></h2>
+  ${growthHtml}
+</section>
+
+<section class="section">
+  <h2 class="section-title">⚡ بهترین فرصت‌های ورود <span class="count">${entries.length} ارز</span></h2>
+  ${entriesHtml}
+</section>
+
+<footer>
+  این گزارش بر اساس داده‌های دریافت‌شده در زمان اسکن ساخته شده است. رتبه‌بندی تضمین‌کننده رشد قیمت نیست.
+</footer>
+</div>
+</body>
+</html>`;
+}
+
+async function saveHtmlReport(candidates, stats, duration) {
+  const generatedAt = new Date().toLocaleString('fa-IR', {
+    dateStyle: 'full',
+    timeStyle: 'medium',
+  });
+
+  const html = buildHtmlReport(candidates, stats, duration, generatedAt);
+  await writeFile(CONFIG.HTML_REPORT_FILE, html, 'utf8');
+
+  console.log(`📄 HTML report saved: ${CONFIG.HTML_REPORT_FILE}`);
+}
+
+/* -------------------------------------------------------------------------- */
+/* MAIN                                                                       */
+/* -------------------------------------------------------------------------- */
 
 async function main() {
   const startedAt = Date.now();
@@ -1324,7 +1747,6 @@ async function main() {
   console.log('🛑 Exit requires serious short-term structure breakdown with selling confirmation.');
 
   // marketStorage.js فقط saveMarketSnapshot را export می‌کند.
-  // بازیابی trade states از این فایل انجام نمی‌شود.
   const previousTradeStates = {};
 
   const [contracts, tickers] = await Promise.all([
@@ -1468,7 +1890,6 @@ async function main() {
   }
 
   // رتبه‌بندی نهایی مستقل از خروجی storage انجام می‌شود.
-  // هیچ رتبه‌ای از storage یا مقدار undefined برای انتخاب نهایی استفاده نمی‌شود.
   const { growthRanked, moveRanked } = assignIndependentRanks(candidates);
 
   const rankedCandidates = candidates;
@@ -1505,6 +1926,13 @@ async function main() {
   console.log(`Errors: ${errors}`);
   console.log(`Duration: ${(duration / 1000).toFixed(1)}s`);
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+
+  // گزارش HTML مستقل از ارسال تلگرام ساخته می‌شود.
+  try {
+    await saveHtmlReport(rankedCandidates, stats, duration);
+  } catch (htmlError) {
+    console.error('⚠️ HTML REPORT FAILED:', htmlError);
+  }
 
   await sendReports(buildReport(rankedCandidates, stats, duration, rankChanges));
 
