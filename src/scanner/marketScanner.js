@@ -1,9 +1,20 @@
 
 /**
- * GATE.IO USDT PERPETUAL — SUSTAINED BULLISH MOVE RADAR
- * Prioritizes fresh bullish moves, strong continuation, and timely entries.
- * 4H/1H = trend continuity | 15M = move start | 5M = entry/exit timing.
- * File: src/scanner/marketScanner.js | Node.js 20+
+ * GATE.IO USDT PERPETUAL — RELATIVE STRENGTH & EARLY BULLISH RADAR
+ * ----------------------------------------------------------------
+ * One unified active list: maximum 10 coins.
+ *
+ * Ranking considers:
+ * 1. Current growth potential and higher-timeframe structure.
+ * 2. Current energy and continuation quality.
+ * 3. Each coin's progress compared with its own historical structure.
+ * 4. Entry readiness and freshness.
+ * 5. Stability: small fluctuations do not reshuffle the active list.
+ *
+ * Only this file is modified:
+ * src/scanner/marketScanner.js
+ *
+ * Node.js 20+
  */
 
 import 'dotenv/config';
@@ -12,6 +23,7 @@ import { saveMarketSnapshot } from '../storage/marketStorage.js';
 
 const CONFIG = {
   API_BASE: 'https://api.gateio.ws/api/v4',
+
   TIMEFRAMES: {
     '5m': { seconds: 300, limit: 100 },
     '15m': { seconds: 900, limit: 100 },
@@ -25,40 +37,58 @@ const CONFIG = {
   CONCURRENCY: 8,
   REQUEST_TIMEOUT: 15000,
   RETRIES: 3,
+
   TELEGRAM_MAX_LENGTH: 3500,
   TELEGRAM_DELAY: 400,
-  MIN_SCORE: 58,
+
   DERIVATIVE_TRADE_LIMIT: 100,
   DERIVATIVE_STATS_LIMIT: 12,
-  MAX_RETURN_15M: 4,
-  MAX_RETURN_1H: 6,
-  MAX_RETURN_4H: 12,
-  NEAR_ENTRY_ATR: 1.25,
-  SETUP_MAX_AGE_HOURS: { SWING: 240, 'SHORT-TERM': 72, SCALP: 24 },
 
-  // حافظه داخلی اسکنر
+  MAX_ACTIVE_AGE_MINUTES: 240,
+
+  // حافظه
   SCANNER_MEMORY_FILE: 'data/scanner-memory.json',
   WATCHLIST_RETENTION_DAYS: 30,
+  HISTORY_RETENTION_DAYS: 30,
   TRADE_STATE_RETENTION_DAYS: 11,
-  MAX_ACTIVE_AGE_MINUTES: 240,
+  ACTIVE_MEMORY_RETENTION_HOURS: 24,
+
+  // مقایسه تاریخی
+  HISTORY_MIN_INTERVAL_MINUTES: 10,
+  HISTORY_MAX_SNAPSHOTS: 300,
+  HISTORY_BASELINE_SNAPSHOTS: 24,
+
+  // برتری لازم برای جایگزینی عضو فهرست فعال
+  REPLACEMENT_PRIORITY_ADVANTAGE: 10,
+  REPLACEMENT_STRUCTURE_ADVANTAGE: 8,
+
+  // جلوگیری از تغییر رتبه با نوسان‌های کوچک
+  RANK_STABILITY_MARGIN: 5,
 
   HTML_REPORT_FILE: 'market-report.html',
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 const number = (value, fallback = 0) => {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
 };
-const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
-const average = (values) => values.length
-  ? values.reduce((a, b) => a + b, 0) / values.length
-  : 0;
+
+const clamp = (value, min, max) =>
+  Math.max(min, Math.min(max, value));
+
+const average = (values) =>
+  values.length
+    ? values.reduce((a, b) => a + b, 0) / values.length
+    : 0;
 
 const median = (values) => {
   if (!values.length) return 0;
+
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
+
   return sorted.length % 2
     ? sorted[mid]
     : (sorted[mid - 1] + sorted[mid]) / 2;
@@ -70,10 +100,14 @@ const pctChange = (current, previous) =>
     : ((current - previous) / previous) * 100;
 
 const formatPrice = (value) => {
-  if (!Number.isFinite(value)) return '-';
+  if (!Number.isFinite(Number(value))) return '-';
+
+  value = Number(value);
+
   if (value >= 1000) return value.toFixed(2);
   if (value >= 1) return value.toFixed(5);
   if (value >= 0.001) return value.toFixed(7);
+
   return value.toPrecision(5);
 };
 
@@ -81,15 +115,17 @@ const getCandleValue = (candle) =>
   candle.turnover > 0 ? candle.turnover : candle.volume;
 
 /* -------------------------------------------------------------------------- */
-/* SCANNER MEMORY                                                             */
+/* MEMORY                                                                     */
 /* -------------------------------------------------------------------------- */
 
 function createEmptyMemory() {
   return {
-    version: 1,
+    version: 3,
     updatedAt: new Date().toISOString(),
     watchlist: {},
     tradeStates: {},
+    activeList: {},
+    coinHistory: {},
   };
 }
 
@@ -101,12 +137,30 @@ async function loadScannerMemory() {
     return {
       ...createEmptyMemory(),
       ...parsed,
-      watchlist: parsed.watchlist && typeof parsed.watchlist === 'object'
-        ? parsed.watchlist
-        : {},
-      tradeStates: parsed.tradeStates && typeof parsed.tradeStates === 'object'
-        ? parsed.tradeStates
-        : {},
+
+      watchlist:
+        parsed.watchlist &&
+        typeof parsed.watchlist === 'object'
+          ? parsed.watchlist
+          : {},
+
+      tradeStates:
+        parsed.tradeStates &&
+        typeof parsed.tradeStates === 'object'
+          ? parsed.tradeStates
+          : {},
+
+      activeList:
+        parsed.activeList &&
+        typeof parsed.activeList === 'object'
+          ? parsed.activeList
+          : {},
+
+      coinHistory:
+        parsed.coinHistory &&
+        typeof parsed.coinHistory === 'object'
+          ? parsed.coinHistory
+          : {},
     };
   } catch (error) {
     if (error.code !== 'ENOENT') {
@@ -129,121 +183,6 @@ async function saveScannerMemory(memory) {
   );
 }
 
-function isWatchCandidate(coin) {
-  if (!coin) return false;
-
-  if (coin.growthScore < 62) return false;
-
-  if (coin.moveStatus === 'CONFIRMED' || coin.moveStatus === 'EARLY') {
-    return false;
-  }
-
-  const warnings = coin.warnings || [];
-
-  if (
-    warnings.some((warning) =>
-      warning.includes('فشار فروش') ||
-      warning.includes('بیش از حد کشیده')
-    )
-  ) {
-    return false;
-  }
-
-  return coin.moveStatus === 'WATCHING' || coin.moveStatus === 'POTENTIAL';
-}
-
-function updateScannerMemory(memory, candidates, activeCoins, analyzedSymbols, nowMs) {
-  const now = new Date(nowMs).toISOString();
-  const activeSymbols = new Set(activeCoins.map((coin) => coin.symbol));
-  const candidateMap = new Map(candidates.map((coin) => [coin.symbol, coin]));
-  const analyzedSet = new Set(analyzedSymbols);
-
-  const watchlist = { ...memory.watchlist };
-  const tradeStates = { ...memory.tradeStates };
-
-  const watchRetentionMs =
-    CONFIG.WATCHLIST_RETENTION_DAYS * 24 * 60 * 60 * 1000;
-
-  const tradeRetentionMs =
-    CONFIG.TRADE_STATE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
-
-  // به‌روزرسانی و پاک‌سازی Watchlist
-  for (const [symbol, item] of Object.entries(watchlist)) {
-    if (activeSymbols.has(symbol)) {
-      delete watchlist[symbol];
-      continue;
-    }
-
-    const coin = candidateMap.get(symbol);
-
-    if (analyzedSet.has(symbol)) {
-      if (coin && isWatchCandidate(coin)) {
-        watchlist[symbol] = {
-          ...item,
-          symbol,
-          lastSeen: now,
-          growthScore: coin.growthScore,
-          moveScore: coin.moveScore,
-          moveStatus: coin.moveStatus,
-          reason: coin.moveTypeLabel,
-        };
-      } else {
-        delete watchlist[symbol];
-      }
-
-      continue;
-    }
-
-    const lastSeen = Date.parse(item.lastSeen || item.firstSeen || '');
-    if (!lastSeen || nowMs - lastSeen > watchRetentionMs) {
-      delete watchlist[symbol];
-    }
-  }
-
-  // افزودن ارزهای مستعد جدید به Watchlist
-  for (const coin of candidates) {
-    if (activeSymbols.has(coin.symbol)) continue;
-    if (!isWatchCandidate(coin)) continue;
-
-    const previous = watchlist[coin.symbol];
-
-    watchlist[coin.symbol] = {
-      symbol: coin.symbol,
-      firstSeen: previous?.firstSeen || now,
-      lastSeen: now,
-      growthScore: coin.growthScore,
-      moveScore: coin.moveScore,
-      moveStatus: coin.moveStatus,
-      reason: coin.moveTypeLabel,
-    };
-  }
-
-  // ذخیره وضعیت معاملات برای بازیابی در اسکن بعدی
-  for (const coin of candidates) {
-    if (coin.tradeState) {
-      tradeStates[coin.symbol] = coin.tradeState;
-    }
-  }
-
-  // پاک‌سازی وضعیت‌های معاملاتی منقضی‌شده
-  for (const [symbol, state] of Object.entries(tradeStates)) {
-    const referenceTime = Date.parse(
-      state.createdAt || state.updatedAt || ''
-    );
-
-    if (!referenceTime || nowMs - referenceTime > tradeRetentionMs) {
-      delete tradeStates[symbol];
-    }
-  }
-
-  return {
-    version: 1,
-    updatedAt: now,
-    watchlist,
-    tradeStates,
-  };
-}
-
 /* -------------------------------------------------------------------------- */
 /* GATE API                                                                   */
 /* -------------------------------------------------------------------------- */
@@ -260,9 +199,17 @@ async function fetchJSON(url) {
 
       if (!response.ok) {
         const body = await response.text();
-        const error = new Error(`HTTP ${response.status}: ${body.slice(0, 200)}`);
+
+        const error = new Error(
+          `HTTP ${response.status}: ${body.slice(0, 200)}`
+        );
+
         error.status = response.status;
-        error.retryAfter = number(response.headers.get('Retry-After'), 0);
+        error.retryAfter = number(
+          response.headers.get('Retry-After'),
+          0
+        );
+
         throw error;
       }
 
@@ -271,14 +218,14 @@ async function fetchJSON(url) {
       lastError = error;
 
       if (attempt < CONFIG.RETRIES) {
-        await sleep(
-          error.status === 429
-            ? Math.max(
-                error.retryAfter * 1000,
-                1800 * (2 ** (attempt - 1))
-              ) + Math.floor(Math.random() * 500)
-            : 700 * attempt
-        );
+        const delay = error.status === 429
+          ? Math.max(
+              error.retryAfter * 1000,
+              1800 * (2 ** (attempt - 1))
+            ) + Math.floor(Math.random() * 500)
+          : 700 * attempt;
+
+        await sleep(delay);
       }
     }
   }
@@ -317,188 +264,6 @@ async function getContractStats(contract) {
   );
 }
 
-function analyzeDerivatives(trades, stats, contractMultiplier = 1) {
-  const nowSeconds = Date.now() / 1000;
-  const multiplier = number(contractMultiplier) > 0
-    ? number(contractMultiplier)
-    : 1;
-
-  const validTrades = Array.isArray(trades)
-    ? trades.filter((trade) => {
-        if (
-          !trade ||
-          trade.is_internal === true ||
-          number(trade.size) === 0 ||
-          number(trade.price) <= 0
-        ) {
-          return false;
-        }
-
-        const rawTime = number(
-          trade.create_time_ms,
-          number(trade.create_time)
-        );
-
-        const timestamp = rawTime > 1e12
-          ? rawTime / 1000
-          : rawTime;
-
-        return !timestamp || nowSeconds - timestamp <= 15 * 60;
-      })
-    : [];
-
-  let buyNotional = 0;
-  let sellNotional = 0;
-
-  for (const trade of validTrades) {
-    const notional =
-      Math.abs(number(trade.size)) *
-      number(trade.price) *
-      multiplier;
-
-    if (number(trade.size) > 0) buyNotional += notional;
-    else sellNotional += notional;
-  }
-
-  const totalNotional = buyNotional + sellNotional;
-
-  const buyRatio = totalNotional > 0
-    ? buyNotional / totalNotional
-    : 0.5;
-
-  const imbalance = totalNotional > 0
-    ? (buyNotional - sellNotional) / totalNotional
-    : 0;
-
-  const points = Array.isArray(stats)
-    ? stats.map((item) => ({
-        time: number(item.time),
-        oi:
-          number(item.open_interest_usd) ||
-          number(item.open_interest),
-        markPrice: number(item.mark_price),
-        longLiq: number(
-          item.long_liq_usd_new,
-          number(item.long_liq_usd)
-        ),
-        shortLiq: number(
-          item.short_liq_usd_new,
-          number(item.short_liq_usd)
-        ),
-        takerLong: number(item.long_taker_size),
-        takerShort: number(item.short_taker_size),
-        lsrTaker: number(item.lsr_taker),
-      }))
-        .filter((item) => item.time > 0 && item.oi > 0)
-        .sort((a, b) => a.time - b.time)
-    : [];
-
-  const first = points[0];
-  const last = points.at(-1);
-
-  const oiChangePct =
-    first && last && first.oi > 0
-      ? pctChange(last.oi, first.oi)
-      : null;
-
-  const markChangePct =
-    first && last && first.markPrice > 0
-      ? pctChange(last.markPrice, first.markPrice)
-      : null;
-
-  const shortLiqTotal = points.reduce(
-    (sum, item) => sum + item.shortLiq,
-    0
-  );
-
-  const longLiqTotal = points.reduce(
-    (sum, item) => sum + item.longLiq,
-    0
-  );
-
-  const latestStats = points.at(-1);
-
-  const statsTakerTotal =
-    number(latestStats?.takerLong) +
-    number(latestStats?.takerShort);
-
-  const statsTakerImbalance = statsTakerTotal > 0
-    ? (
-        number(latestStats?.takerLong) -
-        number(latestStats?.takerShort)
-      ) / statsTakerTotal
-    : null;
-
-  const combinedImbalance = statsTakerImbalance == null
-    ? imbalance
-    : clamp(
-        imbalance * 0.70 +
-        statsTakerImbalance * 0.30,
-        -1,
-        1
-      );
-
-  let flowScore = clamp(
-    50 + combinedImbalance * 65,
-    0,
-    100
-  );
-
-  let oiScore = 50;
-
-  if (oiChangePct !== null && markChangePct !== null) {
-    if (oiChangePct > 0.15 && markChangePct > 0) {
-      oiScore = clamp(
-        58 + oiChangePct * 5 + markChangePct * 2,
-        0,
-        100
-      );
-    } else if (oiChangePct < -0.15 && markChangePct > 0) {
-      oiScore = clamp(43 + oiChangePct * 3, 0, 60);
-    } else if (oiChangePct > 0.15 && markChangePct <= 0) {
-      oiScore = clamp(48 + oiChangePct * 2, 0, 65);
-    } else {
-      oiScore = clamp(50 + oiChangePct * 2, 0, 100);
-    }
-  }
-
-  const liquidationDistortion =
-    shortLiqTotal > 0 && totalNotional > 0
-      ? clamp(shortLiqTotal / totalNotional, 0, 1)
-      : 0;
-
-  flowScore = clamp(
-    flowScore - liquidationDistortion * 18,
-    0,
-    100
-  );
-
-  return {
-    tradeCount: validTrades.length,
-    buyNotional,
-    sellNotional,
-    totalNotional,
-    buyRatio,
-    imbalance: combinedImbalance,
-    rawTradeImbalance: imbalance,
-    statsTakerImbalance,
-    flowScore: Math.round(flowScore),
-    openInterest: last?.oi ?? null,
-    oiChangePct,
-    markChangePct,
-    oiScore: Math.round(oiScore),
-    shortLiquidations: shortLiqTotal,
-    longLiquidations: longLiqTotal,
-    statsPoints: points.length,
-    dataQuality:
-      validTrades.length >= 10 && points.length >= 2
-        ? 'GOOD'
-        : validTrades.length >= 5 || points.length >= 2
-          ? 'PARTIAL'
-          : 'LOW',
-  };
-}
-
 async function getCandles(
   contract,
   interval,
@@ -519,15 +284,16 @@ async function getCandles(
     throw new Error(`Invalid candle response: ${contract} ${interval}`);
   }
 
-  const candles = raw.map((c) => ({
-    time: number(c.t),
-    open: number(c.o),
-    high: number(c.h),
-    low: number(c.l),
-    close: number(c.c),
-    volume: number(c.v),
-    turnover: number(c.sum),
-  }))
+  const candles = raw
+    .map((c) => ({
+      time: number(c.t),
+      open: number(c.o),
+      high: number(c.h),
+      low: number(c.l),
+      close: number(c.c),
+      volume: number(c.v),
+      turnover: number(c.sum),
+    }))
     .filter((c) =>
       c.time > 0 &&
       c.open > 0 &&
@@ -598,6 +364,201 @@ async function mapLimit(items, limit, worker) {
   );
 
   return results;
+}
+
+/* -------------------------------------------------------------------------- */
+/* DERIVATIVES                                                                */
+/* -------------------------------------------------------------------------- */
+
+function analyzeDerivatives(
+  trades,
+  stats,
+  contractMultiplier = 1
+) {
+  const nowSeconds = Date.now() / 1000;
+
+  const multiplier = number(contractMultiplier) > 0
+    ? number(contractMultiplier)
+    : 1;
+
+  const validTrades = Array.isArray(trades)
+    ? trades.filter((trade) => {
+        if (
+          !trade ||
+          trade.is_internal === true ||
+          number(trade.size) === 0 ||
+          number(trade.price) <= 0
+        ) {
+          return false;
+        }
+
+        const rawTime = number(
+          trade.create_time_ms,
+          number(trade.create_time)
+        );
+
+        const timestamp = rawTime > 1e12
+          ? rawTime / 1000
+          : rawTime;
+
+        return !timestamp || nowSeconds - timestamp <= 15 * 60;
+      })
+    : [];
+
+  let buyNotional = 0;
+  let sellNotional = 0;
+
+  for (const trade of validTrades) {
+    const notional =
+      Math.abs(number(trade.size)) *
+      number(trade.price) *
+      multiplier;
+
+    if (number(trade.size) > 0) {
+      buyNotional += notional;
+    } else {
+      sellNotional += notional;
+    }
+  }
+
+  const totalNotional = buyNotional + sellNotional;
+
+  const buyRatio = totalNotional > 0
+    ? buyNotional / totalNotional
+    : 0.5;
+
+  const imbalance = totalNotional > 0
+    ? (buyNotional - sellNotional) / totalNotional
+    : 0;
+
+  const points = Array.isArray(stats)
+    ? stats
+        .map((item) => ({
+          time: number(item.time),
+          oi:
+            number(item.open_interest_usd) ||
+            number(item.open_interest),
+          markPrice: number(item.mark_price),
+          longLiq: number(
+            item.long_liq_usd_new,
+            number(item.long_liq_usd)
+          ),
+          shortLiq: number(
+            item.short_liq_usd_new,
+            number(item.short_liq_usd)
+          ),
+          takerLong: number(item.long_taker_size),
+          takerShort: number(item.short_taker_size),
+        }))
+        .filter((item) => item.time > 0 && item.oi > 0)
+        .sort((a, b) => a.time - b.time)
+    : [];
+
+  const first = points[0];
+  const last = points.at(-1);
+
+  const oiChangePct =
+    first && last && first.oi > 0
+      ? pctChange(last.oi, first.oi)
+      : null;
+
+  const markChangePct =
+    first && last && first.markPrice > 0
+      ? pctChange(last.markPrice, first.markPrice)
+      : null;
+
+  const shortLiqTotal = points.reduce(
+    (sum, item) => sum + item.shortLiq,
+    0
+  );
+
+  const longLiqTotal = points.reduce(
+    (sum, item) => sum + item.longLiq,
+    0
+  );
+
+  const latest = points.at(-1);
+
+  const takerTotal =
+    number(latest?.takerLong) +
+    number(latest?.takerShort);
+
+  const takerImbalance = takerTotal > 0
+    ? (
+        number(latest?.takerLong) -
+        number(latest?.takerShort)
+      ) / takerTotal
+    : null;
+
+  const combinedImbalance = takerImbalance == null
+    ? imbalance
+    : clamp(
+        imbalance * 0.7 +
+        takerImbalance * 0.3,
+        -1,
+        1
+      );
+
+  let flowScore = clamp(
+    50 + combinedImbalance * 65,
+    0,
+    100
+  );
+
+  let oiScore = 50;
+
+  if (oiChangePct !== null && markChangePct !== null) {
+    if (oiChangePct > 0.15 && markChangePct > 0) {
+      oiScore = clamp(
+        58 + oiChangePct * 5 + markChangePct * 2,
+        0,
+        100
+      );
+    } else if (oiChangePct < -0.15 && markChangePct > 0) {
+      oiScore = clamp(43 + oiChangePct * 3, 0, 60);
+    } else if (oiChangePct > 0.15 && markChangePct <= 0) {
+      oiScore = clamp(48 + oiChangePct * 2, 0, 65);
+    } else {
+      oiScore = clamp(50 + oiChangePct * 2, 0, 100);
+    }
+  }
+
+  const liquidationDistortion =
+    shortLiqTotal > 0 && totalNotional > 0
+      ? clamp(shortLiqTotal / totalNotional, 0, 1)
+      : 0;
+
+  flowScore = clamp(
+    flowScore - liquidationDistortion * 18,
+    0,
+    100
+  );
+
+  return {
+    tradeCount: validTrades.length,
+    buyNotional,
+    sellNotional,
+    totalNotional,
+    buyRatio,
+    imbalance: combinedImbalance,
+    rawTradeImbalance: imbalance,
+    statsTakerImbalance: takerImbalance,
+    flowScore: Math.round(flowScore),
+    openInterest: last?.oi ?? null,
+    oiChangePct,
+    markChangePct,
+    oiScore: Math.round(oiScore),
+    shortLiquidations: shortLiqTotal,
+    longLiquidations: longLiqTotal,
+    statsPoints: points.length,
+
+    dataQuality:
+      validTrades.length >= 10 && points.length >= 2
+        ? 'GOOD'
+        : validTrades.length >= 5 || points.length >= 2
+          ? 'PARTIAL'
+          : 'LOW',
+  };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -673,6 +634,7 @@ function findSwingPoints(candles, radius = 2) {
     i++
   ) {
     const current = candles[i];
+
     let isHigh = true;
     let isLow = true;
 
@@ -729,7 +691,7 @@ function analyzeStructure(candles) {
     ...previous.map((c) => c.high)
   );
 
-  const last = candles[candles.length - 1];
+  const last = candles.at(-1);
 
   const breakout =
     resistance > 0 &&
@@ -760,6 +722,7 @@ function analyzeTimeframe(candles) {
   if (!candles || candles.length < 30) return null;
 
   const closes = candles.map((c) => c.close);
+
   const ema9 = calculateEMA(closes, 9);
   const ema21 = calculateEMA(closes, 21);
 
@@ -776,19 +739,25 @@ function analyzeTimeframe(candles) {
     price: last.close,
     ema9: currentEma9,
     ema21: currentEma21,
+
     emaBullish:
       last.close > currentEma9 &&
       currentEma9 > currentEma21,
+
     emaSlope: currentEma21 > previousEma21,
+
     structure: analyzeStructure(candles),
     volumeRatio: getVolumeRatio(candles),
     strength: getCandleStrength(last),
+
     returns: {
       return1: pctChange(last.close, previous.close),
+
       return4: pctChange(
         last.close,
         candles[candles.length - 5].close
       ),
+
       return16: pctChange(
         last.close,
         candles[candles.length - 17].close
@@ -810,6 +779,7 @@ function analyzeDaily(candles, currentCandle, livePrice) {
   const ema50 = calculateEMA(closes, 50);
 
   const last = candles.at(-1);
+
   const previous5 = candles.slice(-6, -1);
   const previous10 = candles.slice(-11, -1);
 
@@ -988,20 +958,14 @@ function calculateCompression(candles) {
       Math.max(...recent.map((c) => c.high)) -
       Math.min(...recent.map((c) => c.low))
     ) /
-    Math.max(
-      average(recent.map((c) => c.close)),
-      1e-12
-    );
+    Math.max(average(recent.map((c) => c.close)), 1e-12);
 
   const baselineRange =
     (
       Math.max(...baseline.map((c) => c.high)) -
       Math.min(...baseline.map((c) => c.low))
     ) /
-    Math.max(
-      average(baseline.map((c) => c.close)),
-      1e-12
-    );
+    Math.max(average(baseline.map((c) => c.close)), 1e-12);
 
   const ratio = baselineRange > 0
     ? recentRange / baselineRange
@@ -1090,132 +1054,16 @@ function findRecentBreakoutAge(
     const previousClose =
       candles[index - 1]?.close ?? 0;
 
-    const wasBelowResistance =
-      previousClose <= previousResistance;
-
     if (
       candle.close > resistance &&
       candle.close > candle.open &&
-      wasBelowResistance
+      previousClose <= previousResistance
     ) {
       return lastIndex - index;
     }
   }
 
   return null;
-}
-
-/* -------------------------------------------------------------------------- */
-/* MOVE START DETECTION                                                       */
-/* -------------------------------------------------------------------------- */
-
-function detectMoveStart(
-  candles15m,
-  candles1h,
-  tf15,
-  tf1h,
-  tf4h,
-  compression
-) {
-  const age15m = findRecentBreakoutAge(
-    candles15m,
-    24,
-    12
-  );
-
-  const age1h = findRecentBreakoutAge(
-    candles1h,
-    12,
-    12
-  );
-
-  const reversal = Boolean(
-    tf1h.structure.higherLow &&
-    (
-      tf1h.structure.higherHigh ||
-      tf1h.structure.breakout
-    ) &&
-    (
-      tf15.structure.higherLow ||
-      tf15.structure.breakout
-    )
-  );
-
-  if (age15m !== null && compression.score >= 45) {
-    const status = age15m <= 1
-      ? (
-          tf1h.structure.breakout
-            ? 'CONFIRMED'
-            : 'EARLY'
-        )
-      : age15m <= 4
-        ? 'EARLY'
-        : 'LATE';
-
-    return {
-      type: 'COMPRESSION_BREAKOUT',
-      label: 'خروج از فشردگی',
-      status,
-      ageBars: age15m,
-      ageMinutes: age15m * 15,
-    };
-  }
-
-  if (reversal) {
-    const age = age1h ?? 6;
-
-    const status = age <= 2 && tf1h.structure.breakout
-      ? 'CONFIRMED'
-      : age <= 4
-        ? 'EARLY'
-        : 'LATE';
-
-    return {
-      type: 'BULLISH_REVERSAL',
-      label: 'برگشت صعودی',
-      status,
-      ageBars: age,
-      ageMinutes: age * 60,
-    };
-  }
-
-  if (age15m !== null) {
-    const status = age15m <= 2
-      ? 'WATCHING'
-      : 'LATE';
-
-    return {
-      type: 'COMPRESSION_BREAKOUT',
-      label: 'شکست محدوده',
-      status,
-      ageBars: age15m,
-      ageMinutes: age15m * 15,
-    };
-  }
-
-  if (
-    compression.score >= 65 &&
-    (
-      tf4h.emaBullish ||
-      tf4h.structure.higherLow
-    )
-  ) {
-    return {
-      type: 'COMPRESSION_WATCH',
-      label: 'آماده خروج از فشردگی',
-      status: 'WATCHING',
-      ageBars: null,
-      ageMinutes: null,
-    };
-  }
-
-  return {
-    type: 'NONE',
-    label: 'هنوز شروعی شناسایی نشده',
-    status: 'POTENTIAL',
-    ageBars: null,
-    ageMinutes: null,
-  };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1248,17 +1096,9 @@ function analyzeCoin(data) {
   const price = number(livePrice, tf15.price);
   const flow = derivatives || analyzeDerivatives([], []);
 
-  const compression15 = calculateCompression(
-    candles['15m']
-  );
-
-  const compression1h = calculateCompression(
-    candles['1h']
-  );
-
-  const compression4h = calculateCompression(
-    candles['4h']
-  );
+  const compression15 = calculateCompression(candles['15m']);
+  const compression1h = calculateCompression(candles['1h']);
+  const compression4h = calculateCompression(candles['4h']);
 
   const room4h = calculateRoomToResistance(
     candles['4h'],
@@ -1345,11 +1185,11 @@ function analyzeCoin(data) {
 
   const resistanceRoom =
     room4h.roomPct == null ||
-    room4h.roomPct >= 2.0;
+    room4h.roomPct >= 2;
 
   const noHeavyOverhead =
     room4h.roomPct == null ||
-    room4h.roomPct >= 1.0;
+    room4h.roomPct >= 1;
 
   const excessive15mRun =
     tf15.returns.return16 > 9;
@@ -1515,6 +1355,7 @@ function analyzeCoin(data) {
     !oiDanger
   ) {
     moveStatus = 'EARLY';
+
     moveType = earlyReversal
       ? 'BULLISH_REVERSAL'
       : 'EARLY_DEMAND';
@@ -1565,19 +1406,11 @@ function analyzeCoin(data) {
   if (oiHealthy && flow.oiChangePct != null) {
     evidence.push('افزایش OI بدون افت قیمت');
   }
-  if (compressionReady) {
-    evidence.push('تراکم/آماده‌سازی پیش از حرکت');
-  }
-  if (breakoutFresh !== null) {
-    evidence.push('شکست تازه در 15M');
-  }
-  if (breakout1hFresh !== null) {
-    evidence.push('شکست تازه در 1H');
-  }
+  if (compressionReady) evidence.push('تراکم/آماده‌سازی پیش از حرکت');
+  if (breakoutFresh !== null) evidence.push('شکست تازه در 15M');
+  if (breakout1hFresh !== null) evidence.push('شکست تازه در 1H');
 
-  if (bearishFlow) {
-    warnings.push('فشار فروش در جریان معاملات');
-  }
+  if (bearishFlow) warnings.push('فشار فروش در جریان معاملات');
 
   if (oiDanger) {
     warnings.push(
@@ -1601,11 +1434,66 @@ function analyzeCoin(data) {
     );
   }
 
+  // امتیاز ساختار مستقل از هیجان کندل‌های کوتاه‌مدت
+  const structuralScore = Math.round(clamp(
+    daily.score * 0.15 +
+    (trend4h ? 90 : 40) * 0.35 +
+    (trend1h ? 90 : 40) * 0.30 +
+    (trend15m ? 85 : 40) * 0.20,
+    0,
+    100
+  ));
+
+  // پتانسیل رشد میان‌مدت؛ وزن تایم‌فریم‌های بزرگ‌تر بیشتر است
+  const potentialScore = Math.round(clamp(
+    daily.score * 0.30 +
+    (trend4h ? 90 : 35) * 0.35 +
+    (trend1h ? 85 : 35) * 0.15 +
+    room4h.score * 0.12 +
+    compression4h.score * 0.08,
+    0,
+    100
+  ));
+
+  // انرژی حرکت؛ حجم، جریان خریداران و OI
+  const volumeEnergy = clamp(
+    35 +
+    Math.max(0, volume15 - 1) * 22 +
+    Math.max(0, volume1h - 1) * 18,
+    0,
+    100
+  );
+
+  const energyScore = Math.round(clamp(
+    volumeEnergy * 0.35 +
+    flow.flowScore * 0.35 +
+    flow.oiScore * 0.15 +
+    (impulseQuality ? 15 : 0),
+    0,
+    100
+  ));
+
+  const entryQualityScore = Math.round(clamp(
+    moveScore * 0.55 +
+    room4h.score * 0.25 +
+    (noHeavyOverhead ? 15 : 0) -
+    (overheated ? 25 : 0) -
+    (bearishFlow ? 20 : 0),
+    0,
+    100
+  ));
+
   return {
     symbol,
+
     score: growthScore,
     growthScore,
     moveScore,
+
+    structuralScore,
+    potentialScore,
+    energyScore,
+    entryQualityScore,
 
     growthStatus:
       trendScore >= 75
@@ -1657,10 +1545,30 @@ function analyzeCoin(data) {
       '4h': Math.round(trend4h ? 85 : 45),
       '1h': Math.round(trend1h ? 85 : 45),
       '15m': Math.round(trend15m ? 85 : 45),
+
       compression4h: compression4h.score,
       compression1h: compression1h.score,
+
       roomToResistance4hPct: room4h.roomPct,
       roomToResistance1dPct: room1d.roomPct,
+
+      higherHigh4h: structure4h.higherHigh,
+      higherLow4h: structure4h.higherLow,
+      higherHigh1h: structure1h.higherHigh,
+      higherLow1h: structure1h.higherLow,
+    },
+
+    flags: {
+      structuralDamage,
+      overheated,
+      bearishFlow,
+      oiDanger,
+      trend4h,
+      trend1h,
+      trend15m,
+      flowPositive,
+      flowStrong,
+      impulseQuality,
     },
 
     evidence,
@@ -1672,10 +1580,12 @@ function analyzeCoin(data) {
         emaBullish: tf15.emaBullish,
         structure: tf15.structure,
       },
+
       tf1h: {
         emaBullish: tf1h.emaBullish,
         structure: tf1h.structure,
       },
+
       tf4h: {
         emaBullish: tf4h.emaBullish,
         emaSlope: tf4h.emaSlope,
@@ -1686,7 +1596,181 @@ function analyzeCoin(data) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* TRADE SETUP AND EXIT                                                       */
+/* HISTORY: EACH COIN COMPARED WITH ITS OWN PAST                              */
+/* -------------------------------------------------------------------------- */
+
+function calculateRelativeSelfStrength(coin, previousSnapshots) {
+  if (!previousSnapshots.length) {
+    return {
+      score: 50,
+      improvement: 0,
+      retention: 1,
+      consistency: 0.5,
+      historyCount: 0,
+      label: 'سابقه در حال تشکیل',
+    };
+  }
+
+  const baseline = previousSnapshots.slice(
+    -CONFIG.HISTORY_BASELINE_SNAPSHOTS
+  );
+
+  const averageStructure = average(
+    baseline.map((item) => number(item.structuralScore))
+  );
+
+  const averageEnergy = average(
+    baseline.map((item) => number(item.energyScore))
+  );
+
+  const averagePotential = average(
+    baseline.map((item) => number(item.potentialScore))
+  );
+
+  const bestStructure = Math.max(
+    ...previousSnapshots.map((item) =>
+      number(item.structuralScore)
+    )
+  );
+
+  const improvement =
+    coin.structuralScore - averageStructure;
+
+  const energyImprovement =
+    coin.energyScore - averageEnergy;
+
+  const potentialImprovement =
+    coin.potentialScore - averagePotential;
+
+  const retention = bestStructure > 0
+    ? coin.structuralScore / bestStructure
+    : 1;
+
+  const consistency = baseline.length
+    ? baseline.filter((item) =>
+        number(item.structuralScore) >= 55
+      ).length / baseline.length
+    : 0.5;
+
+  const score = clamp(
+    50 +
+    clamp(improvement * 0.65, -18, 18) +
+    clamp(energyImprovement * 0.20, -8, 8) +
+    clamp(potentialImprovement * 0.15, -6, 6) +
+    clamp((retention - 0.75) * 24, -12, 6) +
+    clamp((consistency - 0.5) * 12, -6, 6),
+    0,
+    100
+  );
+
+  let label = 'قدرت نسبتاً پایدار';
+
+  if (score >= 68 && improvement > 3) {
+    label = 'تقویت نسبت به گذشته';
+  } else if (score <= 38 && improvement < -5) {
+    label = 'فرسایش قدرت نسبت به گذشته';
+  } else if (retention < 0.75) {
+    label = 'فاصله از بهترین ساختار قبلی';
+  }
+
+  return {
+    score: Math.round(score),
+    improvement: Number(improvement.toFixed(2)),
+    energyImprovement: Number(energyImprovement.toFixed(2)),
+    potentialImprovement: Number(potentialImprovement.toFixed(2)),
+    retention: Number(retention.toFixed(3)),
+    consistency: Number(consistency.toFixed(3)),
+    historyCount: previousSnapshots.length,
+    label,
+  };
+}
+
+function updateCoinHistory(memory, candidates, analyzedSymbols, nowMs) {
+  const history = { ...memory.coinHistory };
+
+  const retentionMs =
+    CONFIG.HISTORY_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+
+  const minimumIntervalMs =
+    CONFIG.HISTORY_MIN_INTERVAL_MINUTES * 60 * 1000;
+
+  for (const symbol of analyzedSymbols) {
+    const coin = candidates.find(
+      (item) => item.symbol === symbol
+    );
+
+    if (!coin) continue;
+
+    const oldSnapshots = Array.isArray(history[symbol])
+      ? history[symbol]
+      : [];
+
+    const validSnapshots = oldSnapshots.filter((item) => {
+      const timestamp = Date.parse(item.time || '');
+
+      return timestamp > 0 &&
+        nowMs - timestamp <= retentionMs;
+    });
+
+    // مقایسه فقط با سابقه قبلی؛ snapshot فعلی هنوز وارد محاسبه نشده است.
+    const relative = calculateRelativeSelfStrength(
+      coin,
+      validSnapshots
+    );
+
+    coin.relativeSelf = relative;
+
+    const lastSnapshot = validSnapshots.at(-1);
+    const lastTime = Date.parse(lastSnapshot?.time || '');
+
+    const shouldSave =
+      !lastTime ||
+      nowMs - lastTime >= minimumIntervalMs;
+
+    if (shouldSave) {
+      validSnapshots.push({
+        time: new Date(nowMs).toISOString(),
+        structuralScore: coin.structuralScore,
+        potentialScore: coin.potentialScore,
+        energyScore: coin.energyScore,
+        growthScore: coin.growthScore,
+        moveScore: coin.moveScore,
+        moveStatus: coin.moveStatus,
+      });
+    }
+
+    history[symbol] = validSnapshots.slice(
+      -CONFIG.HISTORY_MAX_SNAPSHOTS
+    );
+  }
+
+  // پاک‌سازی سابقه ارزهایی که مدت زیادی داده‌ای از آن‌ها نرسیده است.
+  for (const [symbol, snapshots] of Object.entries(history)) {
+    const valid = (Array.isArray(snapshots) ? snapshots : [])
+      .filter((item) => {
+        const timestamp = Date.parse(item.time || '');
+
+        return timestamp > 0 &&
+          nowMs - timestamp <= retentionMs;
+      });
+
+    if (valid.length) {
+      history[symbol] = valid.slice(
+        -CONFIG.HISTORY_MAX_SNAPSHOTS
+      );
+    } else {
+      delete history[symbol];
+    }
+  }
+
+  return {
+    ...memory,
+    coinHistory: history,
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* TRADE SETUP                                                                */
 /* -------------------------------------------------------------------------- */
 
 function calculateATR(candles, period = 14) {
@@ -1717,10 +1801,11 @@ function calculateATR(candles, period = 14) {
 function classifyOpportunity(coin) {
   if (coin.growthScore >= 75) return 'SWING';
   if (coin.growthScore >= 58) return 'SHORT-TERM';
+
   return 'SCALP';
 }
 
-function buildTradeSetup(coin, candles15m) {
+function buildTradeSetup(coin, candles15m, candles5m) {
   const price = number(coin.livePrice, coin.price);
   const atr = calculateATR(candles15m, 14);
 
@@ -1737,11 +1822,10 @@ function buildTradeSetup(coin, candles15m) {
     ema21,
     ...swingPoints.lows,
   ]
-    .filter(
-      (level) =>
-        level > 0 &&
-        level < price &&
-        price - level <= atr * 3.5
+    .filter((level) =>
+      level > 0 &&
+      level < price &&
+      price - level <= atr * 3.5
     )
     .sort((a, b) => b - a);
 
@@ -1783,8 +1867,8 @@ function buildTradeSetup(coin, candles15m) {
   const tp2 = target(2.5, 1);
   const tp3 = target(4, 2);
 
-  const last5m = coin._candles5m?.at(-1);
-  const previous5m = coin._candles5m?.at(-2);
+  const last5m = candles5m.at(-1);
+  const previous5m = candles5m.at(-2);
 
   const strength5m = last5m
     ? getCandleStrength(last5m)
@@ -1809,6 +1893,7 @@ function buildTradeSetup(coin, candles15m) {
       'کندل بسته‌شده ۵ دقیقه‌ای باید محدوده ورود را لمس کند، صعودی بسته شود و سقف کندل قبلی را بشکند.',
 
     confirmationMet: bouncedFromZone,
+
     stopLoss,
     tp1,
     tp2,
@@ -1840,11 +1925,7 @@ function isSameSetup(previous, setup, opportunityType) {
   return Math.abs(newMid - oldMid) / oldMid <= 0.012;
 }
 
-function detectSeriousDecline(
-  candles5m,
-  candles15m,
-  flow
-) {
+function detectSeriousDecline(candles5m, candles15m, flow) {
   if (
     !Array.isArray(candles5m) ||
     candles5m.length < 25 ||
@@ -1940,14 +2021,10 @@ function updateTradeState(
     ? previousState
     : null;
 
-  const price = number(
-    coin.livePrice,
-    coin.price
-  );
-
+  const price = number(coin.livePrice, coin.price);
   const now = new Date(nowMs).toISOString();
 
-  const statusLabels = {
+  const labels = {
     ENTRY_CONFIRMED: 'ورود تأیید شده',
     NEAR_ENTRY: 'نزدیک ورود',
     WAITING: 'در انتظار',
@@ -1962,8 +2039,9 @@ function updateTradeState(
       symbol: coin.symbol,
       opportunityType,
       status: 'WAITING',
-      statusLabel: statusLabels.WAITING,
+      statusLabel: labels.WAITING,
       setup: null,
+      createdAt: now,
       updatedAt: now,
     };
   }
@@ -1974,8 +2052,11 @@ function updateTradeState(
     'EXPIRED',
   ]);
 
-  const maxAgeHours =
-    CONFIG.SETUP_MAX_AGE_HOURS[opportunityType] || 72;
+  const maxAgeHours = {
+    SWING: 240,
+    'SHORT-TERM': 72,
+    SCALP: 24,
+  }[opportunityType] || 72;
 
   const createdAt = previous?.createdAt || now;
 
@@ -2054,8 +2135,8 @@ function updateTradeState(
     enteredAt = now;
     entryPrice = price;
   } else if (
-    price >= setup.entryLow - setup.atr * CONFIG.NEAR_ENTRY_ATR &&
-    price <= setup.entryHigh + setup.atr * CONFIG.NEAR_ENTRY_ATR
+    price >= setup.entryLow - setup.atr * 1.25 &&
+    price <= setup.entryHigh + setup.atr * 1.25
   ) {
     status = 'NEAR_ENTRY';
   } else {
@@ -2066,16 +2147,429 @@ function updateTradeState(
     symbol: coin.symbol,
     opportunityType,
     status,
-    statusLabel: statusLabels[status] || status,
+    statusLabel: labels[status] || status,
     setup,
     createdAt,
     updatedAt: now,
     enteredAt,
     entryPrice,
     exitReason,
-    ageHours: Number(
-      Math.max(0, ageHours).toFixed(1)
-    ),
+    ageHours: Number(Math.max(0, ageHours).toFixed(1)),
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* ACTIVE CANDIDATES AND UNIFIED PRIORITY                                     */
+/* -------------------------------------------------------------------------- */
+
+function isActiveCandidate(coin) {
+  if (!coin) return false;
+
+  if (
+    coin.moveStatus !== 'CONFIRMED' &&
+    coin.moveStatus !== 'EARLY'
+  ) {
+    return false;
+  }
+
+  if (number(coin.moveScore) < 65) return false;
+  if (number(coin.growthScore) < 58) return false;
+
+  const flags = coin.flags || {};
+
+  if (
+    flags.structuralDamage ||
+    flags.bearishFlow ||
+    flags.overheated ||
+    flags.oiDanger
+  ) {
+    return false;
+  }
+
+  if (
+    coin.moveAgeMinutes != null &&
+    coin.moveAgeMinutes > CONFIG.MAX_ACTIVE_AGE_MINUTES
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function calculateActivePriority(coin) {
+  const age = coin.moveAgeMinutes;
+
+  const freshness = age == null
+    ? 65
+    : clamp(
+        100 -
+        (age / CONFIG.MAX_ACTIVE_AGE_MINUTES) * 100,
+        0,
+        100
+      );
+
+  const relativeScore =
+    number(coin.relativeSelf?.score, 50);
+
+  return Number((
+    number(coin.potentialScore) * 0.28 +
+    number(coin.structuralScore) * 0.24 +
+    relativeScore * 0.18 +
+    number(coin.energyScore) * 0.14 +
+    number(coin.entryQualityScore) * 0.11 +
+    freshness * 0.05
+  ).toFixed(2));
+}
+
+function calculateStructuralAdvantage(coin) {
+  return (
+    number(coin.structuralScore) * 0.45 +
+    number(coin.potentialScore) * 0.40 +
+    number(coin.relativeSelf?.score, 50) * 0.15
+  );
+}
+
+function stableSortByPriority(coins, previousActiveList) {
+  const sorted = [...coins].sort((a, b) =>
+    b.activePriority - a.activePriority
+  );
+
+  const previousRank = new Map(
+    Object.entries(previousActiveList || {})
+      .map(([symbol, item]) => [
+        symbol,
+        number(item.rank, 999),
+      ])
+  );
+
+  // مرتب‌سازی پایدار: اختلاف‌های کوچک باعث جابه‌جایی رتبه نمی‌شوند.
+  for (let i = 1; i < sorted.length; i++) {
+    let j = i;
+
+    while (j > 0) {
+      const current = sorted[j];
+      const previous = sorted[j - 1];
+
+      const difference =
+        current.activePriority - previous.activePriority;
+
+      if (
+        difference <= CONFIG.RANK_STABILITY_MARGIN
+      ) {
+        const currentOldRank =
+          previousRank.get(current.symbol) ?? 999;
+
+        const previousOldRank =
+          previousRank.get(previous.symbol) ?? 999;
+
+        if (currentOldRank < previousOldRank) {
+          [sorted[j - 1], sorted[j]] =
+            [sorted[j], sorted[j - 1]];
+
+          j--;
+          continue;
+        }
+      }
+
+      break;
+    }
+  }
+
+  return sorted;
+}
+
+function assignStableRanks(candidates, previousMemory, nowMs) {
+  const previousActiveList =
+    previousMemory.activeList || {};
+
+  const eligible = candidates
+    .filter(isActiveCandidate)
+    .map((coin) => {
+      coin.activePriority = calculateActivePriority(coin);
+
+      coin.structuralPriority =
+        calculateStructuralAdvantage(coin);
+
+      return coin;
+    });
+
+  const bySymbol = new Map(
+    eligible.map((coin) => [coin.symbol, coin])
+  );
+
+  const previousEntries = Object.entries(previousActiveList)
+    .map(([symbol, item]) => ({
+      symbol,
+      item,
+      coin: bySymbol.get(symbol),
+    }))
+    .filter(({ item }) => {
+      const lastSeen = Date.parse(
+        item.lastSeen || item.firstSeen || ''
+      );
+
+      return lastSeen > 0 &&
+        nowMs - lastSeen <=
+          CONFIG.ACTIVE_MEMORY_RETENTION_HOURS * 3600000;
+    });
+
+  // عضو قبلی فقط در صورت تحلیل موفق و واجد شرایط بودن حفظ می‌شود.
+  const incumbents = previousEntries
+    .filter(({ coin }) => Boolean(coin))
+    .map(({ coin }) => coin);
+
+  const selected = [];
+  const selectedSymbols = new Set();
+
+  // حفظ اعضای قبلی واجد شرایط؛ حضور قبلی هیچ امتیازی به آن‌ها نمی‌دهد.
+  for (const coin of incumbents) {
+    if (selected.length >= CONFIG.TOP_COUNT) break;
+
+    if (!selectedSymbols.has(coin.symbol)) {
+      selected.push(coin);
+      selectedSymbols.add(coin.symbol);
+    }
+  }
+
+  const challengers = eligible
+    .filter((coin) => !selectedSymbols.has(coin.symbol))
+    .sort((a, b) =>
+      b.activePriority - a.activePriority
+    );
+
+  // ورود عضو جدید فقط با برتری واقعی نسبت به ضعیف‌ترین عضو فعلی.
+  for (const challenger of challengers) {
+    if (selected.length < CONFIG.TOP_COUNT) {
+      selected.push(challenger);
+      selectedSymbols.add(challenger.symbol);
+      continue;
+    }
+
+    const weakest = [...selected].sort(
+      (a, b) => a.activePriority - b.activePriority
+    )[0];
+
+    const priorityAdvantage =
+      challenger.activePriority - weakest.activePriority;
+
+    const structuralAdvantage =
+      challenger.structuralPriority - weakest.structuralPriority;
+
+    if (
+      priorityAdvantage >=
+        CONFIG.REPLACEMENT_PRIORITY_ADVANTAGE &&
+      structuralAdvantage >=
+        CONFIG.REPLACEMENT_STRUCTURE_ADVANTAGE
+    ) {
+      const index = selected.findIndex(
+        (coin) => coin.symbol === weakest.symbol
+      );
+
+      selected[index] = challenger;
+
+      selectedSymbols.delete(weakest.symbol);
+      selectedSymbols.add(challenger.symbol);
+    }
+  }
+
+  const ranked = stableSortByPriority(
+    selected,
+    previousActiveList
+  );
+
+  ranked.forEach((coin, index) => {
+    coin.activeRank = index + 1;
+  });
+
+  const activeList = {};
+
+  for (const coin of ranked) {
+    const previous = previousActiveList[coin.symbol];
+
+    activeList[coin.symbol] = {
+      symbol: coin.symbol,
+      rank: coin.activeRank,
+      activePriority: coin.activePriority,
+      structuralPriority: coin.structuralPriority,
+      structuralScore: coin.structuralScore,
+      potentialScore: coin.potentialScore,
+      relativeSelfScore: coin.relativeSelf?.score ?? 50,
+      firstSeen: previous?.firstSeen || new Date(nowMs).toISOString(),
+      lastSeen: new Date(nowMs).toISOString(),
+      moveStatus: coin.moveStatus,
+      snapshot: {
+        growthScore: coin.growthScore,
+        moveScore: coin.moveScore,
+        energyScore: coin.energyScore,
+      },
+    };
+  }
+
+  // اگر داده یک ارز موقتاً دریافت نشد، حافظه‌اش فوراً حذف نمی‌شود.
+  for (const [symbol, item] of Object.entries(previousActiveList)) {
+    if (activeList[symbol]) continue;
+
+    const lastSeen = Date.parse(
+      item.lastSeen || item.firstSeen || ''
+    );
+
+    if (
+      lastSeen > 0 &&
+      nowMs - lastSeen <=
+        CONFIG.ACTIVE_MEMORY_RETENTION_HOURS * 3600000 &&
+      !candidates.some((coin) => coin.symbol === symbol)
+    ) {
+      activeList[symbol] = item;
+    }
+  }
+
+  return {
+    activeRanked: ranked,
+    activeList,
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* WATCHLIST AND MEMORY UPDATE                                                */
+/* -------------------------------------------------------------------------- */
+
+function isWatchCandidate(coin) {
+  if (!coin) return false;
+
+  if (
+    coin.moveStatus !== 'WATCHING' &&
+    coin.moveStatus !== 'POTENTIAL'
+  ) {
+    return false;
+  }
+
+  if (number(coin.growthScore) < 52) return false;
+
+  const flags = coin.flags || {};
+
+  if (
+    flags.structuralDamage ||
+    flags.bearishFlow ||
+    flags.overheated
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function updateScannerMemory(
+  memory,
+  candidates,
+  activeList,
+  analyzedSymbols,
+  nowMs
+) {
+  const now = new Date(nowMs).toISOString();
+
+  const activeSymbols = new Set(
+    Object.keys(activeList)
+  );
+
+  const candidateMap = new Map(
+    candidates.map((coin) => [coin.symbol, coin])
+  );
+
+  const analyzedSet = new Set(analyzedSymbols);
+
+  const watchlist = { ...memory.watchlist };
+  const tradeStates = { ...memory.tradeStates };
+
+  const watchRetentionMs =
+    CONFIG.WATCHLIST_RETENTION_DAYS * 86400000;
+
+  const tradeRetentionMs =
+    CONFIG.TRADE_STATE_RETENTION_DAYS * 86400000;
+
+  for (const [symbol, item] of Object.entries(watchlist)) {
+    if (activeSymbols.has(symbol)) {
+      delete watchlist[symbol];
+      continue;
+    }
+
+    const coin = candidateMap.get(symbol);
+
+    if (analyzedSet.has(symbol)) {
+      if (coin && isWatchCandidate(coin)) {
+        watchlist[symbol] = {
+          ...item,
+          symbol,
+          lastSeen: now,
+          growthScore: coin.growthScore,
+          moveScore: coin.moveScore,
+          structuralScore: coin.structuralScore,
+          potentialScore: coin.potentialScore,
+          energyScore: coin.energyScore,
+          moveStatus: coin.moveStatus,
+          reason: coin.moveTypeLabel,
+        };
+      } else {
+        delete watchlist[symbol];
+      }
+
+      continue;
+    }
+
+    const lastSeen = Date.parse(
+      item.lastSeen || item.firstSeen || ''
+    );
+
+    if (!lastSeen || nowMs - lastSeen > watchRetentionMs) {
+      delete watchlist[symbol];
+    }
+  }
+
+  for (const coin of candidates) {
+    if (activeSymbols.has(coin.symbol)) continue;
+    if (!isWatchCandidate(coin)) continue;
+
+    const previous = watchlist[coin.symbol];
+
+    watchlist[coin.symbol] = {
+      symbol: coin.symbol,
+      firstSeen: previous?.firstSeen || now,
+      lastSeen: now,
+      growthScore: coin.growthScore,
+      moveScore: coin.moveScore,
+      structuralScore: coin.structuralScore,
+      potentialScore: coin.potentialScore,
+      energyScore: coin.energyScore,
+      moveStatus: coin.moveStatus,
+      reason: coin.moveTypeLabel,
+    };
+  }
+
+  for (const coin of candidates) {
+    if (coin.tradeState) {
+      tradeStates[coin.symbol] = coin.tradeState;
+    }
+  }
+
+  for (const [symbol, state] of Object.entries(tradeStates)) {
+    const referenceTime = Date.parse(
+      state.createdAt || state.updatedAt || ''
+    );
+
+    if (
+      !referenceTime ||
+      nowMs - referenceTime > tradeRetentionMs
+    ) {
+      delete tradeStates[symbol];
+    }
+  }
+
+  return {
+    version: 3,
+    updatedAt: now,
+    watchlist,
+    tradeStates,
+    activeList,
+    coinHistory: memory.coinHistory || {},
   };
 }
 
@@ -2110,6 +2604,7 @@ async function sendTelegram(message) {
   );
 
   const raw = await response.text();
+
   let result;
 
   try {
@@ -2125,6 +2620,7 @@ async function sendTelegram(message) {
     );
 
     error.retryAfter = result?.parameters?.retry_after;
+
     throw error;
   }
 }
@@ -2202,239 +2698,54 @@ async function sendReports(report) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* ACTIVE LIST RANKING                                                        */
+/* UNIFIED REPORT                                                             */
 /* -------------------------------------------------------------------------- */
 
-function isActiveCandidate(coin) {
-  if (!coin) return false;
+function buildReport(candidates, stats, duration, activeRanked) {
+  const blocks = [
+    [
+      '🚀 GATE.IO | RELATIVE STRENGTH BULLISH RADAR',
+      '━━━━━━━━━━━━━━━━━━',
+      '🏆 بهترین فرصت‌های صعود؛ رتبه‌بندی یکپارچه',
+      `📌 بازارهای بررسی‌شده: ${candidates.length}`,
+      `📊 قرارداد فعال: ${stats.active} | نقدشونده: ${stats.liquid}`,
+      `🔍 بررسی موفق: ${stats.success} | خطا: ${stats.errors}`,
+      `⚡ فهرست فعال: ${activeRanked.length} از ${CONFIG.TOP_COUNT}`,
+      `⏱ زمان اسکن: ${(duration / 1000).toFixed(1)} ثانیه`,
+      '📄 جزئیات کامل در فایل market-report.html',
+      '━━━━━━━━━━━━━━━━━━',
+    ].join('\n'),
+  ];
 
-  if (
-    coin.moveStatus !== 'CONFIRMED' &&
-    coin.moveStatus !== 'EARLY'
-  ) {
-    return false;
-  }
-
-  if (
-    !Number.isFinite(Number(coin.moveScore)) ||
-    Number(coin.moveScore) < 65
-  ) {
-    return false;
-  }
-
-  if (
-    !Number.isFinite(Number(coin.growthScore)) ||
-    Number(coin.growthScore) < 58
-  ) {
-    return false;
-  }
-
-  const warnings = coin.warnings || [];
-
-  // حرکت بیش‌ازحد کشیده یا فشار فروش، فرصت فعال محسوب نمی‌شود.
-  if (
-    warnings.some((warning) =>
-      warning.includes('فشار فروش') ||
-      warning.includes('بیش از حد کشیده')
-    )
-  ) {
-    return false;
-  }
-
-  // حرکت‌های قدیمی وارد فهرست فعال نمی‌شوند.
-  if (
-    coin.moveAgeMinutes != null &&
-    coin.moveAgeMinutes > CONFIG.MAX_ACTIVE_AGE_MINUTES
-  ) {
-    return false;
-  }
-
-  return true;
-}
-
-function calculateActivePriority(coin) {
-  const age = coin.moveAgeMinutes;
-
-  const freshness = age == null
-    ? 65
-    : clamp(
-        100 -
-        (age / CONFIG.MAX_ACTIVE_AGE_MINUTES) * 100,
-        0,
-        100
-      );
-
-  return (
-    number(coin.moveScore) * 0.55 +
-    number(coin.growthScore) * 0.35 +
-    freshness * 0.10
-  );
-}
-
-function assignIndependentRanks(candidates) {
-  for (const coin of candidates) {
-    coin.growthRank = null;
-    coin.moveRank = null;
-    coin.activeRank = null;
-  }
-
-  // فقط یک فهرست فعال وجود دارد؛ حداکثر ۱۰ ارز.
-  const activeRanked = candidates
-    .filter(isActiveCandidate)
-    .sort((a, b) =>
-      calculateActivePriority(b) -
-      calculateActivePriority(a)
-    )
-    .slice(0, CONFIG.TOP_COUNT);
-
-  const growthRanked = [];
-  const moveRanked = [];
-
-  activeRanked.forEach((coin, index) => {
-    coin.activeRank = index + 1;
-
-    // تقسیم گزارش به دو بخش قبلی، بدون تکرار ارزها.
-    if (coin.growthScore >= 75) {
-      coin.growthRank = growthRanked.length + 1;
-      growthRanked.push(coin);
-    } else {
-      coin.moveRank = moveRanked.length + 1;
-      moveRanked.push(coin);
-    }
-  });
-
-  return {
-    activeRanked,
-    growthRanked,
-    moveRanked,
-  };
-}
-
-/* -------------------------------------------------------------------------- */
-/* REPORT                                                                     */
-/* -------------------------------------------------------------------------- */
-
-function buildReport(
-  candidates,
-  stats,
-  duration,
-  rankChanges = null
-) {
-  const growth = candidates
-    .filter((coin) =>
-      Number.isInteger(coin.growthRank) &&
-      coin.growthRank >= 1 &&
-      coin.growthRank <= CONFIG.TOP_COUNT
-    )
-    .sort((a, b) => a.growthRank - b.growthRank);
-
-  const early = candidates
-    .filter((coin) =>
-      Number.isInteger(coin.moveRank) &&
-      coin.moveRank >= 1 &&
-      coin.moveRank <= CONFIG.TOP_COUNT
-    )
-    .sort((a, b) => a.moveRank - b.moveRank);
-
-  const activeCount = growth.length + early.length;
-
-  const rankIcon = (changes, key, symbol) => {
-    const item = changes?.[symbol]?.[key];
-
-    if (!item || item.status === 'NEW') return '🆕';
-    if (item.change > 0) return `🟢↑${item.change}`;
-    if (item.change < 0) return `🔴↓${Math.abs(item.change)}`;
-
-    return '➖';
-  };
-
-  const statusLabel = (coin) => ({
-    HIGH_POTENTIAL: 'روند باکیفیت',
-    WATCHLIST: 'روند در حال شکل‌گیری',
-    NORMAL: 'شرایط ناکافی',
-  }[coin.growthStatus] || coin.growthStatus);
-
-  const moveLabel = (coin) => ({
-    CONFIRMED: 'موج تأییدشده',
-    EARLY: 'شروع اولیه',
-    WATCHING: 'آماده‌سازی',
-    POTENTIAL: 'بدون تأیید شروع',
-    INVALIDATED: 'ابطال‌شده',
-    LATE: 'حرکت انجام‌شده',
-  }[coin.moveStatus] || coin.moveStatus);
-
-  const makeCoinBlock = (coin, rank, kind) => {
-    const isGrowth = kind === 'growth';
-
-    const score = isGrowth
-      ? coin.growthScore
-      : coin.moveScore;
-
-    const rankChange = rankIcon(
-      rankChanges,
-      isGrowth ? 'growth' : 'move',
-      coin.symbol
+  if (!activeRanked.length) {
+    blocks.push(
+      'در این اسکن هیچ ارز واجد شرایط فهرست فعال نشد.'
     );
+  }
 
-    const status = isGrowth
-      ? statusLabel(coin)
-      : moveLabel(coin);
-
+  for (const coin of activeRanked) {
     const setup = coin.tradeSetup;
+    const relative = coin.relativeSelf || {};
 
     const entry = setup
-      ? ` | ورود ${formatPrice(setup.entryLow)}-${formatPrice(setup.entryHigh)}`
+      ? `\n🎯 محدوده ورود: ${formatPrice(setup.entryLow)} تا ${formatPrice(setup.entryHigh)}`
       : '';
 
-    return [
-      `${rank}. ${coin.symbol} ${rankChange} | امتیاز ${score}/100 | ${status}`,
-      `💰 ${formatPrice(number(coin.livePrice, coin.price))}${entry} | معامله: ${coin.tradeStatusLabel || coin.tradeStatus || 'نامشخص'}`,
-    ].join('\n');
-  };
-
-  const blocks = [[
-    '🚀 GATE.IO | SUSTAINED BULLISH MOVE RADAR',
-    '━━━━━━━━━━━━━━━━━━',
-    '🎯 شناسایی روند صعودی پیوسته و زمان مناسب ورود',
-    `📌 بازارهای بررسی‌شده: ${candidates.length}`,
-    `📊 قرارداد فعال: ${stats.active} | نقدشونده: ${stats.liquid}`,
-    `🔍 بررسی موفق: ${stats.success} | خطا: ${stats.errors}`,
-    `⚡ فهرست فعال: ${activeCount} از ${CONFIG.TOP_COUNT}`,
-    `⏱ زمان اسکن: ${(duration / 1000).toFixed(1)} ثانیه`,
-    '📄 جزئیات کامل تمام موارد رتبه‌بندی‌شده در فایل market-report.html',
-    '━━━━━━━━━━━━━━━━━━',
-  ].join('\n')];
-
-  blocks.push(
-    `🧱 روندهای صعودی باکیفیت (${growth.length})\n━━━━━━━━━━━━━━━━━━`
-  );
-
-  if (!growth.length) {
-    blocks.push('موردی در فهرست روند صعودی باکیفیت نیست.');
+    blocks.push([
+      `${coin.activeRank}. ${coin.symbol} | ${coin.moveStatus}`,
+      `🏆 اولویت: ${coin.activePriority}/100`,
+      `🧱 ساختار: ${coin.structuralScore} | پتانسیل: ${coin.potentialScore}`,
+      `⚡ انرژی: ${coin.energyScore} | ورود: ${coin.entryQualityScore}`,
+      `📈 نسبت به گذشته خودش: ${relative.score ?? 50}/100 (${relative.label || 'سابقه در حال تشکیل'})`,
+      `💰 قیمت: ${formatPrice(coin.livePrice)}`,
+      `📊 روند: ${coin.growthScore} | آمادگی حرکت: ${coin.moveScore}`,
+      `🔎 ${coin.moveTypeLabel}`,
+      `🧾 وضعیت معامله: ${coin.tradeStatusLabel || 'نامشخص'}${entry}`,
+    ].join('\n'));
   }
 
-  growth.forEach((coin, index) => {
-    blocks.push(
-      makeCoinBlock(coin, index + 1, 'growth')
-    );
-  });
-
   blocks.push(
-    `⚡ بهترین فرصت‌های ورود (${early.length})\n━━━━━━━━━━━━━━━━━━`
-  );
-
-  if (!early.length) {
-    blocks.push('هنوز ارز واجد شرایط ورود وجود ندارد.');
-  }
-
-  early.forEach((coin, index) => {
-    blocks.push(
-      makeCoinBlock(coin, index + 1, 'move')
-    );
-  });
-
-  blocks.push(
-    '━━━━━━━━━━━━━━━━━━\nℹ️ رتبه‌بندی نشان‌دهنده کیفیت شرایط است و تضمین رشد یا توصیه قطعی ورود نیست.'
+    '━━━━━━━━━━━━━━━━━━\nℹ️ رتبه‌بندی بر اساس قدرت ساختار، پتانسیل رشد، مقایسه با سابقه همان ارز، انرژی و کیفیت ورود است؛ تضمین رشد یا توصیه قطعی ورود نیست.'
   );
 
   return blocks.join('\n\n');
@@ -2461,12 +2772,13 @@ function displayNumber(value, digits = 2, suffix = '') {
   return `${Number(value).toFixed(digits)}${suffix}`;
 }
 
-function yesNo(value) {
-  return value ? 'بله' : 'خیر';
-}
-
 function htmlRow(label, value) {
-  return `<div class="detail-row"><span class="detail-label">${escapeHtml(label)}</span><span class="detail-value">${escapeHtml(value)}</span></div>`;
+  return `
+    <div class="detail-row">
+      <span class="detail-label">${escapeHtml(label)}</span>
+      <span class="detail-value">${escapeHtml(value)}</span>
+    </div>
+  `;
 }
 
 function htmlList(items, emptyText = 'موردی ثبت نشده است') {
@@ -2474,199 +2786,131 @@ function htmlList(items, emptyText = 'موردی ثبت نشده است') {
     return `<p class="muted">${escapeHtml(emptyText)}</p>`;
   }
 
-  return `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`;
+  return `<ul>${items.map((item) =>
+    `<li>${escapeHtml(item)}</li>`
+  ).join('')}</ul>`;
 }
 
-function buildCoinHtml(coin, rank, category) {
+function buildCoinHtml(coin) {
   const d = coin.derivatives || {};
   const s = coin.structure || {};
   const daily = coin.daily || {};
-  const setup = coin.tradeSetup;
+  const setup = coin.tradeSetup || {};
   const state = coin.tradeState || {};
+  const relative = coin.relativeSelf || {};
   const returns = coin.returns || {};
   const volume = coin.volume || {};
 
-  const isGrowth = category === 'growth';
+  const rows = [
+    htmlRow('رتبه واحد', coin.activeRank),
+    htmlRow('اولویت نهایی', displayNumber(coin.activePriority)),
+    htmlRow('امتیاز ساختاری', coin.structuralScore),
+    htmlRow('پتانسیل رشد', coin.potentialScore),
+    htmlRow('انرژی حرکت', coin.energyScore),
+    htmlRow('کیفیت ورود', coin.entryQualityScore),
+    htmlRow('امتیاز روند', coin.growthScore),
+    htmlRow('امتیاز آمادگی حرکت', coin.moveScore),
+    htmlRow('وضعیت حرکت', coin.moveStatus),
+    htmlRow('نوع حرکت', coin.moveTypeLabel),
+    htmlRow('سن حرکت به دقیقه', coin.moveAgeMinutes ?? 'نامشخص'),
+    htmlRow('قدرت نسبت به گذشته خودش', relative.score ?? 50),
+    htmlRow('تغییر ساختار نسبت به میانگین گذشته', displayNumber(relative.improvement)),
+    htmlRow('حفظ قدرت نسبت به بهترین ساختار', displayNumber(relative.retention, 3)),
+    htmlRow('ثبات ساختار در سابقه', displayNumber(relative.consistency, 3)),
+    htmlRow('تعداد نمونه‌های تاریخی', relative.historyCount ?? 0),
+    htmlRow('تفسیر مقایسه تاریخی', relative.label || 'سابقه در حال تشکیل'),
 
-  const rankValue = isGrowth
-    ? coin.growthRank
-    : coin.moveRank;
-
-  const score = isGrowth
-    ? coin.growthScore
-    : coin.moveScore;
-
-  const status = isGrowth
-    ? ({
-        HIGH_POTENTIAL: 'روند صعودی باکیفیت',
-        WATCHLIST: 'در فهرست بررسی',
-        NORMAL: 'عادی',
-      }[coin.growthStatus] || coin.growthStatus)
-    : ({
-        CONFIRMED: 'تأییدشده',
-        EARLY: 'شروع اولیه',
-        WATCHING: 'در حال آماده‌سازی',
-        POTENTIAL: 'بدون تأیید',
-      }[coin.moveStatus] || coin.moveStatus);
-
-  const returnRows = [
     htmlRow('بازده ۱۵ دقیقه', displayNumber(returns['15m'], 2, '%')),
     htmlRow('بازده ۱ ساعت', displayNumber(returns['1h'], 2, '%')),
     htmlRow('بازده ۴ ساعت', displayNumber(returns['4h'], 2, '%')),
     htmlRow('بازده روزانه', displayNumber(returns['1d'], 2, '%')),
-  ].join('');
 
-  const volumeRows = [
     htmlRow('نسبت حجم ۱۵ دقیقه', displayNumber(volume['15m'], 2, 'x')),
     htmlRow('نسبت حجم ۱ ساعت', displayNumber(volume['1h'], 2, 'x')),
     htmlRow('نسبت حجم روزانه', displayNumber(volume['1d'], 2, 'x')),
-  ].join('');
 
-  const structureRows = [
-    htmlRow('امتیاز ساختار روزانه', s.daily ?? '-'),
-    htmlRow('امتیاز ساختار ۴ ساعته', s['4h'] ?? '-'),
-    htmlRow('امتیاز ساختار ۱ ساعته', s['1h'] ?? '-'),
-    htmlRow('امتیاز ساختار ۱۵ دقیقه', s['15m'] ?? '-'),
-    htmlRow('فشردگی ۴ ساعته', s.compression4h ?? '-'),
-    htmlRow('فشردگی ۱ ساعته', s.compression1h ?? '-'),
+    htmlRow('ساختار روزانه', daily.score),
+    htmlRow('ساختار ۴ ساعته', s['4h']),
+    htmlRow('ساختار ۱ ساعته', s['1h']),
+    htmlRow('ساختار ۱۵ دقیقه', s['15m']),
+    htmlRow('فشردگی ۴ ساعته', s.compression4h),
+    htmlRow('فشردگی ۱ ساعته', s.compression1h),
     htmlRow('فضای مقاومت ۴ ساعته', displayNumber(s.roomToResistance4hPct, 2, '%')),
     htmlRow('فضای مقاومت روزانه', displayNumber(s.roomToResistance1dPct, 2, '%')),
-  ].join('');
 
-  const derivativeRows = [
     htmlRow('نسبت خرید', displayNumber(number(d.buyRatio) * 100, 2, '%')),
-    htmlRow('عدم‌تعادل جریان معاملات', displayNumber(number(d.imbalance) * 100, 2, '%')),
-    htmlRow('عدم‌تعادل خام معاملات', displayNumber(number(d.rawTradeImbalance) * 100, 2, '%')),
-    htmlRow('عدم‌تعادل تیکر', displayNumber(d.statsTakerImbalance == null ? null : d.statsTakerImbalance * 100, 2, '%')),
-    htmlRow('امتیاز جریان معاملات', d.flowScore ?? '-'),
-    htmlRow('تعداد معاملات بررسی‌شده', d.tradeCount ?? 0),
-    htmlRow('ارزش خرید', displayNumber(d.buyNotional, 2)),
-    htmlRow('ارزش فروش', displayNumber(d.sellNotional, 2)),
+    htmlRow('عدم تعادل جریان معاملات', displayNumber(number(d.imbalance) * 100, 2, '%')),
+    htmlRow('امتیاز جریان معاملات', d.flowScore),
     htmlRow('تغییر OI', displayNumber(d.oiChangePct, 2, '%')),
     htmlRow('تغییر قیمت مارک', displayNumber(d.markChangePct, 2, '%')),
-    htmlRow('امتیاز OI', d.oiScore ?? '-'),
-    htmlRow('مقدار Open Interest', displayNumber(d.openInterest, 2)),
-    htmlRow('لیکوییدیشن شورت', displayNumber(d.shortLiquidations, 2)),
-    htmlRow('لیکوییدیشن لانگ', displayNumber(d.longLiquidations, 2)),
-    htmlRow('کیفیت داده مشتقات', d.dataQuality || 'نامشخص'),
-    htmlRow('تعداد نقاط آماری OI', d.statsPoints ?? 0),
-  ].join('');
+    htmlRow('امتیاز OI', d.oiScore),
+    htmlRow('کیفیت داده مشتقات', d.dataQuality),
+    htmlRow('تعداد معاملات بررسی‌شده', d.tradeCount),
 
-  const dailyRows = [
-    htmlRow('امتیاز روزانه', daily.score ?? '-'),
-    htmlRow('EMA روزانه صعودی', yesNo(daily.emaBullish)),
-    htmlRow('قیمت بالای EMA50', yesNo(daily.ema50Bullish)),
-    htmlRow('شیب EMA21 صعودی', yesNo(daily.emaSlope)),
-    htmlRow('Higher High روزانه', yesNo(daily.higherHigh)),
-    htmlRow('Higher Low روزانه', yesNo(daily.higherLow)),
-    htmlRow('شکست مقاومت ۲۰ روزه', yesNo(daily.breakout20)),
-    htmlRow('شکست مقاومت ۵۰ روزه', yesNo(daily.breakout50)),
-    htmlRow('نسبت حجم ۵ روزه', displayNumber(daily.volumeRatio5, 2, 'x')),
-    htmlRow('نسبت حجم ۱۰ روزه', displayNumber(daily.volumeRatio10, 2, 'x')),
-    htmlRow('حجم پیش‌بینی‌شده روزانه', displayNumber(daily.projectedVolumeRatio, 2, 'x')),
-    htmlRow('بازده از بازشدن کندل روزانه', displayNumber(daily.dailyOpenReturn, 2, '%')),
-  ].join('');
+    htmlRow('EMA روزانه صعودی', daily.emaBullish ? 'بله' : 'خیر'),
+    htmlRow('قیمت بالای EMA50', daily.ema50Bullish ? 'بله' : 'خیر'),
+    htmlRow('Higher High روزانه', daily.higherHigh ? 'بله' : 'خیر'),
+    htmlRow('Higher Low روزانه', daily.higherLow ? 'بله' : 'خیر'),
 
-  const tradeRows = setup
-    ? [
-        htmlRow('نوع فرصت', coin.opportunityType || '-'),
-        htmlRow('وضعیت معامله', coin.tradeStatusLabel || coin.tradeStatus || '-'),
-        htmlRow('محدوده ورود پایین', formatPrice(setup.entryLow)),
-        htmlRow('محدوده ورود بالا', formatPrice(setup.entryHigh)),
-        htmlRow('نقطه میانی ورود', formatPrice(setup.entryMid)),
-        htmlRow('تأیید ۵ دقیقه', setup.confirmationMet ? 'تأیید شده' : 'تأیید نشده'),
-        htmlRow('شرط تأیید ورود', setup.confirmation || '-'),
-        htmlRow('حد ضرر', formatPrice(setup.stopLoss)),
-        htmlRow('هدف اول TP1', formatPrice(setup.tp1)),
-        htmlRow('هدف دوم TP2', formatPrice(setup.tp2)),
-        htmlRow('هدف سوم TP3', formatPrice(setup.tp3)),
-        htmlRow('نسبت ریسک به بازده', displayNumber(setup.riskReward, 2, 'R')),
-        htmlRow('ATR', formatPrice(setup.atr)),
-        htmlRow('حمایت محاسبه‌شده', formatPrice(setup.support)),
-        htmlRow('دلیل خروج', state.exitReason || 'ندارد'),
-        htmlRow('قیمت ورود ثبت‌شده', state.entryPrice ? formatPrice(state.entryPrice) : 'ثبت نشده'),
-        htmlRow('زمان ایجاد موقعیت', state.createdAt || 'نامشخص'),
-        htmlRow('زمان آخرین به‌روزرسانی', state.updatedAt || 'نامشخص'),
-        htmlRow('عمر موقعیت به ساعت', displayNumber(state.ageHours, 1)),
-      ].join('')
-    : [
-        htmlRow('وضعیت معامله', coin.tradeStatusLabel || coin.tradeStatus || 'نامشخص'),
-        htmlRow('اطلاعات setup', 'برای این ارز محدوده معاملاتی محاسبه نشده است'),
-      ].join('');
+    htmlRow('وضعیت معامله', coin.tradeStatusLabel || coin.tradeStatus),
+    htmlRow('محدوده ورود پایین', setup.entryLow ? formatPrice(setup.entryLow) : 'محاسبه نشده'),
+    htmlRow('محدوده ورود بالا', setup.entryHigh ? formatPrice(setup.entryHigh) : 'محاسبه نشده'),
+    htmlRow('تأیید ۵ دقیقه', setup.confirmationMet ? 'تأیید شده' : 'تأیید نشده'),
+    htmlRow('حد ضرر', setup.stopLoss ? formatPrice(setup.stopLoss) : 'نامشخص'),
+    htmlRow('هدف اول', setup.tp1 ? formatPrice(setup.tp1) : 'نامشخص'),
+    htmlRow('هدف دوم', setup.tp2 ? formatPrice(setup.tp2) : 'نامشخص'),
+    htmlRow('هدف سوم', setup.tp3 ? formatPrice(setup.tp3) : 'نامشخص'),
+    htmlRow('نسبت ریسک به بازده', displayNumber(setup.riskReward, 2, 'R')),
+    htmlRow('دلیل خروج', state.exitReason || 'ندارد'),
 
-  const eventRows = [
-    htmlRow('وضعیت حرکت', coin.moveStatus || '-'),
-    htmlRow('نوع حرکت', coin.moveType || '-'),
-    htmlRow('شرح حرکت', coin.moveTypeLabel || '-'),
-    htmlRow('مرحله فعلی', coin.stage || '-'),
-    htmlRow('سن حرکت به کندل', coin.moveAgeBars ?? 'نامشخص'),
-    htmlRow('سن حرکت به دقیقه', coin.moveAgeMinutes ?? 'نامشخص'),
-    htmlRow('امتیاز روند', coin.growthScore ?? '-'),
-    htmlRow('امتیاز ورود', coin.moveScore ?? '-'),
-    htmlRow('رتبه روند', coin.growthRank ?? 'رتبه ندارد'),
-    htmlRow('رتبه ورود', coin.moveRank ?? 'رتبه ندارد'),
+    htmlRow('آسیب ساختاری', coin.flags?.structuralDamage ? 'بله' : 'خیر'),
+    htmlRow('بیش‌ازحد کشیده', coin.flags?.overheated ? 'بله' : 'خیر'),
+    htmlRow('فشار فروش', coin.flags?.bearishFlow ? 'بله' : 'خیر'),
+    htmlRow('خطر OI', coin.flags?.oiDanger ? 'بله' : 'خیر'),
   ].join('');
 
   return `
     <details class="coin-card" open>
       <summary>
-        <span class="coin-rank">#${escapeHtml(rankValue ?? rank)}</span>
+        <span class="coin-rank">#${escapeHtml(coin.activeRank)}</span>
         <span class="coin-symbol">${escapeHtml(coin.symbol)}</span>
-        <span class="coin-price">${escapeHtml(formatPrice(number(coin.livePrice, coin.price)))}</span>
-        <span class="coin-score">${escapeHtml(score)}/100</span>
-        <span class="coin-status">${escapeHtml(status)}</span>
+        <span class="coin-price">${escapeHtml(formatPrice(coin.livePrice))}</span>
+        <span class="coin-score">${escapeHtml(coin.activePriority)}/100</span>
+        <span class="coin-status">${escapeHtml(coin.moveStatus)}</span>
       </summary>
 
       <div class="coin-content">
         <div class="quick-grid">
-          <div class="quick-item"><span>قیمت فعلی</span><strong>${escapeHtml(formatPrice(number(coin.livePrice, coin.price)))}</strong></div>
-          <div class="quick-item"><span>امتیاز روند</span><strong>${escapeHtml(coin.growthScore)}/100</strong></div>
-          <div class="quick-item"><span>امتیاز ورود</span><strong>${escapeHtml(coin.moveScore)}/100</strong></div>
-          <div class="quick-item"><span>وضعیت معامله</span><strong>${escapeHtml(coin.tradeStatusLabel || coin.tradeStatus || '-')}</strong></div>
+          <div class="quick-item">
+            <span>پتانسیل رشد</span>
+            <strong>${escapeHtml(coin.potentialScore)}/100</strong>
+          </div>
+          <div class="quick-item">
+            <span>ساختار فعلی</span>
+            <strong>${escapeHtml(coin.structuralScore)}/100</strong>
+          </div>
+          <div class="quick-item">
+            <span>قدرت نسبت به گذشته</span>
+            <strong>${escapeHtml(relative.score ?? 50)}/100</strong>
+          </div>
+          <div class="quick-item">
+            <span>انرژی حرکت</span>
+            <strong>${escapeHtml(coin.energyScore)}/100</strong>
+          </div>
         </div>
 
         <section class="detail-section">
-          <h3>۱. وضعیت حرکت و رتبه‌بندی</h3>
-          <div class="detail-grid">${eventRows}</div>
+          <h3>جزئیات رتبه‌بندی و مقایسه تاریخی</h3>
+          <div class="detail-grid">${rows}</div>
         </section>
 
         <section class="detail-section">
-          <h3>۲. بازده تایم‌فریم‌ها</h3>
-          <div class="detail-grid">${returnRows}</div>
-        </section>
-
-        <section class="detail-section">
-          <h3>۳. ساختار بازار و فشردگی</h3>
-          <div class="detail-grid">${structureRows}</div>
-        </section>
-
-        <section class="detail-section">
-          <h3>۴. حجم معاملات</h3>
-          <div class="detail-grid">${volumeRows}</div>
-        </section>
-
-        <section class="detail-section">
-          <h3>۵. جریان معاملات و مشتقات</h3>
-          <div class="detail-grid">${derivativeRows}</div>
-        </section>
-
-        <section class="detail-section">
-          <h3>۶. وضعیت تایم‌فریم روزانه</h3>
-          <div class="detail-grid">${dailyRows}</div>
-        </section>
-
-        <section class="detail-section">
-          <h3>۷. محدوده ورود، حد ضرر و اهداف</h3>
-          <div class="detail-grid">${tradeRows}</div>
-        </section>
-
-        <section class="detail-section">
-          <h3>۸. شواهد صعود</h3>
+          <h3>شواهد صعود</h3>
           ${htmlList(coin.evidence)}
         </section>
 
         <section class="detail-section warning-section">
-          <h3>۹. هشدارها و ریسک‌ها</h3>
+          <h3>هشدارها و ریسک‌ها</h3>
           ${htmlList(coin.warnings, 'هشدار مشخصی ثبت نشده است')}
         </section>
       </div>
@@ -2678,37 +2922,12 @@ function buildHtmlReport(
   candidates,
   stats,
   duration,
-  generatedAt
+  generatedAt,
+  activeRanked
 ) {
-  const growth = candidates
-    .filter((coin) =>
-      Number.isInteger(coin.growthRank) &&
-      coin.growthRank > 0
-    )
-    .sort((a, b) => a.growthRank - b.growthRank);
-
-  const entries = candidates
-    .filter((coin) =>
-      Number.isInteger(coin.moveRank) &&
-      coin.moveRank > 0
-    )
-    .sort((a, b) => a.moveRank - b.moveRank);
-
-  const growthHtml = growth.length
-    ? growth
-        .map((coin, index) =>
-          buildCoinHtml(coin, index + 1, 'growth')
-        )
-        .join('\n')
-    : '<p class="empty">در این اسکن موردی واجد شرایط این دسته نبود.</p>';
-
-  const entriesHtml = entries.length
-    ? entries
-        .map((coin, index) =>
-          buildCoinHtml(coin, index + 1, 'move')
-        )
-        .join('\n')
-    : '<p class="empty">در این اسکن فرصت ورود واجد شرایطی پیدا نشد.</p>';
+  const cards = activeRanked.length
+    ? activeRanked.map(buildCoinHtml).join('\n')
+    : '<p class="empty">در این اسکن ارز واجد شرایطی برای فهرست فعال پیدا نشد.</p>';
 
   return `<!DOCTYPE html>
 <html lang="fa" dir="rtl">
@@ -2716,7 +2935,7 @@ function buildHtmlReport(
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="color-scheme" content="dark">
-<title>Gate.io Sustained Bullish Move Radar</title>
+<title>Gate.io Relative Strength Bullish Radar</title>
 <style>
 :root {
   color-scheme: dark;
@@ -2881,7 +3100,7 @@ footer {
 <div class="container">
 <header>
   <h1>🚀 گزارش تحلیل بازار Gate.io</h1>
-  <div class="subtitle">Sustained Bullish Move Radar | گزارش کامل جزئیات ارزهای رتبه‌بندی‌شده</div>
+  <div class="subtitle">Relative Strength & Early Bullish Radar | رتبه‌بندی بر اساس قدرت فعلی و سابقه هر ارز</div>
   <div class="stats">
     <div class="stat"><span>زمان تولید گزارش</span><strong>${escapeHtml(generatedAt)}</strong></div>
     <div class="stat"><span>بازارهای بررسی‌شده</span><strong>${candidates.length}</strong></div>
@@ -2894,17 +3113,15 @@ footer {
 </header>
 
 <section class="section">
-  <h2 class="section-title">🧱 روندهای صعودی باکیفیت <span class="count">${growth.length} ارز</span></h2>
-  ${growthHtml}
-</section>
-
-<section class="section">
-  <h2 class="section-title">⚡ بهترین فرصت‌های ورود <span class="count">${entries.length} ارز</span></h2>
-  ${entriesHtml}
+  <h2 class="section-title">
+    🏆 بهترین فرصت‌های صعود
+    <span class="count">${activeRanked.length} از ${CONFIG.TOP_COUNT} ارز</span>
+  </h2>
+  ${cards}
 </section>
 
 <footer>
-  این گزارش بر اساس داده‌های دریافت‌شده در زمان اسکن ساخته شده است. رتبه‌بندی تضمین‌کننده رشد قیمت نیست.
+  رتبه‌بندی بر اساس ساختار، پتانسیل، مقایسه تاریخی هر ارز، انرژی حرکت و کیفیت ورود است. رتبه بالا تضمین‌کننده رشد قیمت نیست.
 </footer>
 </div>
 </body>
@@ -2914,7 +3131,8 @@ footer {
 async function saveHtmlReport(
   candidates,
   stats,
-  duration
+  duration,
+  activeRanked
 ) {
   const generatedAt = new Date().toLocaleString(
     'fa-IR',
@@ -2928,7 +3146,8 @@ async function saveHtmlReport(
     candidates,
     stats,
     duration,
-    generatedAt
+    generatedAt,
+    activeRanked
   );
 
   await writeFile(
@@ -2950,12 +3169,12 @@ async function main() {
   const startedAt = Date.now();
   const nowMs = Date.now();
 
-  console.log('\n🚀 GATE.IO SUSTAINED BULLISH MOVE RADAR');
+  console.log('\n🚀 GATE.IO RELATIVE STRENGTH BULLISH RADAR');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log('🎯 Fresh bullish move detection + timely entry readiness');
-  console.log('🛑 Exit requires serious short-term structure breakdown with selling confirmation.');
+  console.log('🎯 Ranking current strength against each coin own history');
+  console.log('🏆 One unified active list | Maximum 10 coins');
+  console.log('🛑 Small 5m fluctuations do not remove active members.');
 
-  // بازیابی حافظه معاملات و Watchlist از اجرای قبلی
   const previousMemory = await loadScannerMemory();
 
   const previousTradeStates =
@@ -3001,13 +3220,12 @@ async function main() {
         lastPrice: number(ticker.last),
       };
     })
-    .filter(
-      (market) =>
-        market.lastPrice > 0 &&
-        market.quoteVolume >= CONFIG.MIN_QUOTE_VOLUME_24H
+    .filter((market) =>
+      market.lastPrice > 0 &&
+      market.quoteVolume >= CONFIG.MIN_QUOTE_VOLUME_24H
     )
-    .sort(
-      (a, b) => b.quoteVolume - a.quoteVolume
+    .sort((a, b) =>
+      b.quoteVolume - a.quoteVolume
     );
 
   console.log(
@@ -3018,7 +3236,7 @@ async function main() {
     `💧 Liquid contracts: ${liquidMarkets.length}`
   );
 
-  console.log('🔍 Scanning all liquid contracts...\n');
+  console.log('🔍 Scanning liquid contracts...\n');
 
   let success = 0;
   let errors = 0;
@@ -3074,13 +3292,8 @@ async function main() {
           true
         ),
 
-        getRecentTrades(
-          market.symbol
-        ).catch(() => []),
-
-        getContractStats(
-          market.symbol
-        ).catch(() => []),
+        getRecentTrades(market.symbol).catch(() => []),
+        getContractStats(market.symbol).catch(() => []),
       ]);
 
       const candles5m = candles5mData.closed;
@@ -3090,15 +3303,13 @@ async function main() {
       if (
         candles15m.length < 30 ||
         candles1h.length < 30 ||
-        candles4h.length < 30
+        candles4h.length < 30 ||
+        candles1d.length < 30
       ) {
         throw new Error(
           'کندل کافی برای تحلیل تایم‌فریم‌ها دریافت نشد.'
         );
       }
-
-      success++;
-      analyzedSymbols.add(market.symbol);
 
       const derivatives = analyzeDerivatives(
         tradesResult,
@@ -3121,7 +3332,12 @@ async function main() {
         derivatives,
       });
 
-      if (!candidate) return null;
+      if (!candidate) {
+        throw new Error('تحلیل تکنیکال خروجی معتبر نداشت.');
+      }
+
+      success++;
+      analyzedSymbols.add(market.symbol);
 
       candidate.livePrice = market.lastPrice;
       candidate.live15m = candles15mData.current;
@@ -3130,11 +3346,10 @@ async function main() {
       candidate.opportunityType =
         classifyOpportunity(candidate);
 
-      candidate._candles5m = candles5m;
-
       const setup = buildTradeSetup(
         candidate,
-        candles15m
+        candles15m,
+        candles5m
       );
 
       const tradeState = updateTradeState(
@@ -3152,7 +3367,6 @@ async function main() {
       candidate.tradeState = tradeState;
 
       delete candidate._analysis;
-      delete candidate._candles5m;
 
       return candidate;
     }
@@ -3166,15 +3380,21 @@ async function main() {
       continue;
     }
 
-    if (result) {
-      candidates.push(result);
-    }
+    if (result) candidates.push(result);
   }
+
+  // ابتدا سابقه هر ارز به‌روزرسانی و قدرت فعلی با گذشته خودش مقایسه می‌شود.
+  const memoryWithHistory = updateCoinHistory(
+    previousMemory,
+    candidates,
+    analyzedSymbols,
+    nowMs
+  );
 
   let rankChanges = null;
 
   try {
-    // Storage موجود بدون تغییر باقی می‌ماند.
+    // فایل marketStorage.js بدون تغییر باقی می‌ماند.
     const storageResult =
       await saveMarketSnapshot(candidates);
 
@@ -3182,9 +3402,7 @@ async function main() {
       storageResult?.rankChanges ?? null;
 
     console.log('\n💾 MARKET DATA SAVED');
-    console.log(
-      '📊 Market snapshot saved successfully.'
-    );
+    console.log('📊 Market snapshot saved successfully.');
   } catch (storageError) {
     console.error(
       '⚠️ MARKET STORAGE FAILED:',
@@ -3192,18 +3410,20 @@ async function main() {
     );
   }
 
-  // یک فهرست فعال با سقف ۱۰ ارز
+  // رتبه‌بندی واحد با ثبات ساختاری و مقایسه با گذشته هر ارز
   const {
     activeRanked,
-    growthRanked,
-    moveRanked,
-  } = assignIndependentRanks(candidates);
-
-  // به‌روزرسانی Watchlist و وضعیت معاملات
-  const updatedMemory = updateScannerMemory(
-    previousMemory,
+    activeList,
+  } = assignStableRanks(
     candidates,
-    activeRanked,
+    memoryWithHistory,
+    nowMs
+  );
+
+  const updatedMemory = updateScannerMemory(
+    memoryWithHistory,
+    candidates,
+    activeList,
     analyzedSymbols,
     nowMs
   );
@@ -3212,7 +3432,7 @@ async function main() {
     await saveScannerMemory(updatedMemory);
 
     console.log(
-      `💾 Scanner memory saved | Watchlist: ${Object.keys(updatedMemory.watchlist).length} | Trade states: ${Object.keys(updatedMemory.tradeStates).length}`
+      `💾 Scanner memory saved | Active memory: ${Object.keys(updatedMemory.activeList).length} | Watchlist: ${Object.keys(updatedMemory.watchlist).length} | Historical coins: ${Object.keys(updatedMemory.coinHistory).length} | Trade states: ${Object.keys(updatedMemory.tradeStates).length}`
     );
   } catch (memoryError) {
     console.error(
@@ -3231,36 +3451,22 @@ async function main() {
   };
 
   console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log('🏆 ACTIVE BULLISH OPPORTUNITIES');
+  console.log('🏆 UNIFIED ACTIVE BULLISH OPPORTUNITIES');
   console.log(
     `Active opportunities: ${activeRanked.length}/${CONFIG.TOP_COUNT}`
   );
 
   activeRanked.forEach((coin) => {
     console.log(
-      `${coin.activeRank}. ${coin.symbol} | Growth ${coin.growthScore}/100 | Move ${coin.moveScore}/100 | ${coin.moveStatus} | ${coin.moveTypeLabel}`
-    );
-  });
-
-  console.log('\n🧱 QUALIFIED BULLISH TRENDS');
-  console.log(
-    `Qualified bullish trends: ${growthRanked.length}`
-  );
-
-  growthRanked.forEach((coin) => {
-    console.log(
-      `${coin.growthRank}. ${coin.symbol} | ${coin.growthScore}/100 | ${coin.growthStatus}`
-    );
-  });
-
-  console.log('\n⚡ QUALIFIED ENTRY OPPORTUNITIES');
-  console.log(
-    `Qualified entry opportunities: ${moveRanked.length}`
-  );
-
-  moveRanked.forEach((coin) => {
-    console.log(
-      `${coin.moveRank}. ${coin.symbol} | ${coin.moveScore}/100 | ${coin.moveStatus} | ${coin.moveTypeLabel}`
+      [
+        `${coin.activeRank}. ${coin.symbol}`,
+        `Priority ${coin.activePriority}`,
+        `Structure ${coin.structuralScore}`,
+        `Potential ${coin.potentialScore}`,
+        `Relative ${coin.relativeSelf?.score ?? 50}`,
+        `Energy ${coin.energyScore}`,
+        coin.moveStatus,
+      ].join(' | ')
     );
   });
 
@@ -3273,19 +3479,22 @@ async function main() {
   );
   console.log(`Errors: ${errors}`);
   console.log(
-    `Watchlist monitored internally: ${Object.keys(updatedMemory.watchlist).length}`
+    `Internal Watchlist: ${Object.keys(updatedMemory.watchlist).length}`
+  );
+  console.log(
+    `Historical coin profiles: ${Object.keys(updatedMemory.coinHistory).length}`
   );
   console.log(
     `Duration: ${(duration / 1000).toFixed(1)}s`
   );
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
-  // گزارش HTML مستقل از ارسال تلگرام ساخته می‌شود.
   try {
     await saveHtmlReport(
       candidates,
       stats,
-      duration
+      duration,
+      activeRanked
     );
   } catch (htmlError) {
     console.error(
@@ -3299,7 +3508,7 @@ async function main() {
       candidates,
       stats,
       duration,
-      rankChanges
+      activeRanked
     )
   );
 
