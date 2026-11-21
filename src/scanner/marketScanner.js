@@ -1,3 +1,4 @@
+
 /**
  * GATE.IO USDT PERPETUAL — SUSTAINED BULLISH MOVE RADAR
  * Prioritizes sustained bullish trend quality, timely entries, and serious-decline exits.
@@ -6,7 +7,7 @@
  */
 
 import 'dotenv/config';
-import { saveMarketSnapshot, getTradeStates } from '../storage/marketStorage.js';
+import { saveMarketSnapshot } from '../storage/marketStorage.js';
 
 const CONFIG = {
   API_BASE: 'https://api.gateio.ws/api/v4',
@@ -84,6 +85,7 @@ async function fetchJSON(url) {
 async function getContracts() {
   return fetchJSON(`${CONFIG.API_BASE}/futures/usdt/contracts`);
 }
+
 async function getTickers() {
   return fetchJSON(`${CONFIG.API_BASE}/futures/usdt/tickers`);
 }
@@ -113,13 +115,16 @@ function analyzeDerivatives(trades, stats, contractMultiplier = 1) {
       return !timestamp || nowSeconds - timestamp <= 15 * 60;
     })
     : [];
+
   let buyNotional = 0;
   let sellNotional = 0;
+
   for (const trade of validTrades) {
     const notional = Math.abs(number(trade.size)) * number(trade.price) * multiplier;
     if (number(trade.size) > 0) buyNotional += notional;
     else sellNotional += notional;
   }
+
   const totalNotional = buyNotional + sellNotional;
   const buyRatio = totalNotional > 0 ? buyNotional / totalNotional : 0.5;
   const imbalance = totalNotional > 0 ? (buyNotional - sellNotional) / totalNotional : 0;
@@ -136,6 +141,7 @@ function analyzeDerivatives(trades, stats, contractMultiplier = 1) {
       lsrTaker: number(item.lsr_taker),
     })).filter((item) => item.time > 0 && item.oi > 0).sort((a, b) => a.time - b.time)
     : [];
+
   const first = points[0];
   const last = points.at(-1);
   const oiChangePct = first && last && first.oi > 0 ? pctChange(last.oi, first.oi) : null;
@@ -145,22 +151,29 @@ function analyzeDerivatives(trades, stats, contractMultiplier = 1) {
   const latestStats = points.at(-1);
   const statsTakerTotal = number(latestStats?.takerLong) + number(latestStats?.takerShort);
   const statsTakerImbalance = statsTakerTotal > 0
-    ? (number(latestStats?.takerLong) - number(latestStats?.takerShort)) / statsTakerTotal : null;
-  const combinedImbalance = statsTakerImbalance == null ? imbalance
+    ? (number(latestStats?.takerLong) - number(latestStats?.takerShort)) / statsTakerTotal
+    : null;
+
+  const combinedImbalance = statsTakerImbalance == null
+    ? imbalance
     : clamp(imbalance * 0.70 + statsTakerImbalance * 0.30, -1, 1);
 
   // Missing derivatives data is neutral, never a bullish assumption.
   let flowScore = clamp(50 + combinedImbalance * 65, 0, 100);
   let oiScore = 50;
+
   if (oiChangePct !== null && markChangePct !== null) {
     if (oiChangePct > 0.15 && markChangePct > 0) oiScore = clamp(58 + oiChangePct * 5 + markChangePct * 2, 0, 100);
     else if (oiChangePct < -0.15 && markChangePct > 0) oiScore = clamp(43 + oiChangePct * 3, 0, 60);
     else if (oiChangePct > 0.15 && markChangePct <= 0) oiScore = clamp(48 + oiChangePct * 2, 0, 65);
     else oiScore = clamp(50 + oiChangePct * 2, 0, 100);
   }
+
   // Large short liquidations can inflate buy flow; reduce its directional value.
   const liquidationDistortion = shortLiqTotal > 0 && totalNotional > 0
-    ? clamp(shortLiqTotal / totalNotional, 0, 1) : 0;
+    ? clamp(shortLiqTotal / totalNotional, 0, 1)
+    : 0;
+
   flowScore = clamp(flowScore - liquidationDistortion * 18, 0, 100);
 
   return {
@@ -180,32 +193,49 @@ function analyzeDerivatives(trades, stats, contractMultiplier = 1) {
     shortLiquidations: shortLiqTotal,
     longLiquidations: longLiqTotal,
     statsPoints: points.length,
-    dataQuality: validTrades.length >= 10 && points.length >= 2 ? 'GOOD' : validTrades.length >= 5 || points.length >= 2 ? 'PARTIAL' : 'LOW',
+    dataQuality: validTrades.length >= 10 && points.length >= 2
+      ? 'GOOD'
+      : validTrades.length >= 5 || points.length >= 2
+        ? 'PARTIAL'
+        : 'LOW',
   };
 }
 
 async function getCandles(contract, interval, limit, includeCurrent = false) {
   const params = new URLSearchParams({ contract, interval, limit: String(limit) });
   const raw = await fetchJSON(`${CONFIG.API_BASE}/futures/usdt/candlesticks?${params}`);
+
   if (!Array.isArray(raw)) throw new Error(`Invalid candle response: ${contract} ${interval}`);
 
   const candles = raw.map((c) => ({
-    time: number(c.t), open: number(c.o), high: number(c.h), low: number(c.l),
-    close: number(c.c), volume: number(c.v), turnover: number(c.sum),
+    time: number(c.t),
+    open: number(c.o),
+    high: number(c.h),
+    low: number(c.l),
+    close: number(c.c),
+    volume: number(c.v),
+    turnover: number(c.sum),
   })).filter((c) => c.time > 0 && c.open > 0 && c.high > 0 && c.low > 0 && c.close > 0)
     .sort((a, b) => a.time - b.time);
 
   const intervalSeconds = CONFIG.TIMEFRAMES[interval].seconds;
   const currentBucket = Math.floor(Date.now() / 1000 / intervalSeconds) * intervalSeconds;
   const closed = candles.filter((c) => c.time < currentBucket);
+
   if (!includeCurrent) return closed;
 
   const current = candles.find((c) => c.time === currentBucket) || null;
+
   return {
     closed,
     current: current ? {
-      bucketTime: currentBucket, open: current.open, high: current.high, low: current.low,
-      close: current.close, volume: current.volume, turnover: current.turnover,
+      bucketTime: currentBucket,
+      open: current.open,
+      high: current.high,
+      low: current.low,
+      close: current.close,
+      volume: current.volume,
+      turnover: current.turnover,
     } : null,
   };
 }
@@ -213,41 +243,54 @@ async function getCandles(contract, interval, limit, includeCurrent = false) {
 async function mapLimit(items, limit, worker) {
   const results = new Array(items.length);
   let nextIndex = 0;
+
   async function runner() {
     while (true) {
       const index = nextIndex++;
       if (index >= items.length) return;
-      try { results[index] = await worker(items[index], index); }
-      catch (error) { results[index] = { error: error.message, item: items[index] }; }
+
+      try {
+        results[index] = await worker(items[index], index);
+      } catch (error) {
+        results[index] = { error: error.message, item: items[index] };
+      }
     }
   }
+
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => runner()));
   return results;
 }
 
 function calculateEMA(values, period) {
   if (values.length < period) return [];
+
   const multiplier = 2 / (period + 1);
   const result = [];
   let ema = average(values.slice(0, period));
   result.push(ema);
+
   for (let i = period; i < values.length; i++) {
     ema = (values[i] - ema) * multiplier + ema;
     result.push(ema);
   }
+
   return result;
 }
 
 function getVolumeRatio(candles) {
   if (candles.length < 25) return 0;
+
   const recentAverage = average(candles.slice(-3).map(getCandleValue));
   const baselineMedian = median(candles.slice(-23, -3).map(getCandleValue));
+
   return baselineMedian > 0 ? recentAverage / baselineMedian : 0;
 }
 
 function getCandleStrength(candle) {
   const range = candle.high - candle.low;
+
   if (range <= 0) return { closeLocation: 0, bodyRatio: 0, bullish: false };
+
   return {
     closeLocation: clamp((candle.close - candle.low) / range, 0, 1),
     bodyRatio: clamp(Math.abs(candle.close - candle.open) / range, 0, 1),
@@ -258,24 +301,35 @@ function getCandleStrength(candle) {
 function findSwingPoints(candles, radius = 2) {
   const highs = [];
   const lows = [];
+
   for (let i = radius; i < candles.length - radius; i++) {
     const current = candles[i];
     let isHigh = true;
     let isLow = true;
+
     for (let j = 1; j <= radius; j++) {
       if (current.high <= candles[i - j].high || current.high <= candles[i + j].high) isHigh = false;
       if (current.low >= candles[i - j].low || current.low >= candles[i + j].low) isLow = false;
     }
+
     if (isHigh) highs.push(current.high);
     if (isLow) lows.push(current.low);
   }
+
   return { highs, lows };
 }
 
 function analyzeStructure(candles) {
-  if (candles.length < 25) return {
-    higherHigh: false, higherLow: false, breakout: false, bullishStructure: false, score: 0,
-  };
+  if (candles.length < 25) {
+    return {
+      higherHigh: false,
+      higherLow: false,
+      breakout: false,
+      bullishStructure: false,
+      score: 0,
+    };
+  }
+
   const swings = findSwingPoints(candles.slice(-35), 2);
   const higherHigh = swings.highs.length >= 2 && swings.highs.at(-1) > swings.highs.at(-2);
   const higherLow = swings.lows.length >= 2 && swings.lows.at(-1) > swings.lows.at(-2);
@@ -284,24 +338,30 @@ function analyzeStructure(candles) {
   const last = candles[candles.length - 1];
   const breakout = resistance > 0 && last.close > resistance && last.close > last.open;
   const bullishStructure = (higherHigh && higherLow) || (breakout && higherLow);
+
   let score = 0;
   if (higherHigh) score += 30;
   if (higherLow) score += 30;
   if (breakout) score += 40;
+
   return { higherHigh, higherLow, breakout, bullishStructure, resistance, score };
 }
 
 function analyzeTimeframe(candles) {
   if (!candles || candles.length < 30) return null;
+
   const closes = candles.map((c) => c.close);
   const ema9 = calculateEMA(closes, 9);
   const ema21 = calculateEMA(closes, 21);
+
   if (ema9.length < 3 || ema21.length < 3) return null;
+
   const last = candles.at(-1);
   const previous = candles.at(-2);
   const currentEma9 = ema9.at(-1);
   const currentEma21 = ema21.at(-1);
   const previousEma21 = ema21.at(-2);
+
   return {
     price: last.close,
     ema9: currentEma9,
@@ -321,8 +381,10 @@ function analyzeTimeframe(candles) {
 
 function analyzeDaily(candles, currentCandle, livePrice) {
   if (!candles || candles.length < 30) return null;
+
   const base = analyzeTimeframe(candles);
   if (!base) return null;
+
   const closes = candles.map((c) => c.close);
   const ema9 = calculateEMA(closes, 9);
   const ema21 = calculateEMA(closes, 21);
@@ -362,7 +424,8 @@ function analyzeDaily(candles, currentCandle, livePrice) {
   const dayProgress = clamp(elapsedSeconds / 86400, 0.05, 1);
   const currentTurnover = number(currentCandle?.turnover);
   const projectedVolumeRatio = currentTurnover > 0 && avg10Volume > 0
-    ? (currentTurnover / dayProgress) / avg10Volume : 0;
+    ? (currentTurnover / dayProgress) / avg10Volume
+    : 0;
 
   let score = 50;
   if (emaBullish) score += 10;
@@ -382,25 +445,47 @@ function analyzeDaily(candles, currentCandle, livePrice) {
   if (dailyReturn < -5) score -= 8;
 
   return {
-    score: Math.round(clamp(score, 0, 100)), price, dailyReturn, dailyOpenReturn,
-    emaBullish, ema50Bullish, emaSlope,
-    higherHigh: base.structure.higherHigh, higherLow: base.structure.higherLow,
-    breakout20, breakout50, volumeRatio5, volumeRatio10, projectedVolumeRatio,
+    score: Math.round(clamp(score, 0, 100)),
+    price,
+    dailyReturn,
+    dailyOpenReturn,
+    emaBullish,
+    ema50Bullish,
+    emaSlope,
+    higherHigh: base.structure.higherHigh,
+    higherLow: base.structure.higherLow,
+    breakout20,
+    breakout50,
+    volumeRatio5,
+    volumeRatio10,
+    projectedVolumeRatio,
     currentCandle: Boolean(currentCandle),
   };
 }
 
 function emptyDailyAnalysis(price = 0) {
   return {
-    score: 50, price, dailyReturn: 0, dailyOpenReturn: 0,
-    emaBullish: false, ema50Bullish: false, emaSlope: false,
-    higherHigh: false, higherLow: false, breakout20: false, breakout50: false,
-    volumeRatio5: 0, volumeRatio10: 0, projectedVolumeRatio: 0, currentCandle: false,
+    score: 50,
+    price,
+    dailyReturn: 0,
+    dailyOpenReturn: 0,
+    emaBullish: false,
+    ema50Bullish: false,
+    emaSlope: false,
+    higherHigh: false,
+    higherLow: false,
+    breakout20: false,
+    breakout50: false,
+    volumeRatio5: 0,
+    volumeRatio10: 0,
+    projectedVolumeRatio: 0,
+    currentCandle: false,
   };
 }
 
 function calculateCompression(candles) {
   if (!candles || candles.length < 40) return { score: 35, ratio: null };
+
   const recent = candles.slice(-12);
   const baseline = candles.slice(-36, -12);
   const recentRange = (Math.max(...recent.map((c) => c.high)) - Math.min(...recent.map((c) => c.low))) /
@@ -408,37 +493,48 @@ function calculateCompression(candles) {
   const baselineRange = (Math.max(...baseline.map((c) => c.high)) - Math.min(...baseline.map((c) => c.low))) /
     Math.max(average(baseline.map((c) => c.close)), 1e-12);
   const ratio = baselineRange > 0 ? recentRange / baselineRange : 1;
+
   return { score: Math.round(clamp(100 - ratio * 55, 0, 100)), ratio };
 }
 
 function calculateRoomToResistance(candles, price, lookback = 30) {
   const previous = candles.slice(-(lookback + 1), -1);
-  if (!previous.length || price <= 0) return { resistance: null, roomPct: null, score: 45 };
+
+  if (!previous.length || price <= 0) {
+    return { resistance: null, roomPct: null, score: 45 };
+  }
+
   const resistance = Math.max(...previous.map((c) => c.high));
   const roomPct = resistance > price ? pctChange(resistance, price) : 0;
+
   let score = 35;
   if (roomPct >= 8 && roomPct <= 25) score = 95;
   else if (roomPct > 25 && roomPct <= 45) score = 82;
   else if (roomPct >= 4 && roomPct < 8) score = 75;
   else if (roomPct > 45) score = 65;
   else if (roomPct <= 1) score = 20;
+
   return { resistance, roomPct, score };
 }
 
 function findRecentBreakoutAge(candles, maxAge = 24, lookback = 12) {
   if (!candles || candles.length < lookback + 2) return null;
+
   const lastIndex = candles.length - 1;
   const firstIndex = Math.max(lookback + 1, lastIndex - maxAge);
+
   for (let index = lastIndex; index >= firstIndex; index--) {
     const candle = candles[index];
     const resistance = Math.max(...candles.slice(index - lookback, index).map((item) => item.high));
     const previousResistance = Math.max(...candles.slice(index - lookback - 1, index - 1).map((item) => item.high));
     const previousClose = candles[index - 1]?.close ?? 0;
     const wasBelowResistance = previousClose <= previousResistance;
+
     if (candle.close > resistance && candle.close > candle.open && wasBelowResistance) {
       return lastIndex - index;
     }
   }
+
   return null;
 }
 
@@ -454,21 +550,58 @@ function detectMoveStart(candles15m, candles1h, tf15, tf1h, tf4h, compression) {
   if (age15m !== null && compression.score >= 45) {
     const status = age15m <= 1 ? (tf1h.structure.breakout ? 'CONFIRMED' : 'EARLY')
       : age15m <= 4 ? 'EARLY' : 'LATE';
-    return { type: 'COMPRESSION_BREAKOUT', label: 'خروج از فشردگی', status, ageBars: age15m, ageMinutes: age15m * 15 };
+
+    return {
+      type: 'COMPRESSION_BREAKOUT',
+      label: 'خروج از فشردگی',
+      status,
+      ageBars: age15m,
+      ageMinutes: age15m * 15,
+    };
   }
+
   if (reversal) {
     const age = age1h ?? 6;
     const status = age <= 2 && tf1h.structure.breakout ? 'CONFIRMED' : age <= 4 ? 'EARLY' : 'LATE';
-    return { type: 'BULLISH_REVERSAL', label: 'برگشت صعودی', status, ageBars: age, ageMinutes: age * 60 };
+
+    return {
+      type: 'BULLISH_REVERSAL',
+      label: 'برگشت صعودی',
+      status,
+      ageBars: age,
+      ageMinutes: age * 60,
+    };
   }
+
   if (age15m !== null) {
     const status = age15m <= 2 ? 'WATCHING' : 'LATE';
-    return { type: 'COMPRESSION_BREAKOUT', label: 'شکست محدوده', status, ageBars: age15m, ageMinutes: age15m * 15 };
+
+    return {
+      type: 'COMPRESSION_BREAKOUT',
+      label: 'شکست محدوده',
+      status,
+      ageBars: age15m,
+      ageMinutes: age15m * 15,
+    };
   }
+
   if (compression.score >= 65 && (tf4h.emaBullish || tf4h.structure.higherLow)) {
-    return { type: 'COMPRESSION_WATCH', label: 'آماده خروج از فشردگی', status: 'WATCHING', ageBars: null, ageMinutes: null };
+    return {
+      type: 'COMPRESSION_WATCH',
+      label: 'آماده خروج از فشردگی',
+      status: 'WATCHING',
+      ageBars: null,
+      ageMinutes: null,
+    };
   }
-  return { type: 'NONE', label: 'هنوز شروعی شناسایی نشده', status: 'POTENTIAL', ageBars: null, ageMinutes: null };
+
+  return {
+    type: 'NONE',
+    label: 'هنوز شروعی شناسایی نشده',
+    status: 'POTENTIAL',
+    ageBars: null,
+    ageMinutes: null,
+  };
 }
 
 function analyzeCoin(data) {
@@ -477,6 +610,7 @@ function analyzeCoin(data) {
   const tf1h = analyzeTimeframe(candles['1h']);
   const tf4h = analyzeTimeframe(candles['4h']);
   const daily = analyzeDaily(candles['1d'], dailyCurrent, livePrice) || emptyDailyAnalysis(livePrice);
+
   if (!tf15 || !tf1h || !tf4h) return null;
 
   const price = number(livePrice, tf15.price);
@@ -487,7 +621,6 @@ function analyzeCoin(data) {
   const room4h = calculateRoomToResistance(candles['4h'], price, 30);
   const room1d = calculateRoomToResistance(candles['1d'], price, 30);
 
-  // The objective is a fresh, sustained bullish leg, not a low-growth/low-price coin.
   const structure15 = tf15.structure;
   const structure1h = tf1h.structure;
   const structure4h = tf4h.structure;
@@ -520,7 +653,8 @@ function analyzeCoin(data) {
     (tf4h.emaSlope ? 4 : 0) + (tf1h.emaSlope ? 4 : 0) + (tf15.emaSlope ? 3 : 0) +
     (flowPositive ? 5 : 0) + (oiHealthy ? 3 : 0) + (resistanceRoom ? 4 : 0) -
     (bearishFlow ? 12 : 0) - (oiDanger ? 8 : 0) - (structuralDamage ? 9 : 0) - (overheated ? 12 : 0),
-    0, 100
+    0,
+    100
   );
 
   const compressionReady = compression15.score >= 48 || compression1h.score >= 48 || compression4h.score >= 55;
@@ -537,13 +671,24 @@ function analyzeCoin(data) {
   let moveType = 'NONE';
   let moveTypeLabel = 'هنوز شروع معتبر شناسایی نشده';
   let moveAgeBars = null;
+
   if (startEvidence && continuationEvidence && trendScore >= 70 && !overheated && !oiDanger) {
     moveStatus = 'CONFIRMED';
-    moveType = breakoutFresh !== null ? 'FRESH_15M_BREAKOUT' : breakout1hFresh !== null ? 'FRESH_1H_BREAKOUT' : earlyReversal ? 'BULLISH_REVERSAL' : 'COMPRESSION_EXPANSION';
+    moveType = breakoutFresh !== null
+      ? 'FRESH_15M_BREAKOUT'
+      : breakout1hFresh !== null
+        ? 'FRESH_1H_BREAKOUT'
+        : earlyReversal
+          ? 'BULLISH_REVERSAL'
+          : 'COMPRESSION_EXPANSION';
+
     moveTypeLabel = ({
-      FRESH_15M_BREAKOUT: 'شکست تازه ۱۵ دقیقه‌ای', FRESH_1H_BREAKOUT: 'شکست تازه یک‌ساعته',
-      BULLISH_REVERSAL: 'برگشت صعودی ساختاری', COMPRESSION_EXPANSION: 'خروج از تراکم با تقاضا',
+      FRESH_15M_BREAKOUT: 'شکست تازه ۱۵ دقیقه‌ای',
+      FRESH_1H_BREAKOUT: 'شکست تازه یک‌ساعته',
+      BULLISH_REVERSAL: 'برگشت صعودی ساختاری',
+      COMPRESSION_EXPANSION: 'خروج از تراکم با تقاضا',
     })[moveType];
+
     moveAgeBars = breakoutFresh ?? (breakout1hFresh != null ? breakout1hFresh * 4 : null);
   } else if (startEvidence && trendScore >= 58 && !bearishFlow && !structuralDamage) {
     moveStatus = 'EARLY';
@@ -561,13 +706,17 @@ function analyzeCoin(data) {
     (bullish15Count >= 2 ? 8 : 0) + (bullish1hCount >= 2 ? 7 : 0) +
     (breakoutFresh !== null ? 10 : 0) + (breakout1hFresh !== null ? 7 : 0) +
     (room4h.score * 0.08) + (noHeavyOverhead ? 5 : -8) - (overheated ? 18 : 0) -
-    (bearishFlow ? 18 : 0) - (oiDanger ? 10 : 0), 0, 100
+    (bearishFlow ? 18 : 0) - (oiDanger ? 10 : 0),
+    0,
+    100
   );
+
   const growthScore = Math.round(trendScore);
   const moveScore = Math.round(entryScore);
 
   const evidence = [];
   const warnings = [];
+
   if (trend4h) evidence.push('جهت ساختاری 4H صعودی');
   if (trend1h) evidence.push('ساختار 1H در حال تقویت');
   if (trend15m) evidence.push('ساختار کوتاه‌مدت صعودی');
@@ -584,38 +733,85 @@ function analyzeCoin(data) {
   if (flow.dataQuality === 'LOW') warnings.push('داده مشتقات ناکافی؛ این بخش با امتیاز خنثی محاسبه شد');
 
   return {
-    symbol, score: growthScore, growthScore, moveScore,
+    symbol,
+    score: growthScore,
+    growthScore,
+    moveScore,
     growthStatus: trendScore >= 75 ? 'HIGH_POTENTIAL' : trendScore >= 60 ? 'WATCHLIST' : 'NORMAL',
-    moveStatus, moveType, moveTypeLabel, moveAgeBars,
+    moveStatus,
+    moveType,
+    moveTypeLabel,
+    moveAgeBars,
     moveAgeMinutes: moveAgeBars == null ? null : moveAgeBars * 15,
-    stage: moveStatus === 'CONFIRMED' ? 'موج صعودی تازه با شواهد ادامه‌دار' : moveStatus === 'EARLY' ? 'نشانه‌های اولیه شروع موج' : moveStatus === 'WATCHING' ? 'در حال آماده‌سازی' : 'شرایط کافی برای شروع موج وجود ندارد',
-    price, livePrice: price,
-    returns: { '15m': tf15.returns.return1, '1h': tf1h.returns.return1, '4h': tf4h.returns.return1, '1d': daily.dailyReturn },
-    volume: { '15m': volume15, '1h': volume1h, '1d': daily.volumeRatio5 },
-    daily, derivatives: flow,
+    stage: moveStatus === 'CONFIRMED'
+      ? 'موج صعودی تازه با شواهد ادامه‌دار'
+      : moveStatus === 'EARLY'
+        ? 'نشانه‌های اولیه شروع موج'
+        : moveStatus === 'WATCHING'
+          ? 'در حال آماده‌سازی'
+          : 'شرایط کافی برای شروع موج وجود ندارد',
+    price,
+    livePrice: price,
+    returns: {
+      '15m': tf15.returns.return1,
+      '1h': tf1h.returns.return1,
+      '4h': tf4h.returns.return1,
+      '1d': daily.dailyReturn,
+    },
+    volume: {
+      '15m': volume15,
+      '1h': volume1h,
+      '1d': daily.volumeRatio5,
+    },
+    daily,
+    derivatives: flow,
     structure: {
-      daily: daily.score, '4h': Math.round(trend4h ? 85 : 45), '1h': Math.round(trend1h ? 85 : 45),
-      '15m': Math.round(trend15m ? 85 : 45), compression4h: compression4h.score,
-      compression1h: compression1h.score, roomToResistance4hPct: room4h.roomPct,
+      daily: daily.score,
+      '4h': Math.round(trend4h ? 85 : 45),
+      '1h': Math.round(trend1h ? 85 : 45),
+      '15m': Math.round(trend15m ? 85 : 45),
+      compression4h: compression4h.score,
+      compression1h: compression1h.score,
+      roomToResistance4hPct: room4h.roomPct,
       roomToResistance1dPct: room1d.roomPct,
     },
-    evidence, warnings,
+    evidence,
+    warnings,
     _analysis: {
-      tf15: { ema21: tf15.ema21, emaBullish: tf15.emaBullish, structure: tf15.structure },
-      tf1h: { emaBullish: tf1h.emaBullish, structure: tf1h.structure },
-      tf4h: { emaBullish: tf4h.emaBullish, emaSlope: tf4h.emaSlope, structure: tf4h.structure },
+      tf15: {
+        ema21: tf15.ema21,
+        emaBullish: tf15.emaBullish,
+        structure: tf15.structure,
+      },
+      tf1h: {
+        emaBullish: tf1h.emaBullish,
+        structure: tf1h.structure,
+      },
+      tf4h: {
+        emaBullish: tf4h.emaBullish,
+        emaSlope: tf4h.emaSlope,
+        structure: tf4h.structure,
+      },
     },
   };
 }
 
 function calculateATR(candles, period = 14) {
   if (!candles || candles.length < period + 1) return 0;
+
   const ranges = [];
+
   for (let i = candles.length - period; i < candles.length; i++) {
     const current = candles[i];
     const previousClose = candles[i - 1].close;
-    ranges.push(Math.max(current.high - current.low, Math.abs(current.high - previousClose), Math.abs(current.low - previousClose)));
+
+    ranges.push(Math.max(
+      current.high - current.low,
+      Math.abs(current.high - previousClose),
+      Math.abs(current.low - previousClose)
+    ));
   }
+
   return average(ranges);
 }
 
@@ -628,6 +824,7 @@ function classifyOpportunity(coin) {
 function buildTradeSetup(coin, candles15m) {
   const price = number(coin.livePrice, coin.price);
   const atr = calculateATR(candles15m, 14);
+
   if (!price || !atr) return null;
 
   const ema21 = number(coin._analysis?.tf15?.ema21);
@@ -635,6 +832,7 @@ function buildTradeSetup(coin, candles15m) {
   const validSupports = [ema21, ...swingPoints.lows]
     .filter((level) => level > 0 && level < price && price - level <= atr * 3.5)
     .sort((a, b) => b - a);
+
   const support = validSupports[0] || Math.max(0, price - atr * 1.25);
   const entryLow = support - atr * 0.25;
   const entryHigh = support + atr * 0.18;
@@ -642,24 +840,37 @@ function buildTradeSetup(coin, candles15m) {
   const stopLoss = Math.min(entryLow - atr * 0.35, (structuralLow || entryLow) - atr * 0.25);
   const risk = Math.max(entryHigh - stopLoss, atr * 0.5);
   const resistanceLevels = swingPoints.highs.filter((level) => level > entryHigh).sort((a, b) => a - b);
+
   const target = (multiple, index) => resistanceLevels[index] && resistanceLevels[index] > entryHigh + risk * 0.8
     ? Math.max(resistanceLevels[index], entryHigh + risk * multiple)
     : entryHigh + risk * multiple;
+
   const tp1 = target(1.5, 0);
   const tp2 = target(2.5, 1);
   const tp3 = target(4, 2);
   const last5m = coin._candles5m?.at(-1);
   const previous5m = coin._candles5m?.at(-2);
   const strength5m = last5m ? getCandleStrength(last5m) : null;
-  const bouncedFromZone = Boolean(last5m && last5m.low <= entryHigh && last5m.close > entryHigh &&
-    last5m.close > last5m.open && strength5m.closeLocation >= 0.65 &&
-    previous5m && last5m.close > previous5m.high);
+  const bouncedFromZone = Boolean(
+    last5m &&
+    last5m.low <= entryHigh &&
+    last5m.close > entryHigh &&
+    last5m.close > last5m.open &&
+    strength5m.closeLocation >= 0.65 &&
+    previous5m &&
+    last5m.close > previous5m.high
+  );
 
   return {
-    entryLow, entryHigh, entryMid: (entryLow + entryHigh) / 2,
+    entryLow,
+    entryHigh,
+    entryMid: (entryLow + entryHigh) / 2,
     confirmation: 'کندل بسته‌شده ۵ دقیقه‌ای باید محدوده ورود را لمس کند، صعودی بسته شود و سقف کندل قبلی را بشکند.',
     confirmationMet: bouncedFromZone,
-    stopLoss, tp1, tp2, tp3,
+    stopLoss,
+    tp1,
+    tp2,
+    tp3,
     riskReward: Number(((tp1 - entryHigh) / risk).toFixed(2)),
     atr,
     support,
@@ -668,9 +879,12 @@ function buildTradeSetup(coin, candles15m) {
 
 function isSameSetup(previous, setup, opportunityType) {
   if (!previous?.setup || !setup || previous.opportunityType !== opportunityType) return false;
+
   const oldMid = number(previous.setup.entryMid);
   const newMid = number(setup.entryMid);
+
   if (!oldMid || !newMid) return false;
+
   return Math.abs(newMid - oldMid) / oldMid <= 0.012;
 }
 
@@ -678,6 +892,7 @@ function detectSeriousDecline(candles5m, candles15m, flow) {
   if (!Array.isArray(candles5m) || candles5m.length < 25 || !Array.isArray(candles15m) || candles15m.length < 25) {
     return { confirmed: false, reason: null, severity: 'UNKNOWN' };
   }
+
   const closes5 = candles5m.map((c) => c.close);
   const ema9_5 = calculateEMA(closes5, 9);
   const ema21_5 = calculateEMA(closes5, 21);
@@ -687,16 +902,28 @@ function detectSeriousDecline(candles5m, candles15m, flow) {
   const ema9_15 = calculateEMA(candles15m.map((c) => c.close), 9);
   const strength5 = getCandleStrength(last5);
   const volume5 = getVolumeRatio(candles5m);
-  const breakdown5 = last5.close < ema9_5.at(-1) && ema9_5.at(-1) < ema21_5.at(-1) &&
-    last5.close < prev5.low && strength5.closeLocation <= 0.35;
-  const strongSellCandle = last5.close < last5.open && strength5.closeLocation <= 0.18 && volume5 >= 1.65;
+
+  const breakdown5 = last5.close < ema9_5.at(-1) &&
+    ema9_5.at(-1) < ema21_5.at(-1) &&
+    last5.close < prev5.low &&
+    strength5.closeLocation <= 0.35;
+
+  const strongSellCandle = last5.close < last5.open &&
+    strength5.closeLocation <= 0.18 &&
+    volume5 >= 1.65;
+
   const confirm15 = last15.close < ema9_15.at(-1) && last15.close < last15.open;
   const sellersControl = number(flow?.imbalance) < -0.12 || number(flow?.buyRatio, 0.5) < 0.43;
   const hardBreakdown = breakdown5 && (confirm15 || sellersControl);
   const panicSell = strongSellCandle && (sellersControl || confirm15);
+
   return {
     confirmed: hardBreakdown || panicSell,
-    reason: hardBreakdown ? 'شکست ساختار کوتاه‌مدت همراه با تأیید فروش' : panicSell ? 'کندل فروش قدرتمند با حجم بالا و تأیید فشار فروش' : null,
+    reason: hardBreakdown
+      ? 'شکست ساختار کوتاه‌مدت همراه با تأیید فروش'
+      : panicSell
+        ? 'کندل فروش قدرتمند با حجم بالا و تأیید فشار فروش'
+        : null,
     severity: hardBreakdown || panicSell ? 'SERIOUS' : breakdown5 || strongSellCandle ? 'WARNING' : 'NORMAL',
   };
 }
@@ -707,15 +934,27 @@ function updateTradeState(coin, setup, previousState, nowMs, candles5m = [], can
   const previous = sameSetup ? previousState : null;
   const price = number(coin.livePrice, coin.price);
   const now = new Date(nowMs).toISOString();
+
   const statusLabels = {
-    ENTRY_CONFIRMED: 'ورود تأیید شده', NEAR_ENTRY: 'نزدیک ورود', WAITING: 'در انتظار',
-    NEAR_EXIT: 'نزدیک خروج', EXIT_CONFIRMED: 'خروج قطعی', INVALIDATED: 'ابطال موقعیت', EXPIRED: 'منقضی شده',
+    ENTRY_CONFIRMED: 'ورود تأیید شده',
+    NEAR_ENTRY: 'نزدیک ورود',
+    WAITING: 'در انتظار',
+    NEAR_EXIT: 'نزدیک خروج',
+    EXIT_CONFIRMED: 'خروج قطعی',
+    INVALIDATED: 'ابطال موقعیت',
+    EXPIRED: 'منقضی شده',
   };
 
-  if (!setup) return {
-    symbol: coin.symbol, opportunityType, status: 'WAITING', statusLabel: statusLabels.WAITING,
-    setup: null, updatedAt: now,
-  };
+  if (!setup) {
+    return {
+      symbol: coin.symbol,
+      opportunityType,
+      status: 'WAITING',
+      statusLabel: statusLabels.WAITING,
+      setup: null,
+      updatedAt: now,
+    };
+  }
 
   const terminal = new Set(['EXIT_CONFIRMED', 'INVALIDATED', 'EXPIRED']);
   const maxAgeHours = CONFIG.SETUP_MAX_AGE_HOURS[opportunityType] || 72;
@@ -735,7 +974,10 @@ function updateTradeState(coin, setup, previousState, nowMs, candles5m = [], can
   } else if (price <= setup.stopLoss && (oldStatus === 'ENTRY_CONFIRMED' || oldStatus === 'NEAR_EXIT')) {
     status = 'EXIT_CONFIRMED';
     exitReason = 'حد ضرر معامله فعال لمس شد';
-  } else if ((oldStatus === 'ENTRY_CONFIRMED' || oldStatus === 'NEAR_EXIT') && detectSeriousDecline(candles5m, candles15m, coin.derivatives).confirmed) {
+  } else if (
+    (oldStatus === 'ENTRY_CONFIRMED' || oldStatus === 'NEAR_EXIT') &&
+    detectSeriousDecline(candles5m, candles15m, coin.derivatives).confirmed
+  ) {
     status = 'EXIT_CONFIRMED';
     exitReason = detectSeriousDecline(candles5m, candles15m, coin.derivatives).reason;
   } else if (price <= setup.stopLoss) {
@@ -744,6 +986,7 @@ function updateTradeState(coin, setup, previousState, nowMs, candles5m = [], can
   } else if (oldStatus === 'ENTRY_CONFIRMED' || oldStatus === 'NEAR_EXIT') {
     const nearTarget = price >= setup.tp1 * 0.985;
     const nearStop = price <= setup.stopLoss + setup.atr * 0.25;
+
     if (price >= setup.tp1) {
       status = 'EXIT_CONFIRMED';
       exitReason = 'هدف اول لمس شد';
@@ -758,7 +1001,10 @@ function updateTradeState(coin, setup, previousState, nowMs, candles5m = [], can
     status = 'ENTRY_CONFIRMED';
     enteredAt = now;
     entryPrice = price;
-  } else if (price >= setup.entryLow - setup.atr * CONFIG.NEAR_ENTRY_ATR && price <= setup.entryHigh + setup.atr * CONFIG.NEAR_ENTRY_ATR) {
+  } else if (
+    price >= setup.entryLow - setup.atr * CONFIG.NEAR_ENTRY_ATR &&
+    price <= setup.entryHigh + setup.atr * CONFIG.NEAR_ENTRY_ATR
+  ) {
     status = 'NEAR_ENTRY';
   } else {
     status = 'WAITING';
@@ -782,32 +1028,51 @@ function updateTradeState(coin, setup, previousState, nowMs, candles5m = [], can
 function attachTradeLifecycle(coin, candles15m, candles5m, previousStates, nowMs) {
   coin.opportunityType = classifyOpportunity(coin);
   coin._candles5m = candles5m;
+
   const setup = buildTradeSetup(coin, candles15m);
   const tradeState = updateTradeState(coin, setup, previousStates[coin.symbol], nowMs);
+
   coin.tradeStatus = tradeState.status;
   coin.tradeStatusLabel = tradeState.statusLabel;
   coin.tradeSetup = tradeState.setup;
   coin.tradeState = tradeState;
+
   delete coin._candles5m;
   delete coin._analysis;
+
   return coin;
 }
 
 async function sendTelegram(message) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = process.env.TELEGRAM_CHAT_ID;
+
   if (!token || !chatId) throw new Error('TELEGRAM_BOT_TOKEN یا TELEGRAM_CHAT_ID تنظیم نشده است.');
+
   const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text: message, disable_web_page_preview: true }),
+    body: JSON.stringify({
+      chat_id: chatId,
+      text: message,
+      disable_web_page_preview: true,
+    }),
     signal: AbortSignal.timeout(15000),
   });
+
   const raw = await response.text();
   let result;
-  try { result = raw ? JSON.parse(raw) : null; } catch { result = null; }
+
+  try {
+    result = raw ? JSON.parse(raw) : null;
+  } catch {
+    result = null;
+  }
+
   if (!response.ok || !result?.ok) {
-    const error = new Error(result?.description || `Telegram HTTP ${response.status}: ${raw.slice(0, 160) || 'empty response'}`);
+    const error = new Error(
+      result?.description || `Telegram HTTP ${response.status}: ${raw.slice(0, 160) || 'empty response'}`
+    );
     error.retryAfter = result?.parameters?.retry_after;
     throw error;
   }
@@ -817,40 +1082,132 @@ function splitTelegramMessage(text, maxLength) {
   const blocks = text.split('\n\n').filter(Boolean);
   const messages = [];
   let current = '';
+
   for (const block of blocks) {
     const candidate = current ? `${current}\n\n${block}` : block;
-    if (candidate.length <= maxLength) { current = candidate; continue; }
-    if (current) { messages.push(current); current = ''; }
-    if (block.length <= maxLength) { current = block; continue; }
+
+    if (candidate.length <= maxLength) {
+      current = candidate;
+      continue;
+    }
+
+    if (current) {
+      messages.push(current);
+      current = '';
+    }
+
+    if (block.length <= maxLength) {
+      current = block;
+      continue;
+    }
+
     for (const line of block.split('\n')) {
       const next = current ? `${current}\n${line}` : line;
-      if (next.length > maxLength && current) { messages.push(current); current = line; }
-      else current = next;
+
+      if (next.length > maxLength && current) {
+        messages.push(current);
+        current = line;
+      } else {
+        current = next;
+      }
     }
   }
+
   if (current) messages.push(current);
+
   return messages;
 }
 
 async function sendReports(report) {
   const messages = splitTelegramMessage(report, CONFIG.TELEGRAM_MAX_LENGTH - 50);
+
   for (let i = 0; i < messages.length; i++) {
     const payload = `📄 گزارش ${i + 1}/${messages.length}\n\n${messages[i]}`;
-    try { await sendTelegram(payload); }
-    catch (error) {
+
+    try {
+      await sendTelegram(payload);
+    } catch (error) {
       if (!error.retryAfter) throw error;
+
       await sleep(error.retryAfter * 1000 + 500);
       await sendTelegram(payload);
     }
+
     if (i < messages.length - 1) await sleep(CONFIG.TELEGRAM_DELAY);
   }
 }
 
+/**
+ * Final candidate selection.
+ *
+ * growthRank:
+ *   Only high-quality sustained trends are eligible.
+ *
+ * moveRank:
+ *   Only confirmed/early starts with sufficient entry score are eligible.
+ *
+ * A missing rank is never interpreted as rank zero.
+ */
+function assignIndependentRanks(candidates) {
+  for (const coin of candidates) {
+    coin.growthRank = null;
+    coin.moveRank = null;
+  }
+
+  const growthRanked = candidates
+    .filter((coin) =>
+      Number.isFinite(Number(coin.growthScore)) &&
+      Number(coin.growthScore) >= 75 &&
+      coin.growthStatus === 'HIGH_POTENTIAL'
+    )
+    .sort((a, b) =>
+      number(b.growthScore) - number(a.growthScore) ||
+      number(b.moveScore) - number(a.moveScore)
+    )
+    .slice(0, CONFIG.TOP_COUNT);
+
+  growthRanked.forEach((coin, index) => {
+    coin.growthRank = index + 1;
+  });
+
+  const moveRanked = candidates
+    .filter((coin) =>
+      (coin.moveStatus === 'CONFIRMED' || coin.moveStatus === 'EARLY') &&
+      Number.isFinite(Number(coin.moveScore)) &&
+      Number(coin.moveScore) >= 65 &&
+      Number.isFinite(Number(coin.growthScore)) &&
+      Number(coin.growthScore) >= 58
+    )
+    .sort((a, b) =>
+      number(b.moveScore) - number(a.moveScore) ||
+      number(b.growthScore) - number(a.growthScore)
+    )
+    .slice(0, CONFIG.TOP_COUNT);
+
+  moveRanked.forEach((coin, index) => {
+    coin.moveRank = index + 1;
+  });
+
+  return { growthRanked, moveRanked };
+}
+
 function buildReport(candidates, stats, duration, rankChanges = null) {
-  const growth = candidates.filter((coin) => number(coin.growthRank) <= CONFIG.TOP_COUNT)
-    .sort((a, b) => number(a.growthRank) - number(b.growthRank));
-  const early = candidates.filter((coin) => number(coin.moveRank) <= CONFIG.TOP_COUNT)
-    .sort((a, b) => number(a.moveRank) - number(b.moveRank));
+  const growth = candidates
+    .filter((coin) =>
+      Number.isInteger(coin.growthRank) &&
+      coin.growthRank >= 1 &&
+      coin.growthRank <= CONFIG.TOP_COUNT
+    )
+    .sort((a, b) => a.growthRank - b.growthRank);
+
+  const early = candidates
+    .filter((coin) =>
+      Number.isInteger(coin.moveRank) &&
+      coin.moveRank >= 1 &&
+      coin.moveRank <= CONFIG.TOP_COUNT
+    )
+    .sort((a, b) => a.moveRank - b.moveRank);
+
   const blocks = [[
     '🚀 GATE.IO | SUSTAINED BULLISH MOVE RADAR',
     '━━━━━━━━━━━━━━━━━━',
@@ -866,22 +1223,34 @@ function buildReport(candidates, stats, duration, rankChanges = null) {
 
   const rankIcon = (changes, key, symbol) => {
     const item = changes?.[symbol]?.[key];
+
     if (!item || item.status === 'NEW') return '🆕';
     if (item.change > 0) return `🟢↑${item.change}`;
     if (item.change < 0) return `🔴↓${Math.abs(item.change)}`;
+
     return '➖';
   };
+
   const statusLabel = (coin) => ({
-    HIGH_POTENTIAL: '🟢 روند صعودی باکیفیت', WATCHLIST: '🟡 روند در حال شکل‌گیری', NORMAL: '⚪ شرایط ناکافی',
+    HIGH_POTENTIAL: '🟢 روند صعودی باکیفیت',
+    WATCHLIST: '🟡 روند در حال شکل‌گیری',
+    NORMAL: '⚪ شرایط ناکافی',
   }[coin.growthStatus] || coin.growthStatus);
+
   const moveLabel = (coin) => ({
-    CONFIRMED: '🟢 موج صعودی پیوسته تأیید شد', EARLY: '🔵 نشانه‌های شروع موج', WATCHING: '🟡 آماده‌سازی',
-    POTENTIAL: '⚪ بدون تأیید شروع', INVALIDATED: '🔴 ابطال‌شده', LATE: '🟠 حرکت انجام‌شده',
+    CONFIRMED: '🟢 موج صعودی پیوسته تأیید شد',
+    EARLY: '🔵 نشانه‌های شروع موج',
+    WATCHING: '🟡 آماده‌سازی',
+    POTENTIAL: '⚪ بدون تأیید شروع',
+    INVALIDATED: '🔴 ابطال‌شده',
+    LATE: '🟠 حرکت انجام‌شده',
   }[coin.moveStatus] || coin.moveStatus);
+
   const makeCoinBlock = (coin, rank, kind) => {
     const isGrowth = kind === 'growth';
     const score = isGrowth ? coin.growthScore : coin.moveScore;
     const rankChange = rankIcon(rankChanges, isGrowth ? 'growth' : 'move', coin.symbol);
+
     const lines = [
       `${rank}. ${coin.symbol} ${rankChange} | امتیاز ${score}/100`,
       isGrowth
@@ -891,52 +1260,103 @@ function buildReport(candidates, stats, duration, rankChanges = null) {
       `📈 بازده: 15M ${number(coin.returns['15m']).toFixed(2)}% | 1H ${number(coin.returns['1h']).toFixed(2)}% | 4H ${number(coin.returns['4h']).toFixed(2)}% | 1D ${number(coin.returns['1d']).toFixed(2)}%`,
       `📐 ساختار: 1D ${coin.structure.daily} | 4H ${coin.structure['4h']} | فشردگی 4H ${coin.structure.compression4h} | فضای مقاومت ${coin.structure.roomToResistance4hPct == null ? 'نامشخص' : `${coin.structure.roomToResistance4hPct.toFixed(1)}%`}`,
       `🧾 جریان معاملات: خرید ${(coin.derivatives.buyRatio * 100).toFixed(1)}% | عدم‌تعادل ${(coin.derivatives.imbalance * 100).toFixed(1)}% | OI ${coin.derivatives.oiChangePct == null ? 'N/A' : `${coin.derivatives.oiChangePct.toFixed(2)}%`} | کیفیت داده ${coin.derivatives.dataQuality}`,
-      coin.growthEvent ? `🕒 رویداد: ${coin.growthEvent.status} | عمر ${coin.growthEvent.ageMinutes ?? '-'} دقیقه | تغییر از شروع ${coin.growthEvent.gainPct ?? 0}%` : null,
+      coin.growthEvent
+        ? `🕒 رویداد: ${coin.growthEvent.status} | عمر ${coin.growthEvent.ageMinutes ?? '-'} دقیقه | تغییر از شروع ${coin.growthEvent.gainPct ?? 0}%`
+        : null,
     ].filter(Boolean);
-    if (coin.tradeStatus) lines.push(`📍 وضعیت معامله: ${coin.tradeStatusLabel || coin.tradeStatus}`);
-    if (coin.tradeStatus === 'EXIT_CONFIRMED') lines.push(`🚨 خروج: ${coin.tradeState?.exitReason || 'ریزش جدی تأیید شد'}`);
+
+    if (coin.tradeStatus) {
+      lines.push(`📍 وضعیت معامله: ${coin.tradeStatusLabel || coin.tradeStatus}`);
+    }
+
+    if (coin.tradeStatus === 'EXIT_CONFIRMED') {
+      lines.push(`🚨 خروج: ${coin.tradeState?.exitReason || 'ریزش جدی تأیید شد'}`);
+    }
+
     if (coin.tradeSetup) {
       lines.push(`🎯 محدوده ورود: ${formatPrice(coin.tradeSetup.entryLow)} تا ${formatPrice(coin.tradeSetup.entryHigh)} | تأیید 5M: ${coin.tradeSetup.confirmationMet ? 'دریافت شد' : 'دریافت نشده'}`);
       lines.push(`🛑 حد ضرر: ${formatPrice(coin.tradeSetup.stopLoss)} | TP1 ${formatPrice(coin.tradeSetup.tp1)} | RR ${coin.tradeSetup.riskReward}R`);
     }
-    if (coin.evidence?.length) lines.push(`✔️ شواهد: ${coin.evidence.slice(0, 5).join('، ')}`);
-    if (coin.warnings?.length) lines.push(`⚠️ هشدار: ${coin.warnings.slice(0, 3).join('، ')}`);
+
+    if (coin.evidence?.length) {
+      lines.push(`✔️ شواهد: ${coin.evidence.slice(0, 5).join('، ')}`);
+    }
+
+    if (coin.warnings?.length) {
+      lines.push(`⚠️ هشدار: ${coin.warnings.slice(0, 3).join('، ')}`);
+    }
+
     return lines.join('\n');
   };
 
   blocks.push(`🧱 رتبه‌بندی اول: کیفیت روند صعودی (${growth.length} مورد)\n━━━━━━━━━━━━━━━━━━`);
-  if (!growth.length) blocks.push('موردی در فهرست روند صعودی باکیفیت نیست.');
-  growth.forEach((coin, index) => blocks.push(makeCoinBlock(coin, index + 1, 'growth')));
+
+  if (!growth.length) {
+    blocks.push('موردی در فهرست روند صعودی باکیفیت نیست.');
+  }
+
+  growth.forEach((coin, index) => {
+    blocks.push(makeCoinBlock(coin, index + 1, 'growth'));
+  });
+
   blocks.push(`⚡ رتبه‌بندی دوم: بهترین زمان ورود (${early.length} مورد)\n━━━━━━━━━━━━━━━━━━`);
-  if (!early.length) blocks.push('هنوز ارز واجد شرایط ورود وجود ندارد.');
-  early.forEach((coin, index) => blocks.push(makeCoinBlock(coin, index + 1, 'move')));
+
+  if (!early.length) {
+    blocks.push('هنوز ارز واجد شرایط ورود وجود ندارد.');
+  }
+
+  early.forEach((coin, index) => {
+    blocks.push(makeCoinBlock(coin, index + 1, 'move'));
+  });
+
   blocks.push('━━━━━━━━━━━━━━━━━━\nℹ️ این رتبه‌بندی احتمال و کیفیت شرایط را نشان می‌دهد، نه تضمین رشد یا توصیه ورود.');
+
   return blocks.join('\n\n');
 }
 
 async function main() {
   const startedAt = Date.now();
   const nowMs = Date.now();
+
   console.log('\n🚀 GATE.IO SUSTAINED BULLISH MOVE RADAR');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('🎯 Sustained bullish trend quality + timely entry readiness');
   console.log('🛑 Exit requires serious short-term structure breakdown with selling confirmation.');
 
-  const [contracts, tickers, previousTradeStates] = await Promise.all([
-    getContracts(), getTickers(), getTradeStates(),
+  // marketStorage.js فقط saveMarketSnapshot را export می‌کند.
+  // بازیابی trade states از این فایل انجام نمی‌شود.
+  const previousTradeStates = {};
+
+  const [contracts, tickers] = await Promise.all([
+    getContracts(),
+    getTickers(),
   ]);
-  if (!Array.isArray(contracts) || !Array.isArray(tickers)) throw new Error('داده قراردادها یا تیکرهای Gate.io معتبر نیست.');
+
+  if (!Array.isArray(contracts) || !Array.isArray(tickers)) {
+    throw new Error('داده قراردادها یا تیکرهای Gate.io معتبر نیست.');
+  }
 
   const tickerMap = new Map(tickers.map((ticker) => [ticker.contract, ticker]));
-  const activeContracts = contracts.filter((contract) => contract?.name && contract.in_delisting !== true && tickerMap.has(contract.name));
+  const activeContracts = contracts.filter((contract) =>
+    contract?.name &&
+    contract.in_delisting !== true &&
+    tickerMap.has(contract.name)
+  );
+
   const liquidMarkets = activeContracts.map((contract) => {
     const ticker = tickerMap.get(contract.name);
+
     return {
-      symbol: contract.name, ticker, contract,
-      quoteVolume: number(ticker.volume_24h_quote), lastPrice: number(ticker.last),
+      symbol: contract.name,
+      ticker,
+      contract,
+      quoteVolume: number(ticker.volume_24h_quote),
+      lastPrice: number(ticker.last),
     };
-  }).filter((market) => market.lastPrice > 0 && market.quoteVolume >= CONFIG.MIN_QUOTE_VOLUME_24H)
-    .sort((a, b) => b.quoteVolume - a.quoteVolume);
+  }).filter((market) =>
+    market.lastPrice > 0 &&
+    market.quoteVolume >= CONFIG.MIN_QUOTE_VOLUME_24H
+  ).sort((a, b) => b.quoteVolume - a.quoteVolume);
 
   console.log(`📊 Active contracts: ${activeContracts.length}`);
   console.log(`💧 Liquid contracts: ${liquidMarkets.length}`);
@@ -944,9 +1364,19 @@ async function main() {
 
   let success = 0;
   let errors = 0;
+
   const analyzed = await mapLimit(liquidMarkets, CONFIG.CONCURRENCY, async (market) => {
-    const [candles5mData, candles15mData, candles1h, candles4h, candles1dData, tradesResult, statsResult] = await Promise.all([
-      getCandles(market.symbol, '5m', CONFIG.TIMEFRAMES['5m'].limit, true).catch(() => ({ closed: [], current: null })),
+    const [
+      candles5mData,
+      candles15mData,
+      candles1h,
+      candles4h,
+      candles1dData,
+      tradesResult,
+      statsResult,
+    ] = await Promise.all([
+      getCandles(market.symbol, '5m', CONFIG.TIMEFRAMES['5m'].limit, true)
+        .catch(() => ({ closed: [], current: null })),
       getCandles(market.symbol, '15m', CONFIG.TIMEFRAMES['15m'].limit, true),
       getCandles(market.symbol, '1h', CONFIG.TIMEFRAMES['1h'].limit),
       getCandles(market.symbol, '4h', CONFIG.TIMEFRAMES['4h'].limit),
@@ -954,84 +1384,130 @@ async function main() {
       getRecentTrades(market.symbol).catch(() => []),
       getContractStats(market.symbol).catch(() => []),
     ]);
+
     const candles5m = candles5mData.closed;
     const candles15m = candles15mData.closed;
     const candles1d = candles1dData.closed;
+
     if (candles15m.length < 30 || candles1h.length < 30 || candles4h.length < 30) {
       throw new Error('کندل کافی برای تحلیل تایم‌فریم‌ها دریافت نشد.');
     }
+
     success++;
-    const derivatives = analyzeDerivatives(tradesResult, statsResult, market.contract?.quanto_multiplier);
+
+    const derivatives = analyzeDerivatives(
+      tradesResult,
+      statsResult,
+      market.contract?.quanto_multiplier
+    );
+
     const candidate = analyzeCoin({
       symbol: market.symbol,
-      candles: { '15m': candles15m, '1h': candles1h, '4h': candles4h, '1d': candles1d },
+      candles: {
+        '15m': candles15m,
+        '1h': candles1h,
+        '4h': candles4h,
+        '1d': candles1d,
+      },
       dailyCurrent: candles1dData.current,
       livePrice: market.lastPrice,
       derivatives,
     });
+
     if (!candidate) return null;
+
     candidate.livePrice = market.lastPrice;
     candidate.live15m = candles15mData.current;
     candidate.live1d = candles1dData.current;
     candidate.opportunityType = classifyOpportunity(candidate);
     candidate._candles5m = candles5m;
+
     const setup = buildTradeSetup(candidate, candles15m);
-    const tradeState = updateTradeState(candidate, setup, previousTradeStates[market.symbol], nowMs, candles5m, candles15m);
+    const tradeState = updateTradeState(
+      candidate,
+      setup,
+      previousTradeStates[market.symbol],
+      nowMs,
+      candles5m,
+      candles15m
+    );
+
     candidate.tradeStatus = tradeState.status;
     candidate.tradeStatusLabel = tradeState.statusLabel;
     candidate.tradeSetup = tradeState.setup;
     candidate.tradeState = tradeState;
+
     delete candidate._analysis;
     delete candidate._candles5m;
+
     return candidate;
   });
 
   const candidates = [];
+
   for (const result of analyzed) {
-    if (result?.error) { errors++; continue; }
+    if (result?.error) {
+      errors++;
+      continue;
+    }
+
     if (result) candidates.push(result);
   }
 
-  const updatedTradeStates = { ...previousTradeStates };
-  for (const coin of candidates) updatedTradeStates[coin.symbol] = coin.tradeState;
-
   let rankChanges = null;
-  let rankedCandidates = candidates;
+
   try {
-    const storageResult = await saveMarketSnapshot(candidates, { tradeStates: updatedTradeStates });
-    rankChanges = storageResult.rankChanges;
-    rankedCandidates = storageResult.rankedCandidates;
+    // امضای تابع storage فقط یک آرگومان دارد.
+    const storageResult = await saveMarketSnapshot(candidates);
+    rankChanges = storageResult?.rankChanges ?? null;
+
     console.log('\n💾 MARKET DATA SAVED');
-    console.log(`Snapshots: ${storageResult.snapshotsSaved}`);
-    console.log(`History records: ${storageResult.historyCount}`);
-    console.log(`Coin summaries: ${storageResult.summaryCount}`);
-    console.log(`Trade states: ${storageResult.tradeStateCount}`);
-    console.log('📊 Independent growth and early-move ranks calculated.');
+    console.log('📊 Market snapshot saved successfully.');
   } catch (storageError) {
     console.error('⚠️ MARKET STORAGE FAILED:', storageError);
-    rankedCandidates = [...candidates].sort((a, b) => number(b.growthScore) - number(a.growthScore));
-    rankedCandidates.forEach((coin, index) => { coin.growthRank = index + 1; });
-    [...candidates].sort((a, b) => number(b.moveScore) - number(a.moveScore))
-      .forEach((coin, index) => { coin.moveRank = index + 1; });
   }
 
+  // رتبه‌بندی نهایی مستقل از خروجی storage انجام می‌شود.
+  // هیچ رتبه‌ای از storage یا مقدار undefined برای انتخاب نهایی استفاده نمی‌شود.
+  const { growthRanked, moveRanked } = assignIndependentRanks(candidates);
+
+  const rankedCandidates = candidates;
   const duration = Date.now() - startedAt;
-  const stats = { active: activeContracts.length, liquid: liquidMarkets.length, success, errors };
+  const stats = {
+    active: activeContracts.length,
+    liquid: liquidMarkets.length,
+    success,
+    errors,
+  };
+
   console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log('🏆 TOP SUSTAINED BULLISH TRENDS');
-  [...rankedCandidates].sort((a, b) => number(a.growthRank) - number(b.growthRank))
-    .slice(0, CONFIG.TOP_COUNT).forEach((coin) => console.log(`${coin.growthRank}. ${coin.symbol} | ${coin.growthScore}/100 | ${coin.growthStatus}`));
-  console.log('\n⚡ TOP ENTRY TIMING');
-  [...rankedCandidates].sort((a, b) => number(a.moveRank) - number(b.moveRank))
-    .slice(0, CONFIG.TOP_COUNT).forEach((coin) => console.log(`${coin.moveRank}. ${coin.symbol} | ${coin.moveScore}/100 | ${coin.moveStatus} | ${coin.moveTypeLabel}`));
+  console.log('🏆 QUALIFIED SUSTAINED BULLISH TRENDS');
+  console.log(`Qualified bullish trends: ${growthRanked.length}`);
+
+  growthRanked.forEach((coin) => {
+    console.log(
+      `${coin.growthRank}. ${coin.symbol} | ${coin.growthScore}/100 | ${coin.growthStatus}`
+    );
+  });
+
+  console.log('\n⚡ QUALIFIED ENTRY OPPORTUNITIES');
+  console.log(`Qualified entry opportunities: ${moveRanked.length}`);
+
+  moveRanked.forEach((coin) => {
+    console.log(
+      `${coin.moveRank}. ${coin.symbol} | ${coin.moveScore}/100 | ${coin.moveStatus} | ${coin.moveTypeLabel}`
+    );
+  });
+
   console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log(`Candidates: ${rankedCandidates.length}`);
+  console.log(`Analyzed candidates: ${rankedCandidates.length}`);
   console.log(`Successful analyses: ${success}`);
   console.log(`Errors: ${errors}`);
   console.log(`Duration: ${(duration / 1000).toFixed(1)}s`);
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
   await sendReports(buildReport(rankedCandidates, stats, duration, rankChanges));
+
   console.log('✅ Telegram report sent successfully.');
 }
 
