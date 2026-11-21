@@ -1,1230 +1,1108 @@
 
 /**
- * GATE.IO USDT PERPETUAL — EARLY LONG BREAKOUT RADAR
- * --------------------------------------------------
+ * GATE.IO USDT PERPETUAL — INDEPENDENT LONG RADAR
+ * ------------------------------------------------------------
  * LONG ONLY
  *
- * Strategy:
- * 1h  = Actual consolidation detection (up to 48 closed candles)
- * 15m = Fresh breakout detection + candle strength + volume
- * 1h  = EMA20 trend confirmation
- * 4h  = Overhead resistance / room-to-grow filter
+ * هدف:
+ * 1) کشف شروع حرکت صعودی قبل از جهش‌های بزرگ
+ * 2) شناسایی ارزهای قدرتمند حتی هنگام نزول BTC
+ * 3) تشخیص افزایش قیمت همراه با افزایش گردش مالی
+ * 4) تشخیص استمرار حرکت در تایم‌فریم‌های 15m و 1h و 4h
+ * 5) جداسازی حرکت اولیه از حرکت پیشرفته
  *
- * Consolidation:
- * - Backward scan from the latest closed 1h candle
- * - Continuous candles only
- * - Expanding window until range limit is exceeded
- * - Actual candle count, duration, high, low and range
+ * TIMEFRAMES:
+ * 15m = کشف حرکت تازه و شتاب اولیه
+ * 1h  = تأیید استمرار و قدرت حرکت
+ * 4h  = بررسی جهت کلی و فضای حرکت
+ * BTC = معیار سنجش قدرت مستقل ارز
  *
- * File: src/scanner/marketScanner.js
+ * IMPORTANT:
+ * Buy pressure is ESTIMATED from candle structure and turnover.
+ * It is NOT verified taker-buy volume.
+ *
+ * FILE:
+ * src/scanner/marketScanner.js
  */
 
-import 'dotenv/config';
-import { saveMarketSnapshot } from '../storage/marketStorage.js';
+import { saveMarketSnapshot } from "../storage/marketStorage.js";
 
 // ============================================================
 // CONFIG
 // ============================================================
 
 const CONFIG = {
-  API_BASE: 'https://api.gateio.ws/api/v4',
+  API_BASE: "https://api.gateio.ws/api/v4",
+
+  SETTLE: "usdt",
+  BTC_SYMBOL: "BTC_USDT",
 
   TIMEFRAMES: {
-    '15m': { seconds: 900, limit: 100 },
-    '1h': { seconds: 3600, limit: 100 },
-    '4h': { seconds: 14400, limit: 100 }
+    FAST: "15m",
+    MEDIUM: "1h",
+    SLOW: "4h",
   },
 
-  TOP_COUNT: 30,
-  MIN_QUOTE_VOLUME_24H: 100000,
+  CANDLE_LIMITS: {
+    FAST: 100,
+    MEDIUM: 60,
+    SLOW: 40,
+  },
 
-  // API protection
+  // Liquidity protection
+  MIN_QUOTE_VOLUME_24H: 100000,
+  MAX_MARKETS_PER_SCAN: 0,
+
+  // Request control
   CONCURRENCY: 3,
-  REQUEST_INTERVAL_MS: 150,
-  REQUEST_TIMEOUT: 15000,
+  REQUEST_DELAY_MS: 150,
+  REQUEST_TIMEOUT_MS: 15000,
   RETRIES: 3,
 
-  TELEGRAM_MAX_LENGTH: 3500,
-  TELEGRAM_DELAY: 400,
-
-  // Telegram reliability
-  TELEGRAM_RETRIES: 4,
-  TELEGRAM_REQUEST_TIMEOUT: 15000,
-
-  // 1H Consolidation detection
-  MIN_CONSOLIDATION_CANDLES: 4,
-  MAX_CONSOLIDATION_CANDLES: 48,
-  MAX_CONSOLIDATION_RANGE: 5.0,
-
-  // 15M Breakout conditions
-  MIN_BREAKOUT_PERCENT: 0.10,
-  MAX_BREAKOUT_EXTENSION: 1.25,
-  MIN_CANDLE_RETURN: 0.15,
-  MIN_CLOSE_LOCATION: 0.65,
-
-  // 15M Volume
+  // Analysis
   VOLUME_BASELINE_CANDLES: 20,
-  MIN_VOLUME_RATIO: 1.35,
-  MIN_CANDLE_ELAPSED_SECONDS: 180,
+  MIN_HISTORY_FAST: 25,
+  MIN_HISTORY_MEDIUM: 15,
+  MIN_HISTORY_SLOW: 10,
 
-  // 1H Trend
-  EMA_PERIOD: 20,
-  EMA_SLOPE_LOOKBACK: 5,
+  // Early movement thresholds
+  EARLY_MIN_CHANGE_15M: 0.25,
+  EARLY_MIN_CHANGE_1H: 0.50,
+  EARLY_MIN_CHANGE_4H: 0.50,
 
-  // 4H resistance
-  RESISTANCE_CANDLES_4H: 10,
-  MIN_RESISTANCE_ROOM: 0.80,
+  // Strong movement thresholds
+  STRONG_CHANGE_15M: 0.80,
+  STRONG_CHANGE_1H: 1.50,
+
+  // Turnover expansion
+  MIN_TURNOVER_RATIO: 1.25,
+  STRONG_TURNOVER_RATIO: 2.0,
+
+  // Relative strength
+  MIN_RELATIVE_STRENGTH: 0.50,
+  STRONG_RELATIVE_STRENGTH: 2.0,
+
+  // Avoid extreme late entries in early category
+  EARLY_MAX_CHANGE_24H: 18,
+  ADVANCED_MIN_CHANGE_24H: 20,
+
+  // Abnormal candle protection
+  MAX_SINGLE_CANDLE_CHANGE_15M: 12,
+  MAX_SINGLE_CANDLE_CHANGE_1H: 35,
 
   // Ranking
-  MIN_SCORE: 55
+  MIN_SCORE: 35,
+
+  // Reporting
+  MAX_REPORT_ITEMS: 30,
+  TELEGRAM_MAX_LENGTH: 3900,
+
+  // BTC benchmark
+  BTC_SYMBOL_ALIASES: ["BTC_USDT", "BTCUSDT"],
 };
 
 // ============================================================
 // UTILITIES
 // ============================================================
 
-const sleep = ms =>
-  new Promise(resolve => setTimeout(resolve, ms));
+const sleep = (ms) =>
+  new Promise((resolve) => setTimeout(resolve, ms));
 
-const number = (value, fallback = 0) => {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
+const toNumber = (value, fallback = 0) => {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
 };
 
 const clamp = (value, min, max) =>
   Math.max(min, Math.min(max, value));
 
-const median = values => {
-  if (!values.length) return 0;
-
-  const sorted = [...values].sort((a, b) => a - b);
-  const middle = Math.floor(sorted.length / 2);
-
-  return sorted.length % 2
-    ? sorted[middle]
-    : (sorted[middle - 1] + sorted[middle]) / 2;
+const round = (value, digits = 2) => {
+  const factor = 10 ** digits;
+  return Math.round(toNumber(value) * factor) / factor;
 };
 
-const pctChange = (current, previous) => {
+const percentChange = (current, previous) => {
   if (!previous || previous <= 0) return 0;
-
   return ((current - previous) / previous) * 100;
 };
 
-const formatPrice = value => {
-  if (!Number.isFinite(value)) return '-';
-  if (value >= 1000) return value.toFixed(2);
-  if (value >= 1) return value.toFixed(5);
-  if (value >= 0.001) return value.toFixed(7);
+const median = (values) => {
+  const clean = values
+    .map(Number)
+    .filter((value) => Number.isFinite(value) && value >= 0)
+    .sort((a, b) => a - b);
 
-  return value.toPrecision(5);
+  if (!clean.length) return 0;
+
+  const middle = Math.floor(clean.length / 2);
+
+  return clean.length % 2
+    ? clean[middle]
+    : (clean[middle - 1] + clean[middle]) / 2;
 };
 
-const formatTurnover = value =>
-  new Intl.NumberFormat('en-US', {
-    notation: 'compact',
-    maximumFractionDigits: 2
-  }).format(number(value));
+const average = (values) => {
+  const clean = values.filter(Number.isFinite);
+  if (!clean.length) return 0;
 
-const formatPercent = value => {
-  if (!Number.isFinite(value)) return '-';
-
-  return `${value >= 0 ? '+' : ''}${value.toFixed(3)}%`;
+  return clean.reduce((sum, value) => sum + value, 0) /
+    clean.length;
 };
 
-const getContractMultiplier = contract => {
-  const multiplier = number(contract?.quanto_multiplier, 1);
-  return multiplier > 0 ? multiplier : 1;
+const formatPercent = (value) => {
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${round(value)}%`;
 };
 
-// ============================================================
-// API REQUEST PACING
-// ============================================================
+const normalizeSymbol = (symbol) =>
+  String(symbol || "").replace("/", "_").toUpperCase();
 
-let nextRequestAt = 0;
-
-async function waitForRequestSlot() {
-  const now = Date.now();
-  const scheduledAt = Math.max(now, nextRequestAt);
-
-  nextRequestAt =
-    scheduledAt + CONFIG.REQUEST_INTERVAL_MS;
-
-  const wait = scheduledAt - now;
-
-  if (wait > 0) {
-    await sleep(wait);
-  }
-}
-
-function getRetryAfterMs(response) {
-  const value = response?.headers?.get('retry-after');
-
-  if (!value) return 0;
-
-  const seconds = Number(value);
-
-  if (Number.isFinite(seconds) && seconds > 0) {
-    return seconds * 1000;
-  }
-
-  const date = Date.parse(value);
-
-  if (Number.isFinite(date)) {
-    return Math.max(0, date - Date.now());
-  }
-
-  return 0;
-}
+const isValidPrice = (value) =>
+  Number.isFinite(value) && value > 0;
 
 // ============================================================
-// DIAGNOSTICS
+// REQUEST ENGINE
 // ============================================================
 
-function createDiagnostics() {
-  return {
-    validData: 0,
-    consolidation: 0,
+let lastRequestTime = 0;
 
-    // Consolidation details
-    consolidationSamples: [],
+async function requestGate(path, params = {}) {
+  let attempt = 0;
 
-    // Breakout diagnostics
-    breakoutChecks: 0,
-    breakoutBelowResistance: 0,
-    breakoutNearResistance: 0,
-    breakoutAboveMax: 0,
-    candleReturnRejected: 0,
-    invalidCandleRange: 0,
-    closeLocationRejected: 0,
-
-    breakout: 0,
-    volume: 0,
-    trend: 0,
-    room: 0,
-    score: 0,
-
-    // Breakout rejection samples
-    breakoutSamples: [],
-
-    // Breakout volume details
-    volumeSamples: [],
-
-    // Detailed diagnostics for volume-confirmed breakouts
-    trendSamples: []
-  };
-}
-
-function getTrendFailureReasons(trend) {
-  const reasons = [];
-
-  if (!trend.dataValid) {
-    reasons.push('داده EMA نامعتبر');
-    return reasons;
-  }
-
-  if (!trend.lastCloseAboveEMA) {
-    reasons.push('قیمت بسته‌شدن زیر EMA20');
-  }
-
-  if (!trend.livePriceAboveEMA) {
-    reasons.push('قیمت زنده زیر EMA20');
-  }
-
-  if (!trend.positiveSlope) {
-    reasons.push('شیب EMA مثبت نیست');
-  }
-
-  return reasons;
-}
-
-function getRoomFailureReason(room) {
-  if (!room.dataValid) {
-    return 'داده مقاومت 4H نامعتبر';
-  }
-
-  if (!room.passed) {
-    return `فضای رشد کمتر از ${CONFIG.MIN_RESISTANCE_ROOM.toFixed(2)}%`;
-  }
-
-  return 'تأیید شد';
-}
-
-function formatBreakoutDiagnostics(d) {
-  const lines = [
-    '🔬 تشخیص علت رد شکست 15M:',
-    `🔎 تعداد بررسی شکست: ${d.breakoutChecks}`,
-    `🔴 قیمت زیر مقاومت: ${d.breakoutBelowResistance}`,
-    `🟡 نزدیک مقاومت، اما شکست کمتر از ${CONFIG.MIN_BREAKOUT_PERCENT.toFixed(2)}%: ${d.breakoutNearResistance}`,
-    `🚀 عبور بیش از حد مجاز ${CONFIG.MAX_BREAKOUT_EXTENSION.toFixed(2)}%: ${d.breakoutAboveMax}`,
-    `📉 رشد کندل کمتر از ${CONFIG.MIN_CANDLE_RETURN.toFixed(2)}%: ${d.candleReturnRejected}`,
-    `⚠️ دامنه کندل نامعتبر: ${d.invalidCandleRange}`,
-    `📍 موقعیت Close کمتر از ${CONFIG.MIN_CLOSE_LOCATION.toFixed(2)}: ${d.closeLocationRejected}`,
-    `✅ شکست تأییدشده: ${d.breakout}`,
-    '',
-    '📋 نمونه ارزهای بررسی‌شده در مرحله شکست:'
-  ];
-
-  const samples = [...d.breakoutSamples]
-    .sort((a, b) => {
-      return b.breakoutPercent - a.breakoutPercent;
-    })
-    .slice(0, 12);
-
-  if (!samples.length) {
-    lines.push('هیچ نمونه‌ای برای بررسی شکست ثبت نشد.');
-  } else {
-    for (const sample of samples) {
-      const status = sample.passed ? '✅' : '❌';
-
-      lines.push(
-        `${status} ${sample.symbol} | فاصله از سقف تراکم 1H: ${formatPercent(sample.breakoutPercent)}`
-      );
-
-      lines.push(
-        `   رشد کندل: ${formatPercent(sample.candleReturn)} | موقعیت Close: ${sample.closeLocation === null ? '-' : sample.closeLocation.toFixed(2)}`
-      );
-
-      lines.push(
-        `   قیمت: ${formatPrice(sample.livePrice)} | سقف تراکم: ${formatPrice(sample.resistance)}`
-      );
-
-      lines.push(
-        `   طول تراکم: ${sample.consolidationCandles} کندل | مدت: ${sample.consolidationDurationHours} ساعت | دامنه: ${sample.rangePercent.toFixed(2)}%`
-      );
-
-      if (sample.failedChecks.length) {
-        lines.push(
-          `   علت رد: ${sample.failedChecks.join('، ')}`
-        );
-      } else {
-        lines.push('   نتیجه: تمام شروط شکست تأیید شدند.');
-      }
-    }
-  }
-
-  lines.push(
-    '',
-    'ℹ️ شمارنده‌های علت رد مستقل هستند؛ یک ارز می‌تواند هم‌زمان در چند علت رد ثبت شود.'
-  );
-
-  return lines.join('\n');
-}
-
-function formatDiagnostics(d) {
-  const lines = [
-    '🔬 مراحل عبور ارزها:',
-    `1️⃣ داده معتبر: ${d.validData}`,
-    `2️⃣ تشکیل تراکم 1H: ${d.consolidation}`,
-    `3️⃣ شکست معتبر 15M: ${d.breakout}`,
-    `4️⃣ تأیید حجم 15M: ${d.volume}`,
-    `5️⃣ تأیید روند 1H: ${d.trend}`,
-    `6️⃣ فضای رشد 4H: ${d.room}`,
-    `7️⃣ امتیاز نهایی: ${d.score}`,
-    '',
-    '📦 جزئیات تراکم‌های شناسایی‌شده در 1H:'
-  ];
-
-  const consolidationSamples = [...d.consolidationSamples]
-    .sort((a, b) => b.candlesCount - a.candlesCount)
-    .slice(0, 8);
-
-  if (!consolidationSamples.length) {
-    lines.push('تراکم معتبر یک‌ساعته شناسایی نشد.');
-  } else {
-    for (const sample of consolidationSamples) {
-      lines.push(
-        `• ${sample.symbol} | ${sample.candlesCount} کندل | ${sample.durationHours} ساعت`
-      );
-
-      lines.push(
-        `   سقف: ${formatPrice(sample.resistance)} | کف: ${formatPrice(sample.support)} | دامنه: ${sample.rangePercent.toFixed(2)}%`
-      );
-    }
-  }
-
-  lines.push(
-    '',
-    formatBreakoutDiagnostics(d),
-    '',
-    '📊 بررسی حجم شکست‌های معتبر:'
-  );
-
-  const volumeSamples = [...d.volumeSamples]
-    .sort((a, b) => b.volumeRatio - a.volumeRatio)
-    .slice(0, 8);
-
-  if (!volumeSamples.length) {
-    lines.push('در این اسکن شکست معتبری برای بررسی حجم ثبت نشد.');
-  } else {
-    for (const sample of volumeSamples) {
-      const status =
-        sample.volumeRatio >= CONFIG.MIN_VOLUME_RATIO
-          ? '✅'
-          : '❌';
-
-      lines.push(
-        `${status} ${sample.symbol} | نسبت حجم: ${sample.volumeRatio.toFixed(2)}x`
-      );
-
-      lines.push(
-        `   گردش جاری: ${formatTurnover(sample.currentTurnover)} | مبنا: ${formatTurnover(sample.baselineTurnover)}`
-      );
-
-      lines.push(
-        `   حجم موردانتظار: ${formatTurnover(sample.expectedTurnover)} | زمان کندل: ${sample.elapsedSeconds}s`
-      );
-    }
-  }
-
-  lines.push(
-    `📌 حداقل نسبت حجم موردنیاز: ${CONFIG.MIN_VOLUME_RATIO.toFixed(2)}x`
-  );
-
-  // ----------------------------------------------------------
-  // 1H + 4H DIAGNOSTICS
-  // ----------------------------------------------------------
-
-  lines.push(
-    '',
-    '🔍 بررسی تشخیصی ارزهای دارای شکست + حجم تأییدشده:'
-  );
-
-  const trendSamples = [...d.trendSamples]
-    .sort((a, b) => b.volumeRatio - a.volumeRatio)
-    .slice(0, 10);
-
-  if (!trendSamples.length) {
-    lines.push(
-      'ارزی با شکست و حجم تأییدشده برای بررسی 1H و 4H ثبت نشد.'
-    );
-
-    return lines.join('\n');
-  }
-
-  for (const sample of trendSamples) {
-    const trendStatus = sample.trend.passed
-      ? '✅'
-      : '❌';
-
-    const roomStatus = sample.room.passed
-      ? '✅'
-      : '❌';
-
-    lines.push('');
-    lines.push(
-      `${trendStatus} ${sample.symbol} | حجم ${sample.volumeRatio.toFixed(2)}x`
-    );
-
-    lines.push(
-      `   1H EMA20: ${formatPrice(sample.trend.ema)}`
-    );
-
-    lines.push(
-      `   قیمت زنده: ${formatPrice(sample.trend.livePrice)} | فاصله از EMA: ${formatPercent(sample.trend.liveDistancePct)}`
-    );
-
-    lines.push(
-      `   آخرین Close: ${formatPrice(sample.trend.lastClose)} | فاصله از EMA: ${formatPercent(sample.trend.closeDistancePct)}`
-    );
-
-    lines.push(
-      `   شیب EMA20: ${formatPercent(sample.trend.emaSlope)}`
-    );
-
-    lines.push(
-      `   شروط 1H: Close ${sample.trend.lastCloseAboveEMA ? '✅' : '❌'} | Live ${sample.trend.livePriceAboveEMA ? '✅' : '❌'} | Slope ${sample.trend.positiveSlope ? '✅' : '❌'}`
-    );
-
-    if (sample.trend.passed) {
-      lines.push('   نتیجه 1H: تأیید شد');
-    } else {
-      lines.push(
-        `   علت رد 1H: ${sample.trend.failureReasons.join('، ')}`
-      );
-    }
-
-    lines.push(
-      `   4H مقاومت: ${formatPrice(sample.room.resistance)}`
-    );
-
-    lines.push(
-      `   فضای رشد 4H: ${formatPercent(sample.room.roomPercent)}`
-    );
-
-    lines.push(
-      `   نتیجه 4H: ${roomStatus} ${getRoomFailureReason(sample.room)}`
-    );
-  }
-
-  lines.push(
-    '',
-    'ℹ️ این بخش صرفاً تشخیصی است و در پذیرش یا رد ارزها تغییری ایجاد نمی‌کند.'
-  );
-
-  return lines.join('\n');
-}
-
-// ============================================================
-// CANDLE TURNOVER
-// ============================================================
-
-const candleValue = (candle, multiplier = 1) => {
-  const turnover = number(candle?.turnover);
-
-  if (turnover > 0) return turnover;
-
-  const volume = Math.max(0, number(candle?.volume));
-  const close = Math.max(0, number(candle?.close));
-
-  return volume * close * multiplier;
-};
-
-const getMax = (candles, field) =>
-  Math.max(...candles.map(c => number(c[field])));
-
-const getMin = (candles, field) =>
-  Math.min(...candles.map(c => number(c[field])));
-
-// ============================================================
-// HTTP
-// ============================================================
-
-async function fetchJSON(url) {
-  let lastError;
-
-  for (
-    let attempt = 1;
-    attempt <= CONFIG.RETRIES;
-    attempt++
-  ) {
+  while (attempt <= CONFIG.RETRIES) {
     try {
-      await waitForRequestSlot();
+      const elapsed = Date.now() - lastRequestTime;
+
+      if (elapsed < CONFIG.REQUEST_DELAY_MS) {
+        await sleep(CONFIG.REQUEST_DELAY_MS - elapsed);
+      }
+
+      lastRequestTime = Date.now();
+
+      const url = new URL(`${CONFIG.API_BASE}${path}`);
+
+      for (const [key, value] of Object.entries(params)) {
+        if (value !== undefined && value !== null) {
+          url.searchParams.set(key, String(value));
+        }
+      }
+
+      const controller = new AbortController();
+
+      const timeout = setTimeout(
+        () => controller.abort(),
+        CONFIG.REQUEST_TIMEOUT_MS
+      );
 
       const response = await fetch(url, {
-        headers: { Accept: 'application/json' },
-        signal: AbortSignal.timeout(CONFIG.REQUEST_TIMEOUT)
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+        },
+        signal: controller.signal,
       });
 
+      clearTimeout(timeout);
+
       if (!response.ok) {
-        const retryAfterMs =
-          getRetryAfterMs(response);
+        const errorText = await response.text().catch(() => "");
 
-        const body = await response.text();
-
-        const error = new Error(
-          `HTTP ${response.status}: ${body.slice(0, 200)}`
+        throw new Error(
+          `Gate API ${response.status}: ${errorText.slice(0, 200)}`
         );
-
-        error.status = response.status;
-        error.retryAfterMs = retryAfterMs;
-
-        throw error;
       }
 
       return await response.json();
-
     } catch (error) {
-      lastError = error;
+      attempt++;
 
-      if (attempt < CONFIG.RETRIES) {
-        const exponentialBackoff =
-          1500 * Math.pow(2, attempt - 1);
-
-        const jitter = Math.floor(
-          Math.random() * 500
-        );
-
-        const retryDelay =
-          error.status === 429
-            ? Math.max(
-                error.retryAfterMs || 0,
-                exponentialBackoff + jitter
-              )
-            : 700 * attempt + jitter;
-
-        console.warn(
-          `⚠️ API retry ${attempt}/${CONFIG.RETRIES} | ${error.status || 'NETWORK'} | wait ${Math.ceil(retryDelay / 1000)}s`
-        );
-
-        await sleep(retryDelay);
+      if (attempt > CONFIG.RETRIES) {
+        throw error;
       }
+
+      await sleep(500 * attempt);
     }
   }
 
-  throw lastError;
+  throw new Error("Request failed");
 }
 
 // ============================================================
-// GATE.IO API
+// MARKET DATA
 // ============================================================
 
 async function getContracts() {
-  return fetchJSON(
-    `${CONFIG.API_BASE}/futures/usdt/contracts`
+  const result = await requestGate(
+    `/futures/${CONFIG.SETTLE}/contracts`
   );
+
+  return Array.isArray(result) ? result : [];
 }
 
 async function getTickers() {
-  return fetchJSON(
-    `${CONFIG.API_BASE}/futures/usdt/tickers`
+  const result = await requestGate(
+    `/futures/${CONFIG.SETTLE}/tickers`
   );
+
+  return Array.isArray(result) ? result : [];
 }
 
-async function getCandles(
-  contract,
-  interval,
-  limit,
-  includeCurrent = false
-) {
-  const params = new URLSearchParams({
-    contract,
-    interval,
-    limit: String(limit)
-  });
-
-  const raw = await fetchJSON(
-    `${CONFIG.API_BASE}/futures/usdt/candlesticks?${params}`
+async function getCandles(symbol, interval, limit) {
+  const result = await requestGate(
+    `/futures/${CONFIG.SETTLE}/candlesticks`,
+    {
+      contract: symbol,
+      interval,
+      limit,
+    }
   );
 
-  if (!Array.isArray(raw)) {
-    throw new Error(`Invalid candles: ${contract} ${interval}`);
-  }
+  if (!Array.isArray(result)) return [];
 
-  const candles = raw
-    .map(c => ({
-      time: number(c.t),
-      open: number(c.o),
-      high: number(c.h),
-      low: number(c.l),
-      close: number(c.c),
-      volume: number(c.v),
-      turnover: number(c.sum)
-    }))
-    .filter(c =>
-      c.time > 0 &&
-      c.open > 0 &&
-      c.high > 0 &&
-      c.low > 0 &&
-      c.close > 0
-    )
-    .sort((a, b) => a.time - b.time);
-
-  const seconds = CONFIG.TIMEFRAMES[interval].seconds;
-
-  const currentBucket =
-    Math.floor(Date.now() / 1000 / seconds) * seconds;
-
-  const closed = candles.filter(
-    c => c.time < currentBucket
-  );
-
-  if (!includeCurrent) return closed;
-
-  const current =
-    candles.find(c => c.time === currentBucket) || null;
-
-  return { closed, current };
-}
-
-// ============================================================
-// CONCURRENCY
-// ============================================================
-
-async function mapLimit(items, limit, worker) {
-  const results = new Array(items.length);
-  let nextIndex = 0;
-
-  async function runner() {
-    while (true) {
-      const index = nextIndex++;
-
-      if (index >= items.length) return;
-
-      try {
-        results[index] = await worker(items[index]);
-      } catch (error) {
-        results[index] = {
-          error: error.message,
-          item: items[index]
+  return result
+    .map((item) => {
+      // Gate.io normally returns candle objects.
+      // Array support is retained as a defensive fallback.
+      if (Array.isArray(item)) {
+        return {
+          time: toNumber(item[0]),
+          volume: toNumber(item[1]),
+          close: toNumber(item[2]),
+          high: toNumber(item[3]),
+          low: toNumber(item[4]),
+          open: toNumber(item[5]),
+          turnover: toNumber(item[6]),
         };
       }
-    }
-  }
 
-  await Promise.all(
-    Array.from(
-      { length: Math.min(limit, items.length) },
-      () => runner()
+      return {
+        time: toNumber(item.t),
+        volume: toNumber(item.v),
+        close: toNumber(item.c),
+        high: toNumber(item.h),
+        low: toNumber(item.l),
+        open: toNumber(item.o),
+        turnover: toNumber(item.sum),
+      };
+    })
+    .filter(
+      (candle) =>
+        isValidPrice(candle.open) &&
+        isValidPrice(candle.close) &&
+        isValidPrice(candle.high) &&
+        isValidPrice(candle.low)
     )
+    .sort((a, b) => a.time - b.time);
+}
+
+function getClosedCandles(candles, intervalSeconds) {
+  const now = Math.floor(Date.now() / 1000);
+
+  return candles.filter(
+    (candle) => candle.time + intervalSeconds <= now
+  );
+}
+
+// ============================================================
+// CANDLE ANALYSIS
+// ============================================================
+
+function analyzeCandle(candle) {
+  const range = Math.max(candle.high - candle.low, 0);
+
+  const body = candle.close - candle.open;
+
+  const bodyPercent = percentChange(
+    candle.close,
+    candle.open
   );
 
-  return results;
-}
+  const closeLocation =
+    range > 0
+      ? (candle.close - candle.low) / range
+      : 0.5;
 
-// ============================================================
-// EMA
-// ============================================================
+  const upperWick =
+    range > 0
+      ? (candle.high - Math.max(candle.open, candle.close)) /
+        range
+      : 0;
 
-function calculateEMA(values, period) {
-  if (values.length < period) return [];
-
-  const multiplier = 2 / (period + 1);
-
-  let ema = values
-    .slice(0, period)
-    .reduce((sum, value) => sum + value, 0) / period;
-
-  const result = [ema];
-
-  for (let i = period; i < values.length; i++) {
-    ema =
-      (values[i] - ema) * multiplier + ema;
-
-    result.push(ema);
-  }
-
-  return result;
-}
-
-// ============================================================
-// 1H CONSOLIDATION DETECTION
-// ============================================================
-
-function analyzeConsolidation1h(candles) {
-  const minCount = CONFIG.MIN_CONSOLIDATION_CANDLES;
-  const maxCount = CONFIG.MAX_CONSOLIDATION_CANDLES;
-
-  if (candles.length < minCount) return null;
-
-  // Only the latest closed 1H candles are used.
-  const available = candles.slice(-maxCount);
-
-  if (available.length < minCount) return null;
-
-  let resistance = 0;
-  let support = Infinity;
-  let acceptedCandles = [];
-
-  // Start from the latest closed candle and scan backward.
-  for (let i = available.length - 1; i >= 0; i--) {
-    const candle = available[i];
-
-    // Enforce continuity: no missing 1H candles.
-    if (acceptedCandles.length > 0) {
-      const newerCandle = acceptedCandles[0];
-
-      if (
-        newerCandle.time - candle.time !==
-        CONFIG.TIMEFRAMES['1h'].seconds
-      ) {
-        break;
-      }
-    }
-
-    const nextResistance = Math.max(
-      resistance,
-      candle.high
-    );
-
-    const nextSupport = Math.min(
-      support,
-      candle.low
-    );
-
-    if (
-      nextResistance <= 0 ||
-      nextSupport <= 0 ||
-      !Number.isFinite(nextSupport)
-    ) {
-      break;
-    }
-
-    const midpoint =
-      (nextResistance + nextSupport) / 2;
-
-    const nextRangePercent =
-      ((nextResistance - nextSupport) / midpoint) * 100;
-
-    // Stop when adding an older candle breaks the range limit.
-    // The previously accepted continuous range remains intact.
-    if (
-      !Number.isFinite(nextRangePercent) ||
-      nextRangePercent > CONFIG.MAX_CONSOLIDATION_RANGE
-    ) {
-      break;
-    }
-
-    resistance = nextResistance;
-    support = nextSupport;
-
-    acceptedCandles.unshift(candle);
-  }
-
-  const candlesCount = acceptedCandles.length;
-
-  if (candlesCount < minCount) {
-    return null;
-  }
-
-  const midpoint = (resistance + support) / 2;
-
-  const rangePercent =
-    ((resistance - support) / midpoint) * 100;
-
-  if (
-    !Number.isFinite(rangePercent) ||
-    rangePercent > CONFIG.MAX_CONSOLIDATION_RANGE
-  ) {
-    return null;
-  }
-
-  const startTime = acceptedCandles[0].time;
-
-  const lastCandle = acceptedCandles.at(-1);
-
-  const endTime =
-    lastCandle.time + CONFIG.TIMEFRAMES['1h'].seconds;
-
-  const durationHours =
-    (endTime - startTime) /
-    CONFIG.TIMEFRAMES['1h'].seconds;
+  const lowerWick =
+    range > 0
+      ? (Math.min(candle.open, candle.close) - candle.low) /
+        range
+      : 0;
 
   return {
-    resistance,
-    support,
-    rangePercent,
+    bullish: body > 0,
+    bodyPercent: round(bodyPercent),
+    closeLocation: round(closeLocation, 3),
+    upperWick: round(upperWick, 3),
+    lowerWick: round(lowerWick, 3),
+    rangePercent: round(
+      percentChange(candle.high, candle.low)
+    ),
+  };
+}
 
-    candlesCount,
-    durationHours,
+function getReturn(candles, count) {
+  if (!candles || candles.length < count + 1) return 0;
 
-    startTime,
-    endTime,
+  const current = candles[candles.length - 1].close;
+  const previous = candles[candles.length - 1 - count].close;
 
-    startCandle: acceptedCandles[0],
-    endCandle: lastCandle
+  return percentChange(current, previous);
+}
+
+function getTurnover(candle) {
+  if (candle.turnover > 0) return candle.turnover;
+
+  return candle.volume * candle.close;
+}
+
+function analyzeTurnover(candles) {
+  if (!candles || candles.length < 5) {
+    return {
+      ratio: 0,
+      current: 0,
+      baseline: 0,
+      expanded: false,
+    };
+  }
+
+  const currentCandle = candles[candles.length - 1];
+  const current = getTurnover(currentCandle);
+
+  const baselineCandles = candles.slice(
+    -CONFIG.VOLUME_BASELINE_CANDLES - 1,
+    -1
+  );
+
+  const baselineValues = baselineCandles
+    .map(getTurnover)
+    .filter((value) => value > 0);
+
+  const baseline = median(baselineValues);
+
+  const ratio = baseline > 0 ? current / baseline : 0;
+
+  return {
+    ratio: round(ratio, 2),
+    current: round(current, 2),
+    baseline: round(baseline, 2),
+    expanded: ratio >= CONFIG.MIN_TURNOVER_RATIO,
   };
 }
 
 // ============================================================
-// BREAKOUT DETECTION + DETAILED DIAGNOSTICS
+// ESTIMATED BUY PRESSURE
 // ============================================================
 
-function analyzeBreakout(
-  consolidation,
-  current15m,
-  livePrice,
-  diagnostics,
-  symbol
-) {
-  if (
-    !consolidation ||
-    !current15m ||
-    !livePrice
-  ) {
-    return null;
+function estimateBuyPressure(candles) {
+  if (!candles || candles.length < 4) {
+    return {
+      score: 0,
+      label: "داده ناکافی",
+      bullishCandles: 0,
+      averageCloseLocation: 0,
+    };
   }
 
-  diagnostics.consolidation++;
-  diagnostics.breakoutChecks++;
+  const recent = candles.slice(-4);
 
-  const {
-    resistance,
-    support,
-    rangePercent,
-    candlesCount,
-    durationHours
-  } = consolidation;
+  let bullishCandles = 0;
+  let weightedPressure = 0;
+  let totalWeight = 0;
 
-  // ----------------------------------------------------------
-  // Calculate all breakout measurements first.
-  // Breakout resistance comes from the actual 1H range.
-  // ----------------------------------------------------------
+  for (const candle of recent) {
+    const structure = analyzeCandle(candle);
+    const turnover = Math.max(getTurnover(candle), 1);
 
-  const breakoutPercent = pctChange(
-    livePrice,
-    resistance
+    if (structure.bullish) bullishCandles++;
+
+    const candlePressure =
+      structure.closeLocation * 0.55 +
+      (structure.bullish ? 0.30 : 0) +
+      (1 - structure.upperWick) * 0.15;
+
+    weightedPressure += candlePressure * turnover;
+    totalWeight += turnover;
+  }
+
+  const score =
+    totalWeight > 0
+      ? (weightedPressure / totalWeight) * 100
+      : 0;
+
+  let label = "ضعیف";
+
+  if (score >= 75) label = "قوی";
+  else if (score >= 62) label = "مناسب";
+  else if (score >= 50) label = "متوسط";
+
+  return {
+    score: round(score),
+    label,
+    bullishCandles,
+    averageCloseLocation: round(
+      average(recent.map((c) => analyzeCandle(c).closeLocation)),
+      3
+    ),
+  };
+}
+
+// ============================================================
+// MOMENTUM ANALYSIS
+// ============================================================
+
+function analyzeFastTimeframe(candles) {
+  if (candles.length < CONFIG.MIN_HISTORY_FAST) {
+    return {
+      valid: false,
+      reason: "تاریخچه 15 دقیقه کافی نیست",
+    };
+  }
+
+  const last = candles[candles.length - 1];
+  const previous = candles[candles.length - 2];
+
+  const change15m = percentChange(
+    last.close,
+    previous.close
   );
 
-  const candleReturn = pctChange(
-    livePrice,
-    current15m.open
-  );
+  const change30m = getReturn(candles, 2);
+  const change1h = getReturn(candles, 4);
+  const change2h = getReturn(candles, 8);
 
-  const currentHigh = Math.max(
-    current15m.high,
-    livePrice
-  );
+  const candleStructure = analyzeCandle(last);
+  const turnover = analyzeTurnover(candles);
+  const pressure = estimateBuyPressure(candles);
 
-  const currentLow = Math.min(
-    current15m.low,
-    livePrice
-  );
+  const previousChanges = candles
+    .slice(-5, -1)
+    .map((candle, index, array) => {
+      const previousCandle = array[index - 1];
+      if (!previousCandle) return 0;
 
-  const currentRange = currentHigh - currentLow;
-
-  const validCandleRange =
-    Number.isFinite(currentRange) &&
-    currentRange > 0;
-
-  const closeLocation = validCandleRange
-    ? clamp(
-        (livePrice - currentLow) / currentRange,
-        0,
-        1
-      )
-    : null;
-
-  // ----------------------------------------------------------
-  // Independent condition checks
-  // ----------------------------------------------------------
-
-  const belowResistance =
-    breakoutPercent < 0;
-
-  const nearResistance =
-    breakoutPercent >= 0 &&
-    breakoutPercent < CONFIG.MIN_BREAKOUT_PERCENT;
-
-  const aboveMaximum =
-    breakoutPercent > CONFIG.MAX_BREAKOUT_EXTENSION;
-
-  const candleReturnRejected =
-    candleReturn < CONFIG.MIN_CANDLE_RETURN;
-
-  const invalidCandleRange =
-    !validCandleRange;
-
-  const closeLocationRejected =
-    validCandleRange &&
-    closeLocation < CONFIG.MIN_CLOSE_LOCATION;
-
-  // ----------------------------------------------------------
-  // Update independent diagnostic counters
-  // ----------------------------------------------------------
-
-  if (belowResistance) {
-    diagnostics.breakoutBelowResistance++;
-  }
-
-  if (nearResistance) {
-    diagnostics.breakoutNearResistance++;
-  }
-
-  if (aboveMaximum) {
-    diagnostics.breakoutAboveMax++;
-  }
-
-  if (candleReturnRejected) {
-    diagnostics.candleReturnRejected++;
-  }
-
-  if (invalidCandleRange) {
-    diagnostics.invalidCandleRange++;
-  }
-
-  if (closeLocationRejected) {
-    diagnostics.closeLocationRejected++;
-  }
-
-  // ----------------------------------------------------------
-  // Collect rejection reasons
-  // ----------------------------------------------------------
-
-  const failedChecks = [];
-
-  if (belowResistance) {
-    failedChecks.push('قیمت هنوز زیر سقف تراکم 1H است');
-  } else if (nearResistance) {
-    failedChecks.push('شکست کمتر از حداقل مجاز');
-  }
-
-  if (aboveMaximum) {
-    failedChecks.push('قیمت بیش از حد از مقاومت فاصله گرفته');
-  }
-
-  if (candleReturnRejected) {
-    failedChecks.push('رشد کندل کافی نیست');
-  }
-
-  if (invalidCandleRange) {
-    failedChecks.push('دامنه کندل نامعتبر است');
-  } else if (closeLocationRejected) {
-    failedChecks.push('موقعیت قیمت در کندل ضعیف است');
-  }
-
-  const passed =
-    !belowResistance &&
-    !nearResistance &&
-    !aboveMaximum &&
-    !candleReturnRejected &&
-    !invalidCandleRange &&
-    !closeLocationRejected;
-
-  // ----------------------------------------------------------
-  // Store diagnostic samples
-  // ----------------------------------------------------------
-
-  if (diagnostics.breakoutSamples.length < 30) {
-    diagnostics.breakoutSamples.push({
-      symbol,
-      passed,
-
-      breakoutPercent,
-      candleReturn,
-      closeLocation,
-
-      livePrice,
-      resistance,
-      support,
-      rangePercent,
-
-      consolidationCandles: candlesCount,
-      consolidationDurationHours: durationHours,
-
-      failedChecks
+      return percentChange(
+        candle.close,
+        previousCandle.close
+      );
     });
-  }
 
-  // ----------------------------------------------------------
-  // Original breakout acceptance conditions preserved.
-  // ----------------------------------------------------------
+  const previousMomentum = average(previousChanges);
 
-  if (!passed) return null;
+  const acceleration = change15m - previousMomentum;
 
-  diagnostics.breakout++;
+  const abnormalCandle =
+    Math.abs(change15m) >
+    CONFIG.MAX_SINGLE_CANDLE_CHANGE_15M;
+
+  const positiveMomentum =
+    change15m >= CONFIG.EARLY_MIN_CHANGE_15M ||
+    change30m >= CONFIG.EARLY_MIN_CHANGE_15M ||
+    change1h >= CONFIG.EARLY_MIN_CHANGE_1H;
+
+  const priceAndTurnover =
+    positiveMomentum &&
+    turnover.ratio >= CONFIG.MIN_TURNOVER_RATIO;
 
   return {
-    resistance,
-    support,
-    rangePercent,
+    valid: true,
 
-    breakoutPercent,
-    candleReturn,
-    closeLocation,
+    change15m: round(change15m),
+    change30m: round(change30m),
+    change1h: round(change1h),
+    change2h: round(change2h),
 
-    consolidationCandles: candlesCount,
-    consolidationDurationHours: durationHours,
+    acceleration: round(acceleration),
 
-    consolidationStartTime: consolidation.startTime,
-    consolidationEndTime: consolidation.endTime
+    candleStructure,
+    turnover,
+    pressure,
+
+    positiveMomentum,
+    priceAndTurnover,
+    abnormalCandle,
+
+    lastPrice: last.close,
+  };
+}
+
+function analyzeMediumTimeframe(candles) {
+  if (candles.length < CONFIG.MIN_HISTORY_MEDIUM) {
+    return {
+      valid: false,
+      reason: "تاریخچه یک‌ساعته کافی نیست",
+    };
+  }
+
+  const change1h = getReturn(candles, 1);
+  const change3h = getReturn(candles, 3);
+  const change6h = getReturn(candles, 6);
+  const change12h = getReturn(candles, 12);
+
+  const turnover = analyzeTurnover(candles);
+  const pressure = estimateBuyPressure(candles);
+
+  const recent = candles.slice(-6);
+
+  const bullishCount = recent.filter(
+    (candle) => candle.close > candle.open
+  ).length;
+
+  const continuity = bullishCount / recent.length;
+
+  const rising =
+    change1h > 0 &&
+    (change3h > 0 || change6h > 0);
+
+  return {
+    valid: true,
+
+    change1h: round(change1h),
+    change3h: round(change3h),
+    change6h: round(change6h),
+    change12h: round(change12h),
+
+    turnover,
+    pressure,
+
+    bullishCount,
+    continuity: round(continuity, 2),
+    rising,
+  };
+}
+
+function analyzeSlowTimeframe(candles) {
+  if (candles.length < CONFIG.MIN_HISTORY_SLOW) {
+    return {
+      valid: false,
+      reason: "تاریخچه چهار‌ساعته کافی نیست",
+    };
+  }
+
+  const change4h = getReturn(candles, 1);
+  const change8h = getReturn(candles, 2);
+  const change12h = getReturn(candles, 3);
+  const change24h = getReturn(candles, 6);
+
+  const recent = candles.slice(-6);
+
+  const bullishCount = recent.filter(
+    (candle) => candle.close > candle.open
+  ).length;
+
+  const continuity = bullishCount / recent.length;
+
+  const rising =
+    change4h > 0 &&
+    (change8h > 0 || change12h > 0);
+
+  return {
+    valid: true,
+
+    change4h: round(change4h),
+    change8h: round(change8h),
+    change12h: round(change12h),
+    change24h: round(change24h),
+
+    bullishCount,
+    continuity: round(continuity, 2),
+    rising,
   };
 }
 
 // ============================================================
-// VOLUME CONFIRMATION + DIAGNOSTICS
+// BTC BENCHMARK
 // ============================================================
 
-function getCurrentVolumeDetails(
-  closedCandles,
-  currentCandle,
-  multiplier
-) {
-  if (!currentCandle) return null;
+function analyzeBitcoin(candles) {
+  const fast = analyzeFastTimeframe(candles);
+  const medium = analyzeMediumTimeframe(candles);
+  const slow = analyzeSlowTimeframe(candles);
+
+  return {
+    valid: fast.valid && medium.valid && slow.valid,
+
+    change15m: fast.change15m || 0,
+    change1h: medium.change1h || 0,
+    change4h: slow.change4h || 0,
+    change24h: slow.change24h || 0,
+
+    fast,
+    medium,
+    slow,
+  };
+}
+
+function calculateRelativeStrength(coin, btc) {
+  return {
+    rs15m: round(coin.fast.change15m - btc.change15m),
+    rs1h: round(coin.medium.change1h - btc.change1h),
+    rs4h: round(coin.slow.change4h - btc.change4h),
+    rs24h: round(coin.change24h - btc.change24h),
+  };
+}
+
+// ============================================================
+// MOVEMENT CLASSIFICATION
+// ============================================================
+
+function classifyMovement(data) {
+  const {
+    fast,
+    medium,
+    slow,
+    relative,
+    change24h,
+  } = data;
+
+  const independent =
+    (
+      relative.rs1h >= CONFIG.MIN_RELATIVE_STRENGTH ||
+      relative.rs4h >= CONFIG.MIN_RELATIVE_STRENGTH
+    );
+
+  const strongIndependent =
+    (
+      relative.rs1h >= CONFIG.STRONG_RELATIVE_STRENGTH ||
+      relative.rs4h >= CONFIG.STRONG_RELATIVE_STRENGTH
+    );
+
+  const earlyMomentum =
+    fast.change15m >= CONFIG.EARLY_MIN_CHANGE_15M ||
+    fast.change30m >= CONFIG.EARLY_MIN_CHANGE_15M ||
+    fast.change1h >= CONFIG.EARLY_MIN_CHANGE_1H;
+
+  const volumeConfirmed =
+    fast.turnover.ratio >= CONFIG.MIN_TURNOVER_RATIO ||
+    medium.turnover.ratio >= CONFIG.MIN_TURNOVER_RATIO;
+
+  const strongMomentum =
+    fast.change15m >= CONFIG.STRONG_CHANGE_15M ||
+    medium.change1h >= CONFIG.STRONG_CHANGE_1H;
+
+  const advanced =
+    change24h >= CONFIG.ADVANCED_MIN_CHANGE_24H;
+
+  const early =
+    earlyMomentum &&
+    volumeConfirmed &&
+    !advanced &&
+    !fast.abnormalCandle;
+
+  if (advanced) {
+    return {
+      stage: "ADVANCED",
+      stageLabel: "حرکت پیشرفته",
+      independent,
+      strongIndependent,
+      eligible: true,
+    };
+  }
+
+  if (early && independent) {
+    return {
+      stage: "EARLY_INDEPENDENT",
+      stageLabel: "شروع حرکت مستقل",
+      independent: true,
+      strongIndependent,
+      eligible: true,
+    };
+  }
+
+  if (early) {
+    return {
+      stage: "EARLY",
+      stageLabel: "شروع حرکت",
+      independent,
+      strongIndependent,
+      eligible: true,
+    };
+  }
 
   if (
-    closedCandles.length <
-    CONFIG.VOLUME_BASELINE_CANDLES
+    strongMomentum &&
+    volumeConfirmed &&
+    (medium.rising || slow.rising)
   ) {
+    return {
+      stage: "STRONG",
+      stageLabel: "رشد قدرتمند",
+      independent,
+      strongIndependent,
+      eligible: true,
+    };
+  }
+
+  if (
+    medium.rising &&
+    volumeConfirmed &&
+    independent
+  ) {
+    return {
+      stage: "INDEPENDENT",
+      stageLabel: "قدرت مستقل از BTC",
+      independent: true,
+      strongIndependent,
+      eligible: true,
+    };
+  }
+
+  return {
+    stage: "WATCH",
+    stageLabel: "زیر نظر",
+    independent,
+    strongIndependent,
+    eligible: false,
+  };
+}
+
+// ============================================================
+// SCORING
+// ============================================================
+
+function scoreMomentum(fast, medium, slow) {
+  let score = 0;
+
+  score += clamp(fast.change15m * 5, 0, 15);
+  score += clamp(fast.change30m * 2.5, 0, 10);
+  score += clamp(fast.change1h * 2, 0, 12);
+
+  score += clamp(medium.change3h * 1.2, 0, 8);
+  score += clamp(medium.change6h * 0.7, 0, 6);
+
+  score += clamp(slow.change4h * 0.8, 0, 5);
+
+  return score;
+}
+
+function scoreTurnover(fast, medium) {
+  let score = 0;
+
+  score += clamp(
+    (fast.turnover.ratio - 1) * 10,
+    0,
+    15
+  );
+
+  score += clamp(
+    (medium.turnover.ratio - 1) * 6,
+    0,
+    10
+  );
+
+  return score;
+}
+
+function scorePressure(fast, medium) {
+  const score =
+    fast.pressure.score * 0.65 +
+    medium.pressure.score * 0.35;
+
+  return clamp((score - 45) * 0.35, 0, 12);
+}
+
+function scoreRelativeStrength(relative) {
+  let score = 0;
+
+  score += clamp(relative.rs15m * 1.5, 0, 5);
+  score += clamp(relative.rs1h * 1.5, 0, 10);
+  score += clamp(relative.rs4h * 0.8, 0, 8);
+
+  return score;
+}
+
+function scoreContinuity(medium, slow) {
+  return clamp(
+    medium.continuity * 7 +
+    slow.continuity * 5,
+    0,
+    12
+  );
+}
+
+function scoreAcceleration(fast) {
+  return clamp(fast.acceleration * 3, 0, 8);
+}
+
+function calculateScore(data) {
+  const {
+    fast,
+    medium,
+    slow,
+    relative,
+    classification,
+    quoteVolume,
+  } = data;
+
+  let score = 0;
+
+  score += scoreMomentum(fast, medium, slow);
+  score += scoreTurnover(fast, medium);
+  score += scorePressure(fast, medium);
+  score += scoreRelativeStrength(relative);
+  score += scoreContinuity(medium, slow);
+  score += scoreAcceleration(fast);
+
+  // Liquidity quality
+  if (quoteVolume >= 1000000) score += 5;
+  else if (quoteVolume >= 500000) score += 3;
+  else if (quoteVolume >= 200000) score += 2;
+
+  // Independent movement bonus
+  if (classification.independent) score += 5;
+  if (classification.strongIndependent) score += 4;
+
+  // Early movement bonus
+  if (classification.stage === "EARLY_INDEPENDENT") {
+    score += 8;
+  } else if (classification.stage === "EARLY") {
+    score += 5;
+  }
+
+  // Advanced moves remain visible but lose early-entry priority.
+  if (classification.stage === "ADVANCED") {
+    score -= 8;
+  }
+
+  // Penalize extreme one-candle spikes.
+  if (fast.abnormalCandle) score -= 15;
+
+  // Penalize weak close location.
+  if (fast.candleStructure.closeLocation < 0.45) {
+    score -= 5;
+  }
+
+  // Penalize negative medium trend.
+  if (!medium.rising && medium.change1h < 0) {
+    score -= 5;
+  }
+
+  return Math.round(clamp(score, 0, 100));
+}
+
+// ============================================================
+// COIN ANALYSIS
+// ============================================================
+
+async function analyzeCoin(ticker, btc, semaphore) {
+  const symbol = normalizeSymbol(ticker.contract);
+
+  if (!symbol || symbol === CONFIG.BTC_SYMBOL) {
     return null;
   }
 
-  const baselineCandles = closedCandles.slice(
-    -CONFIG.VOLUME_BASELINE_CANDLES
+  const quoteVolume = toNumber(
+    ticker.volume_24h_quote
   );
 
-  const baseline = median(
-    baselineCandles.map(c =>
-      candleValue(c, multiplier)
-    )
-  );
+  if (quoteVolume < CONFIG.MIN_QUOTE_VOLUME_24H) {
+    return null;
+  }
 
-  if (baseline <= 0) return null;
+  const release = await semaphore.acquire();
 
-  const nowSeconds = Date.now() / 1000;
+  try {
+    const [rawFast, rawMedium, rawSlow] = await Promise.all([
+      getCandles(
+        symbol,
+        CONFIG.TIMEFRAMES.FAST,
+        CONFIG.CANDLE_LIMITS.FAST
+      ),
+      getCandles(
+        symbol,
+        CONFIG.TIMEFRAMES.MEDIUM,
+        CONFIG.CANDLE_LIMITS.MEDIUM
+      ),
+      getCandles(
+        symbol,
+        CONFIG.TIMEFRAMES.SLOW,
+        CONFIG.CANDLE_LIMITS.SLOW
+      ),
+    ]);
 
-  const elapsedSeconds = clamp(
-    nowSeconds - currentCandle.time,
-    CONFIG.MIN_CANDLE_ELAPSED_SECONDS,
-    CONFIG.TIMEFRAMES['15m'].seconds
-  );
+    const fastCandles = getClosedCandles(rawFast, 15 * 60);
+    const mediumCandles = getClosedCandles(rawMedium, 60 * 60);
+    const slowCandles = getClosedCandles(rawSlow, 4 * 60 * 60);
 
-  const expectedTurnover =
-    baseline *
-    (
-      elapsedSeconds /
-      CONFIG.TIMEFRAMES['15m'].seconds
+    if (
+      fastCandles.length < CONFIG.MIN_HISTORY_FAST ||
+      mediumCandles.length < CONFIG.MIN_HISTORY_MEDIUM ||
+      slowCandles.length < CONFIG.MIN_HISTORY_SLOW
+    ) {
+      return null;
+    }
+
+    const fast = analyzeFastTimeframe(fastCandles);
+    const medium = analyzeMediumTimeframe(mediumCandles);
+    const slow = analyzeSlowTimeframe(slowCandles);
+
+    if (!fast.valid || !medium.valid || !slow.valid) {
+      return null;
+    }
+
+    const lastPrice = toNumber(
+      ticker.last,
+      fast.lastPrice
     );
 
-  if (expectedTurnover <= 0) return null;
+    const change24h = toNumber(
+      ticker.change_percentage
+    );
 
-  const currentTurnover =
-    candleValue(currentCandle, multiplier);
+    const relative = calculateRelativeStrength(
+      {
+        fast,
+        medium,
+        slow,
+        change24h,
+      },
+      btc
+    );
 
-  const volumeRatio =
-    currentTurnover / expectedTurnover;
+    const classification = classifyMovement({
+      fast,
+      medium,
+      slow,
+      relative,
+      change24h,
+    });
 
-  return {
-    volumeRatio,
-    currentTurnover,
-    baselineTurnover: baseline,
-    expectedTurnover,
-    elapsedSeconds
-  };
+    if (!classification.eligible) {
+      return null;
+    }
+
+    const candidateData = {
+      fast,
+      medium,
+      slow,
+      relative,
+      classification,
+      quoteVolume,
+    };
+
+    const score = calculateScore({
+      ...candidateData,
+      change24h,
+    });
+
+    if (score < CONFIG.MIN_SCORE) {
+      return null;
+    }
+
+    const result = {
+      symbol,
+      contract: symbol,
+
+      price: lastPrice,
+      lastPrice,
+
+      score,
+
+      stage: classification.stage,
+      stageLabel: classification.stageLabel,
+
+      independent: classification.independent,
+      strongIndependent: classification.strongIndependent,
+
+      change24h: round(change24h),
+
+      change15m: fast.change15m,
+      change30m: fast.change30m,
+      change1h: medium.change1h,
+      change3h: medium.change3h,
+      change4h: slow.change4h,
+      change6h: medium.change6h,
+
+      relativeStrength: relative,
+
+      volumeRatio15m: fast.turnover.ratio,
+      volumeRatio1h: medium.turnover.ratio,
+
+      turnover15m: fast.turnover.current,
+      turnover1h: medium.turnover.current,
+
+      buyPressure: {
+        score: fast.pressure.score,
+        label: fast.pressure.label,
+        estimated: true,
+      },
+
+      mediumBuyPressure: {
+        score: medium.pressure.score,
+        label: medium.pressure.label,
+        estimated: true,
+      },
+
+      continuity1h: medium.continuity,
+      continuity4h: slow.continuity,
+
+      acceleration15m: fast.acceleration,
+
+      quoteVolume24h: quoteVolume,
+
+      btcChange15m: btc.change15m,
+      btcChange1h: btc.change1h,
+      btcChange4h: btc.change4h,
+      btcChange24h: btc.change24h,
+
+      btcCondition:
+        btc.change1h < 0 || btc.change4h < 0
+          ? "BTC نزولی"
+          : "BTC خنثی/صعودی",
+
+      diagnostics: {
+        fast,
+        medium,
+        slow,
+        relative,
+        classification,
+      },
+
+      scannedAt: new Date().toISOString(),
+    };
+
+    return result;
+  } catch (error) {
+    return null;
+  } finally {
+    release();
+  }
 }
 
 // ============================================================
-// 1H TREND CONFIRMATION + DETAILED DIAGNOSTICS
+// CONCURRENCY CONTROL
 // ============================================================
 
-function analyze1hTrend(candles, livePrice) {
-  if (
-    candles.length <
-    CONFIG.EMA_PERIOD + 6
-  ) {
-    return {
-      dataValid: false,
-      passed: false,
-      failureReasons: ['تعداد کندل کافی نیست']
-    };
-  }
-
-  const closes = candles.map(c => c.close);
-
-  const emaValues = calculateEMA(
-    closes,
-    CONFIG.EMA_PERIOD
-  );
-
-  if (
-    emaValues.length <
-    CONFIG.EMA_SLOPE_LOOKBACK + 1
-  ) {
-    return {
-      dataValid: false,
-      passed: false,
-      failureReasons: ['محاسبه EMA نامعتبر است']
-    };
-  }
-
-  const currentEMA = emaValues.at(-1);
-
-  const previousEMA = emaValues[
-    -(CONFIG.EMA_SLOPE_LOOKBACK + 1)
-  ];
-
-  const emaSlope = pctChange(
-    currentEMA,
-    previousEMA
-  );
-
-  const lastClose = closes.at(-1);
-
-  const lastCloseAboveEMA =
-    lastClose > currentEMA;
-
-  const livePriceAboveEMA =
-    livePrice > currentEMA;
-
-  const aboveEMA =
-    lastCloseAboveEMA &&
-    livePriceAboveEMA;
-
-  const positiveSlope = emaSlope > 0;
-
-  const passed =
-    aboveEMA &&
-    positiveSlope;
-
-  const result = {
-    dataValid: true,
-    passed,
-
-    ema: currentEMA,
-    emaSlope,
-
-    lastClose,
-    livePrice,
-
-    closeDistancePct: pctChange(
-      lastClose,
-      currentEMA
-    ),
-
-    liveDistancePct: pctChange(
-      livePrice,
-      currentEMA
-    ),
-
-    lastCloseAboveEMA,
-    livePriceAboveEMA,
-    aboveEMA,
-    positiveSlope
-  };
-
-  result.failureReasons =
-    getTrendFailureReasons(result);
-
-  return result;
-}
-
-// ============================================================
-// 4H RESISTANCE / ROOM TO GROW + DIAGNOSTICS
-// ============================================================
-
-function analyze4hRoom(candles, livePrice) {
-  const count = CONFIG.RESISTANCE_CANDLES_4H;
-
-  if (candles.length < count) {
-    return {
-      dataValid: false,
-      passed: false,
-      failureReason: 'تعداد کندل کافی نیست'
-    };
-  }
-
-  const recent = candles.slice(-count);
-
-  const resistance = getMax(recent, 'high');
-
-  if (resistance <= 0) {
-    return {
-      dataValid: false,
-      passed: false,
-      failureReason: 'مقاومت نامعتبر است'
-    };
-  }
-
-  if (livePrice >= resistance) {
-    return {
-      dataValid: true,
-      passed: true,
-
-      resistance,
-      roomPercent: 100,
-      hasOverheadResistance: false
-    };
-  }
-
-  const roomPercent = pctChange(
-    resistance,
-    livePrice
-  );
-
-  const passed =
-    roomPercent >= CONFIG.MIN_RESISTANCE_ROOM;
+function createSemaphore(max) {
+  let active = 0;
+  const waiting = [];
 
   return {
-    dataValid: true,
-    passed,
+    async acquire() {
+      if (active < max) {
+        active++;
+        return () => {
+          active--;
+          const next = waiting.shift();
+          if (next) next();
+        };
+      }
 
-    resistance,
-    roomPercent,
-    hasOverheadResistance: true,
+      await new Promise((resolve) => waiting.push(resolve));
 
-    failureReason: passed
-      ? null
-      : `فضای رشد ${roomPercent.toFixed(3)}% کمتر از حداقل ${CONFIG.MIN_RESISTANCE_ROOM.toFixed(2)}%`
+      active++;
+
+      return () => {
+        active--;
+        const next = waiting.shift();
+        if (next) next();
+      };
+    },
   };
 }
 
@@ -1232,949 +1110,594 @@ function analyze4hRoom(candles, livePrice) {
 // RANKING
 // ============================================================
 
-function calculateBreakoutScore({
-  breakout,
-  volumeRatio,
-  trend,
-  room
-}) {
-  const breakoutScore = clamp(
-    65 + breakout.breakoutPercent * 15,
-    0,
-    100
-  );
+const STAGE_PRIORITY = {
+  EARLY_INDEPENDENT: 1,
+  EARLY: 2,
+  STRONG: 3,
+  INDEPENDENT: 4,
+  ADVANCED: 5,
+};
 
-  const volumeScore = clamp(
-    50 + Math.log2(Math.max(0.01, volumeRatio)) * 30,
-    0,
-    100
-  );
+function rankCandidates(candidates) {
+  return candidates.sort((a, b) => {
+    const stageA = STAGE_PRIORITY[a.stage] || 99;
+    const stageB = STAGE_PRIORITY[b.stage] || 99;
 
-  const compressionScore = clamp(
-    100 - breakout.rangePercent * 12,
-    0,
-    100
-  );
+    // Early independent opportunities get first priority.
+    if (stageA !== stageB) {
+      return stageA - stageB;
+    }
 
-  const trendScore = clamp(
-    65 + trend.emaSlope * 20,
-    0,
-    100
-  );
+    if (b.score !== a.score) {
+      return b.score - a.score;
+    }
 
-  const roomScore = room.roomPercent >= 100
-    ? 100
-    : clamp(
-        room.roomPercent * 20,
-        0,
-        100
+    if (
+      b.relativeStrength.rs1h !==
+      a.relativeStrength.rs1h
+    ) {
+      return (
+        b.relativeStrength.rs1h -
+        a.relativeStrength.rs1h
       );
-
-  const candleScore =
-    breakout.closeLocation * 100;
-
-  const score = Math.round(
-    breakoutScore * 0.25 +
-    volumeScore * 0.25 +
-    compressionScore * 0.10 +
-    trendScore * 0.20 +
-    roomScore * 0.10 +
-    candleScore * 0.10
-  );
-
-  return {
-    score,
-    components: {
-      breakout: Math.round(breakoutScore),
-      volume: Math.round(volumeScore),
-      compression: Math.round(compressionScore),
-      trend: Math.round(trendScore),
-      room: Math.round(roomScore),
-      candle: Math.round(candleScore)
     }
+
+    return b.volumeRatio15m - a.volumeRatio15m;
+  });
+}
+
+// ============================================================
+// REPORT HELPERS
+// ============================================================
+
+function stageEmoji(stage) {
+  const map = {
+    EARLY_INDEPENDENT: "🟢",
+    EARLY: "🚀",
+    STRONG: "🔥",
+    INDEPENDENT: "💎",
+    ADVANCED: "⚠️",
   };
+
+  return map[stage] || "👀";
+}
+
+function formatCandidate(candidate, index) {
+  const relative = candidate.relativeStrength;
+
+  return [
+    `${index + 1}) ${stageEmoji(candidate.stage)} ${candidate.symbol}`,
+    `امتیاز: ${candidate.score}/100 | ${candidate.stageLabel}`,
+    `قیمت: ${candidate.price}`,
+    `15m: ${formatPercent(candidate.change15m)} | 1h: ${formatPercent(candidate.change1h)} | 4h: ${formatPercent(candidate.change4h)}`,
+    `24h: ${formatPercent(candidate.change24h)}`,
+    `حجم: 15m ${candidate.volumeRatio15m}x | 1h ${candidate.volumeRatio1h}x`,
+    `قدرت نسبت به BTC: 1h ${formatPercent(relative.rs1h)} | 4h ${formatPercent(relative.rs4h)}`,
+    `فشار خرید تخمینی: ${candidate.buyPressure.label} (${candidate.buyPressure.score})`,
+    `وضعیت BTC: ${candidate.btcCondition}`,
+  ].join("\n");
+}
+
+function buildReport(candidates, stats, btc) {
+  const early = candidates.filter(
+    (item) =>
+      item.stage === "EARLY_INDEPENDENT" ||
+      item.stage === "EARLY"
+  );
+
+  const strong = candidates.filter(
+    (item) =>
+      item.stage === "STRONG" ||
+      item.stage === "INDEPENDENT"
+  );
+
+  const advanced = candidates.filter(
+    (item) => item.stage === "ADVANCED"
+  );
+
+  const lines = [
+    "🚀 GATE.IO | INDEPENDENT LONG RADAR",
+    "━━━━━━━━━━━━━━━━━━",
+    "🎯 کشف شروع حرکت و رشد مستقل از BTC",
+    "⏱ تایم‌فریم: 15m | 1h | 4h",
+    "",
+    `📊 کل بازار: ${stats.totalMarkets}`,
+    `💧 بازار نقدشونده: ${stats.liquidMarkets}`,
+    `✅ بررسی موفق: ${stats.successful}`,
+    `📌 فرصت‌های شناسایی‌شده: ${candidates.length}`,
+    "",
+    `₿ وضعیت BTC: 15m ${formatPercent(btc.change15m)} | 1h ${formatPercent(btc.change1h)} | 4h ${formatPercent(btc.change4h)}`,
+    "",
+    `🟢 شروع حرکت: ${early.length}`,
+    `🔥 رشد قدرتمند: ${strong.length}`,
+    `⚠️ حرکت پیشرفته: ${advanced.length}`,
+    "━━━━━━━━━━━━━━━━━━",
+  ];
+
+  const groups = [
+    {
+      title: "🟢 شروع حرکت / فرصت‌های اولیه",
+      items: early,
+    },
+    {
+      title: "🔥 رشد قدرتمند",
+      items: strong,
+    },
+    {
+      title: "⚠️ حرکت پیشرفته / جهش‌های بزرگ",
+      items: advanced,
+    },
+  ];
+
+  for (const group of groups) {
+    if (!group.items.length) continue;
+
+    lines.push("", group.title, "━━━━━━━━━━━━━━━━━━");
+
+    group.items
+      .slice(0, CONFIG.MAX_REPORT_ITEMS)
+      .forEach((candidate, index) => {
+        lines.push(
+          formatCandidate(candidate, index),
+          "──────────────────"
+        );
+      });
+  }
+
+  if (!candidates.length) {
+    lines.push(
+      "",
+      "در این اسکن موقعیت واجد شرایطی پیدا نشد."
+    );
+  }
+
+  lines.push(
+    "",
+    "ℹ️ فشار خرید از ساختار کندل و گردش مالی تخمین زده شده است؛ داده قطعی Taker Buy نیست."
+  );
+
+  return lines.join("\n");
 }
 
 // ============================================================
-// COIN ANALYSIS
+// TELEGRAM
 // ============================================================
 
-function analyzeCoin(data, diagnostics) {
-  const {
-    symbol,
-    candles15m,
-    candles1h,
-    candles4h,
-    current15m,
-    livePrice,
-    contract
-  } = data;
-
-  if (
-    candles15m.length < 25 ||
-    candles1h.length < 30 ||
-    candles4h.length < 15 ||
-    !current15m ||
-    !livePrice
-  ) {
-    return null;
-  }
-
-  const multiplier = getContractMultiplier(contract);
-
-  // ----------------------------------------------------------
-  // 1. Detect actual 1H consolidation.
-  // The same 1H candles are also used for EMA trend analysis.
-  // ----------------------------------------------------------
-
-  const consolidation = analyzeConsolidation1h(
-    candles1h
-  );
-
-  if (!consolidation) return null;
-
-  if (diagnostics.consolidationSamples.length < 30) {
-    diagnostics.consolidationSamples.push({
-      symbol,
-      candlesCount: consolidation.candlesCount,
-      durationHours: consolidation.durationHours,
-      resistance: consolidation.resistance,
-      support: consolidation.support,
-      rangePercent: consolidation.rangePercent
-    });
-  }
-
-  // ----------------------------------------------------------
-  // 2. Detect 15M breakout against the 1H consolidation high.
-  // ----------------------------------------------------------
-
-  const breakout = analyzeBreakout(
-    consolidation,
-    current15m,
-    livePrice,
-    diagnostics,
-    symbol
-  );
-
-  if (!breakout) return null;
-
-  // ----------------------------------------------------------
-  // 3. Calculate 15M volume details.
-  // ----------------------------------------------------------
-
-  const volumeDetails = getCurrentVolumeDetails(
-    candles15m,
-    current15m,
-    multiplier
-  );
-
-  if (!volumeDetails) return null;
-
-  const {
-    volumeRatio,
-    currentTurnover,
-    baselineTurnover,
-    expectedTurnover,
-    elapsedSeconds
-  } = volumeDetails;
-
-  diagnostics.volumeSamples.push({
-    symbol,
-    volumeRatio,
-    currentTurnover,
-    baselineTurnover,
-    expectedTurnover,
-    elapsedSeconds
-  });
-
-  if (volumeRatio < CONFIG.MIN_VOLUME_RATIO) {
-    return null;
-  }
-
-  diagnostics.volume++;
-
-  // ----------------------------------------------------------
-  // 4. Evaluate BOTH 1H and 4H.
-  // EMA20 trend confirmation is preserved.
-  // ----------------------------------------------------------
-
-  const trend = analyze1hTrend(
-    candles1h,
-    livePrice
-  );
-
-  const room = analyze4hRoom(
-    candles4h,
-    livePrice
-  );
-
-  diagnostics.trendSamples.push({
-    symbol,
-    volumeRatio,
-
-    trend: {
-      dataValid: trend.dataValid,
-      passed: trend.passed,
-
-      ema: trend.ema,
-      emaSlope: trend.emaSlope,
-
-      lastClose: trend.lastClose,
-      livePrice: trend.livePrice,
-
-      closeDistancePct: trend.closeDistancePct,
-      liveDistancePct: trend.liveDistancePct,
-
-      lastCloseAboveEMA: trend.lastCloseAboveEMA,
-      livePriceAboveEMA: trend.livePriceAboveEMA,
-      positiveSlope: trend.positiveSlope,
-
-      failureReasons: trend.failureReasons || []
-    },
-
-    room: {
-      dataValid: room.dataValid,
-      passed: room.passed,
-
-      resistance: room.resistance,
-      roomPercent: room.roomPercent,
-      hasOverheadResistance: room.hasOverheadResistance,
-
-      failureReason: room.failureReason
-    }
-  });
-
-  if (!trend.passed) return null;
-
-  diagnostics.trend++;
-
-  if (!room.passed) return null;
-
-  diagnostics.room++;
-
-  // ----------------------------------------------------------
-  // 5. Ranking
-  // Scoring formula is unchanged.
-  // ----------------------------------------------------------
-
-  const ranking = calculateBreakoutScore({
-    breakout,
-    volumeRatio,
-    trend,
-    room
-  });
-
-  if (ranking.score < CONFIG.MIN_SCORE) {
-    return null;
-  }
-
-  diagnostics.score++;
-
-  const strength =
-    ranking.score >= 85
-      ? 'شکست صعودی بسیار قوی'
-      : ranking.score >= 75
-        ? 'شکست صعودی قوی'
-        : ranking.score >= 65
-          ? 'شکست صعودی معتبر'
-          : 'شروع شکست صعودی';
-
-  const stage =
-    breakout.breakoutPercent <= 0.50
-      ? 'شروع حرکت'
-      : breakout.breakoutPercent <= 0.90
-        ? 'شتاب حرکت'
-        : 'شکست در حال گسترش';
-
-  return {
-    symbol,
-
-    price: livePrice,
-    livePrice,
-
-    score: ranking.score,
-    strength,
-    stage,
-
-    pressureScore: breakout.closeLocation * 100,
-    pressureQuality: 'BREAKOUT_PRICE_ACTION',
-    closeLocation: breakout.closeLocation,
-
-    momentum: {
-      '15m': breakout.candleReturn,
-      '1h': trend.emaSlope,
-      '4h': pctChange(
-        candles4h.at(-1).close,
-        candles4h.at(-2).close
-      )
-    },
-
-    volume: {
-      '15m': volumeRatio,
-      '1h': 0,
-      '4h': 0
-    },
-
-    components: ranking.components,
-
-    breakout: {
-      resistance: breakout.resistance,
-      support: breakout.support,
-      extension: breakout.breakoutPercent,
-      consolidationRange: breakout.rangePercent,
-
-      consolidationCandles: breakout.consolidationCandles,
-      consolidationDurationHours: breakout.consolidationDurationHours,
-      consolidationStartTime: breakout.consolidationStartTime,
-      consolidationEndTime: breakout.consolidationEndTime
-    },
-
-    trend: {
-      ema: trend.ema,
-      emaSlope: trend.emaSlope
-    },
-
-    room: {
-      resistance: room.resistance,
-      percent: room.roomPercent,
-      hasOverheadResistance: room.hasOverheadResistance
-    },
-
-    confirmations: [
-      '1h_CONSOLIDATION',
-      '15m_BREAKOUT',
-      '15m_VOLUME',
-      '1h_TREND',
-      '4h_ROOM'
-    ],
-
-    contract
-  };
-}
-
-// ============================================================
-// TELEGRAM — RELIABLE DELIVERY
-// ============================================================
-
-function getNestedErrorCodes(error) {
-  const codes = new Set();
-  const visited = new Set();
-
-  function inspect(value, depth = 0) {
-    if (!value || depth > 5) return;
-
-    if (typeof value !== 'object') return;
-    if (visited.has(value)) return;
-
-    visited.add(value);
-
-    if (value.code) {
-      codes.add(String(value.code).toUpperCase());
-    }
-
-    if (value.cause) {
-      inspect(value.cause, depth + 1);
-    }
-
-    if (Array.isArray(value.errors)) {
-      for (const item of value.errors) {
-        inspect(item, depth + 1);
-      }
-    } else if (value.errors) {
-      inspect(value.errors, depth + 1);
-    }
-  }
-
-  inspect(error);
-
-  return [...codes];
-}
-
-function isRetryableTelegramError(error) {
-  const status = Number(error?.status);
-
-  if (status === 429) return true;
-  if (status >= 500 && status <= 599) return true;
-
-  const retryableCodes = new Set([
-    'ETIMEDOUT',
-    'ECONNRESET',
-    'ECONNREFUSED',
-    'EAI_AGAIN',
-    'ENOTFOUND',
-    'EHOSTUNREACH',
-    'ENETUNREACH',
-    'UND_ERR_CONNECT_TIMEOUT',
-    'UND_ERR_HEADERS_TIMEOUT',
-    'UND_ERR_SOCKET',
-    'ECONNABORTED'
-  ]);
-
-  const codes = getNestedErrorCodes(error);
-
-  if (codes.some(code => retryableCodes.has(code))) {
-    return true;
-  }
-
-  if (
-    error instanceof TypeError &&
-    /fetch failed|network|socket/i.test(error.message)
-  ) {
-    return true;
-  }
-
-  if (
-    error?.name === 'TimeoutError' ||
-    error?.name === 'AbortError'
-  ) {
-    return true;
-  }
-
-  return false;
-}
-
-async function sendTelegram(message) {
+async function sendTelegramMessage(message) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = process.env.TELEGRAM_CHAT_ID;
 
   if (!token || !chatId) {
-    const error = new Error(
-      'TELEGRAM_BOT_TOKEN یا TELEGRAM_CHAT_ID تنظیم نشده است.'
-    );
-
-    error.permanent = true;
-    throw error;
+    return {
+      sent: false,
+      reason: "Telegram credentials are not configured",
+    };
   }
 
-  const response = await fetch(
-    `https://api.telegram.org/bot${token}/sendMessage`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: message,
-        disable_web_page_preview: true
-      }),
-      signal: AbortSignal.timeout(
-        CONFIG.TELEGRAM_REQUEST_TIMEOUT
-      )
-    }
-  );
-
-  let result = null;
-
-  try {
-    result = await response.json();
-  } catch {
-    // Invalid or empty response body.
-  }
-
-  if (!response.ok || !result?.ok) {
-    const error = new Error(
-      result?.description ||
-      `Telegram HTTP ${response.status}`
-    );
-
-    error.status = response.status;
-
-    error.retryAfter =
-      number(result?.parameters?.retry_after, 0);
-
-    error.retryAfterMs =
-      error.retryAfter * 1000;
-
-    throw error;
-  }
-
-  return true;
-}
-
-function splitTelegramMessage(text, maxLength) {
-  const blocks = text.split('\n\n').filter(Boolean);
-  const messages = [];
-  let current = '';
-
-  for (const block of blocks) {
-    const candidate = current
-      ? `${current}\n\n${block}`
-      : block;
-
-    if (candidate.length <= maxLength) {
-      current = candidate;
-    } else {
-      if (current) messages.push(current);
-
-      if (block.length > maxLength) {
-        let remaining = block;
-
-        while (remaining.length > maxLength) {
-          messages.push(
-            remaining.slice(0, maxLength)
-          );
-
-          remaining = remaining.slice(maxLength);
-        }
-
-        current = remaining;
-      } else {
-        current = block;
-      }
-    }
-  }
-
-  if (current) messages.push(current);
-
-  return messages;
-}
-
-async function sendTelegramWithRetry(message, messageIndex) {
-  let lastError = null;
-  let attemptsMade = 0;
+  const chunks = [];
 
   for (
-    let attempt = 1;
-    attempt <= CONFIG.TELEGRAM_RETRIES;
-    attempt++
+    let index = 0;
+    index < message.length;
+    index += CONFIG.TELEGRAM_MAX_LENGTH
   ) {
-    attemptsMade = attempt;
+    chunks.push(
+      message.slice(
+        index,
+        index + CONFIG.TELEGRAM_MAX_LENGTH
+      )
+    );
+  }
 
+  for (const chunk of chunks) {
+    let attempt = 0;
+    let sent = false;
+
+    while (attempt <= CONFIG.RETRIES && !sent) {
+      try {
+        const response = await fetch(
+          `https://api.telegram.org/bot${token}/sendMessage`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              chat_id: chatId,
+              text: chunk,
+              disable_web_page_preview: true,
+            }),
+          }
+        );
+
+        const data = await response.json();
+
+        if (!response.ok || !data.ok) {
+          throw new Error(
+            data.description || "Telegram send failed"
+          );
+        }
+
+        sent = true;
+      } catch (error) {
+        attempt++;
+
+        if (attempt > CONFIG.RETRIES) {
+          throw error;
+        }
+
+        await sleep(1000 * attempt);
+      }
+    }
+  }
+
+  return { sent: true };
+}
+
+async function sendTelegramDocument(filename, content) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+
+  if (!token || !chatId) return;
+
+  const boundary = `----GateScanner${Date.now()}`;
+
+  const bodyStart = [
+    `--${boundary}`,
+    `Content-Disposition: form-data; name="chat_id"`,
+    "",
+    chatId,
+    `--${boundary}`,
+    `Content-Disposition: form-data; name="document"; filename="${filename}"`,
+    "Content-Type: application/json",
+    "",
+  ].join("\r\n");
+
+  const bodyEnd = `\r\n--${boundary}--\r\n`;
+
+  const body = Buffer.concat([
+    Buffer.from(bodyStart),
+    Buffer.from(content),
+    Buffer.from(bodyEnd),
+  ]);
+
+  let attempt = 0;
+
+  while (attempt <= CONFIG.RETRIES) {
     try {
-      await sendTelegram(message);
+      const response = await fetch(
+        `https://api.telegram.org/bot${token}/sendDocument`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": `multipart/form-data; boundary=${boundary}`,
+          },
+          body,
+        }
+      );
 
-      return {
-        sent: true,
-        attempts: attempt
-      };
+      const data = await response.json();
 
-    } catch (error) {
-      lastError = error;
-
-      const retryable =
-        isRetryableTelegramError(error);
-
-      if (
-        !retryable ||
-        attempt >= CONFIG.TELEGRAM_RETRIES
-      ) {
-        break;
+      if (!response.ok || !data.ok) {
+        throw new Error(
+          data.description || "Telegram document failed"
+        );
       }
 
-      const exponentialBackoff =
-        1500 * Math.pow(2, attempt - 1);
+      return;
+    } catch (error) {
+      attempt++;
 
-      const jitter = Math.floor(
-        Math.random() * 700
-      );
+      if (attempt > CONFIG.RETRIES) {
+        throw error;
+      }
 
-      const retryAfterMs = Math.max(
-        number(error.retryAfterMs, 0),
-        number(error.retryAfter, 0) * 1000
-      );
-
-      const delay =
-        error.status === 429
-          ? Math.max(
-              retryAfterMs,
-              exponentialBackoff + jitter
-            )
-          : exponentialBackoff + jitter;
-
-      console.warn(
-        `⚠️ Telegram retry ${attempt}/${CONFIG.TELEGRAM_RETRIES - 1} | Message ${messageIndex} | ${error.status || error.code || error.name || 'NETWORK'} | wait ${Math.ceil(delay / 1000)}s`
-      );
-
-      await sleep(delay);
+      await sleep(1000 * attempt);
     }
   }
-
-  return {
-    sent: false,
-    attempts: attemptsMade,
-    error: lastError
-  };
 }
 
-async function sendReports(report) {
-  const messages = splitTelegramMessage(
-    report,
-    CONFIG.TELEGRAM_MAX_LENGTH - 50
-  );
+async function sendTelegramReport(output) {
+  try {
+    await sendTelegramMessage(output.report);
 
-  let sentCount = 0;
-  let failedCount = 0;
-
-  const failures = [];
-
-  console.log(
-    `\n📨 Telegram: sending ${messages.length} report message(s)...`
-  );
-
-  for (let i = 0; i < messages.length; i++) {
-    const payload =
-      `📄 گزارش ${i + 1}/${messages.length}\n\n` +
-      messages[i];
-
-    const result = await sendTelegramWithRetry(
-      payload,
-      `${i + 1}/${messages.length}`
+    await sendTelegramDocument(
+      `gate-independent-radar-${Date.now()}.json`,
+      JSON.stringify(output, null, 2)
     );
 
-    if (result.sent) {
-      sentCount++;
+    return true;
+  } catch (error) {
+    console.error(
+      "[TELEGRAM ERROR]",
+      error.message
+    );
 
-      console.log(
-        `✅ Telegram message ${i + 1}/${messages.length} sent.`
-      );
-
-    } else {
-      failedCount++;
-
-      const errorMessage =
-        result.error?.message || 'Unknown Telegram error';
-
-      failures.push({
-        message: i + 1,
-        error: errorMessage
-      });
-
-      console.error(
-        `❌ Telegram message ${i + 1}/${messages.length} failed after ${result.attempts} attempt(s): ${errorMessage}`
-      );
-    }
-
-    if (i < messages.length - 1) {
-      await sleep(CONFIG.TELEGRAM_DELAY);
-    }
+    return false;
   }
-
-  const deliveryResult = {
-    sent: failedCount === 0,
-    total: messages.length,
-    sentCount,
-    failedCount,
-    failures
-  };
-
-  if (failedCount > 0) {
-    console.warn(
-      `⚠️ Telegram delivery incomplete: ${sentCount}/${messages.length} messages sent.`
-    );
-  } else {
-    console.log(
-      `✅ Telegram delivery completed: ${sentCount}/${messages.length} messages sent.`
-    );
-  }
-
-  return deliveryResult;
 }
 
 // ============================================================
-// REPORT
+// MAIN SCANNER
 // ============================================================
 
-function buildReport(
-  candidates,
-  stats,
-  duration,
-  rankChanges
-) {
-  const lines = [
-    '🚀 GATE.IO | EARLY LONG BREAKOUT RADAR',
-    '━━━━━━━━━━━━━━━━━━',
-    '🎯 تراکم واقعی 1H + شکست 15M + تأیید حجم',
-    '⏱ تحلیل: 1H CONSOLIDATION | 15M BREAKOUT | 1H TREND | 4H ROOM',
-    '🔄 اجرای اسکن هر ۵ دقیقه؛ بدون دخالت در امتیاز',
-    `📊 بازار: ${stats.active} | نقدشونده: ${stats.liquid}`,
-    `✅ دریافت موفق: ${stats.success} | خطا: ${stats.errors}`,
-    `⏱ زمان اسکن: ${(duration / 1000).toFixed(1)} ثانیه`,
-    '━━━━━━━━━━━━━━━━━━',
-    formatDiagnostics(stats.diagnostics),
-    '━━━━━━━━━━━━━━━━━━'
-  ];
-
-  if (!candidates.length) {
-    lines.push(
-      '🔎 در این اسکن شکست صعودی واجد شرایط پیدا نشد.'
-    );
-
-    return lines.join('\n');
-  }
-
-  candidates.forEach((coin, index) => {
-    const change = rankChanges?.[coin.symbol];
-
-    const rankIcon =
-      !change || change.status === 'NEW'
-        ? '🆕'
-        : change.status === 'UP'
-          ? `🟢↑${change.change}`
-          : change.status === 'DOWN'
-            ? `🔴↓${Math.abs(change.change)}`
-            : '➖';
-
-    lines.push(
-      `${index + 1}. ${coin.symbol} ${rankIcon} | ⭐ ${coin.score}/100`
-    );
-
-    lines.push(
-      `🚀 ${coin.stage} | رشد 15m: +${coin.momentum['15m'].toFixed(2)}%`
-    );
-
-    lines.push(
-      `📊 حجم: ${coin.volume['15m'].toFixed(2)}x | شکست: +${coin.breakout.extension.toFixed(2)}% | محدوده: ${coin.breakout.consolidationRange.toFixed(2)}%`
-    );
-
-    lines.push(
-      `⏳ تراکم 1H: ${coin.breakout.consolidationCandles} کندل | مدت: ${coin.breakout.consolidationDurationHours} ساعت`
-    );
-
-    lines.push('');
-  });
-
-  lines.push(
-    '━━━━━━━━━━━━━━━━━━',
-    'ℹ️ این گزارش کاندیدای شکست است؛ نه تضمین ادامه رشد یا دستور ورود.'
-  );
-
-  return lines.join('\n');
-}
-
-// ============================================================
-// MAIN
-// ============================================================
-
-async function main() {
+export async function scanGateMarkets() {
   const startedAt = Date.now();
 
-  const diagnostics = createDiagnostics();
-
-  console.log('\n🚀 GATE.IO EARLY LONG BREAKOUT RADAR');
-  console.log('━━━━━━━━━━━━━━━━━━━━━━━━');
-
-  console.log('⏱ Analysis: 1h Consolidation / 15m Breakout / 1h Trend / 4h Room');
-  console.log('🎯 Strategy: Actual Consolidation + Fresh Breakout + Volume');
-  console.log(
-    `📦 Consolidation: ${CONFIG.MIN_CONSOLIDATION_CANDLES}-${CONFIG.MAX_CONSOLIDATION_CANDLES} closed 1h candles | Max range ${CONFIG.MAX_CONSOLIDATION_RANGE}%`
-  );
-  console.log('🔄 Scan schedule does not affect score');
-  console.log(
-    `🛡 API protection: Concurrency ${CONFIG.CONCURRENCY} | Interval ${CONFIG.REQUEST_INTERVAL_MS}ms`
-  );
+  console.log("\n========================================");
+  console.log("GATE.IO INDEPENDENT LONG RADAR STARTED");
+  console.log("========================================\n");
 
   const [contracts, tickers] = await Promise.all([
     getContracts(),
-    getTickers()
+    getTickers(),
   ]);
 
-  if (
-    !Array.isArray(contracts) ||
-    !Array.isArray(tickers)
-  ) {
-    throw new Error(
-      'داده قراردادها یا تیکرها معتبر نیست.'
-    );
-  }
-
   const tickerMap = new Map(
-    tickers.map(ticker => [
-      ticker.contract,
-      ticker
+    tickers.map((ticker) => [
+      normalizeSymbol(ticker.contract),
+      ticker,
     ])
   );
 
   const activeContracts = contracts.filter(
-    contract =>
-      contract?.name &&
+    (contract) =>
       contract.in_delisting !== true &&
-      tickerMap.has(contract.name)
+      contract.in_delisting !== "true" &&
+      contract.trade_status !== "untradable"
   );
 
   const liquidMarkets = activeContracts
-    .map(contract => {
-      const ticker = tickerMap.get(contract.name);
+    .map((contract) => {
+      const symbol = normalizeSymbol(contract.name);
+      const ticker = tickerMap.get(symbol);
+
+      if (!ticker) return null;
 
       return {
-        symbol: contract.name,
         contract,
         ticker,
-        quoteVolume: number(ticker.volume_24h_quote),
-        lastPrice: number(ticker.last)
+        symbol,
+        quoteVolume: toNumber(ticker.volume_24h_quote),
       };
     })
-    .filter(market =>
-      market.lastPrice > 0 &&
-      market.quoteVolume >= CONFIG.MIN_QUOTE_VOLUME_24H
+    .filter(
+      (item) =>
+        item &&
+        item.quoteVolume >= CONFIG.MIN_QUOTE_VOLUME_24H &&
+        item.symbol !== CONFIG.BTC_SYMBOL
     )
-    .sort((a, b) => b.quoteVolume - a.quoteVolume);
+    .sort(
+      (a, b) => b.quoteVolume - a.quoteVolume
+    );
 
-  console.log(`📊 Active: ${activeContracts.length}`);
-  console.log(`💧 Liquid: ${liquidMarkets.length}`);
-
-  let success = 0;
-  let errors = 0;
-
-  const results = await mapLimit(
-    liquidMarkets,
-    CONFIG.CONCURRENCY,
-    async market => {
-      const [
-        candles15Data,
-        candles1h,
-        candles4h
-      ] = await Promise.all([
-        getCandles(
-          market.symbol,
-          '15m',
-          CONFIG.TIMEFRAMES['15m'].limit,
-          true
-        ),
-
-        getCandles(
-          market.symbol,
-          '1h',
-          CONFIG.TIMEFRAMES['1h'].limit
-        ),
-
-        getCandles(
-          market.symbol,
-          '4h',
-          CONFIG.TIMEFRAMES['4h'].limit
+  const marketsToScan =
+    CONFIG.MAX_MARKETS_PER_SCAN > 0
+      ? liquidMarkets.slice(
+          0,
+          CONFIG.MAX_MARKETS_PER_SCAN
         )
-      ]);
-
-      if (
-        candles15Data.closed.length < 25 ||
-        candles1h.length < 30 ||
-        candles4h.length < 15 ||
-        !candles15Data.current
-      ) {
-        throw new Error(
-          'کندل کافی یا کندل جاری 15m دریافت نشد.'
-        );
-      }
-
-      diagnostics.validData++;
-
-      const coin = analyzeCoin({
-        symbol: market.symbol,
-
-        candles15m: candles15Data.closed,
-        candles1h,
-        candles4h,
-
-        current15m: candles15Data.current,
-
-        livePrice: market.lastPrice,
-
-        contract: market.contract
-      }, diagnostics);
-
-      success++;
-
-      return coin;
-    }
-  );
-
-  const candidates = [];
-
-  for (const result of results) {
-    if (result?.error) {
-      errors++;
-
-      console.error(
-        `⚠️ ${result.item?.symbol || 'UNKNOWN'}: ${result.error}`
-      );
-
-      continue;
-    }
-
-    if (result) candidates.push(result);
-  }
-
-  // ----------------------------------------------------------
-  // STORAGE + RANKING
-  // ----------------------------------------------------------
-
-  const storageResult = await saveMarketSnapshot(candidates);
-
-  const rankedCandidates =
-    storageResult.rankedCandidates || candidates;
-
-  const rankChanges = storageResult.rankChanges || {};
-
-  const duration = Date.now() - startedAt;
-
-  const stats = {
-    active: activeContracts.length,
-    liquid: liquidMarkets.length,
-    success,
-    errors,
-    diagnostics
-  };
-
-  // ----------------------------------------------------------
-  // CONSOLE
-  // ----------------------------------------------------------
-
-  console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log('🏆 TOP LONG BREAKOUT CANDIDATES');
-
-  rankedCandidates
-    .slice(0, CONFIG.TOP_COUNT)
-    .forEach((coin, index) => {
-      console.log(
-        `${index + 1}. ${coin.symbol} | ${coin.score}/100 | Volume ${coin.volume['15m'].toFixed(2)}x | Breakout ${coin.breakout?.extension?.toFixed(2) ?? '-'}% | Consolidation ${coin.breakout?.consolidationCandles ?? '-'} candles`
-      );
-    });
-
-  console.log('\n' + formatDiagnostics(diagnostics));
-
-  console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log(`Candidates: ${rankedCandidates.length}`);
-  console.log(`Successful: ${success}`);
-  console.log(`Errors: ${errors}`);
-  console.log(`Duration: ${(duration / 1000).toFixed(1)}s`);
+      : liquidMarkets;
 
   console.log(
-    `💾 History: ${storageResult.historyCount} | Summaries: ${storageResult.summaryCount}`
+    `[MARKETS] Total: ${activeContracts.length} | Liquid: ${liquidMarkets.length} | Scanning: ${marketsToScan.length}`
   );
 
-  // ----------------------------------------------------------
-  // TELEGRAM
-  // ----------------------------------------------------------
+  // BTC data is fetched only once per scan.
+  let btcCandles;
 
-  const report = buildReport(
-    rankedCandidates.slice(0, CONFIG.TOP_COUNT),
-    stats,
-    duration,
-    rankChanges
-  );
-
-  const telegramResult = await sendReports(report);
-
-  if (telegramResult.sent) {
-    console.log('\n✅ All Telegram reports sent successfully.');
-  } else {
-    console.warn(
-      '\n⚠️ Scan completed, but Telegram delivery was incomplete.'
+  try {
+    btcCandles = await getCandles(
+      CONFIG.BTC_SYMBOL,
+      CONFIG.TIMEFRAMES.FAST,
+      CONFIG.CANDLE_LIMITS.FAST
     );
 
-    console.warn(
-      `📨 Sent: ${telegramResult.sentCount}/${telegramResult.total}`
+    const btcFastCandles = getClosedCandles(
+      btcCandles,
+      15 * 60
     );
+
+    const [btc1hRaw, btc4hRaw] = await Promise.all([
+      getCandles(
+        CONFIG.BTC_SYMBOL,
+        CONFIG.TIMEFRAMES.MEDIUM,
+        CONFIG.CANDLE_LIMITS.MEDIUM
+      ),
+      getCandles(
+        CONFIG.BTC_SYMBOL,
+        CONFIG.TIMEFRAMES.SLOW,
+        CONFIG.CANDLE_LIMITS.SLOW
+      ),
+    ]);
+
+    const btc1h = getClosedCandles(btc1hRaw, 60 * 60);
+    const btc4h = getClosedCandles(btc4hRaw, 4 * 60 * 60);
+
+    const btc = analyzeBitcoin([
+      ...btcFastCandles,
+    ]);
+
+    // Use timeframe-specific BTC returns.
+    const btcBenchmark = {
+      ...btc,
+      valid:
+        btcFastCandles.length >= CONFIG.MIN_HISTORY_FAST &&
+        btc1h.length >= CONFIG.MIN_HISTORY_MEDIUM &&
+        btc4h.length >= CONFIG.MIN_HISTORY_SLOW,
+
+      change15m: getReturn(btcFastCandles, 1),
+      change1h: getReturn(btc1h, 1),
+      change4h: getReturn(btc4h, 1),
+      change24h: getReturn(btc4h, 6),
+    };
+
+    if (!btcBenchmark.valid) {
+      throw new Error("BTC benchmark history is insufficient");
+    }
+
+    const semaphore = createSemaphore(
+      CONFIG.CONCURRENCY
+    );
+
+    const results = [];
+    let successful = 0;
+    let failed = 0;
+
+    let completed = 0;
+
+    const workers = marketsToScan.map(async (market) => {
+      const result = await analyzeCoin(
+        market.ticker,
+        btcBenchmark,
+        semaphore
+      );
+
+      completed++;
+
+      if (result) {
+        successful++;
+        results.push(result);
+      } else {
+        failed++;
+      }
+
+      if (completed % 50 === 0) {
+        console.log(
+          `[PROGRESS] ${completed}/${marketsToScan.length} | Candidates: ${results.length}`
+        );
+      }
+    });
+
+    await Promise.all(workers);
+
+    const rankedCandidates = rankCandidates(results);
+
+    const stats = {
+      totalMarkets: activeContracts.length,
+      liquidMarkets: liquidMarkets.length,
+      scannedMarkets: marketsToScan.length,
+      successful,
+      failed,
+      candidates: rankedCandidates.length,
+      durationMs: Date.now() - startedAt,
+    };
+
+    const report = buildReport(
+      rankedCandidates,
+      stats,
+      btcBenchmark
+    );
+
+    const output = {
+      success: true,
+
+      exchange: "GATE.IO",
+      market: "USDT PERPETUAL",
+
+      strategy: "INDEPENDENT LONG RADAR",
+
+      scannedAt: new Date().toISOString(),
+
+      stats,
+
+      btc: {
+        change15m: round(btcBenchmark.change15m),
+        change1h: round(btcBenchmark.change1h),
+        change4h: round(btcBenchmark.change4h),
+        change24h: round(btcBenchmark.change24h),
+      },
+
+      candidates: rankedCandidates,
+
+      // Compatibility aliases for existing consumers.
+      rankedCandidates,
+      rankChanges: [],
+      historyCount: 0,
+      summaryCount: rankedCandidates.length,
+
+      report,
+    };
+
+    // Persist scan snapshot.
+    try {
+      const storageResult = await saveMarketSnapshot(
+        rankedCandidates
+      );
+
+      if (storageResult) {
+        output.historyCount =
+          storageResult.historyCount ?? output.historyCount;
+
+        output.summaryCount =
+          storageResult.summaryCount ?? output.summaryCount;
+
+        output.rankChanges =
+          storageResult.rankChanges ?? output.rankChanges;
+      }
+    } catch (error) {
+      console.error(
+        "[STORAGE ERROR]",
+        error.message
+      );
+    }
+
+    console.log("\n========================================");
+    console.log("SCAN FINISHED");
+    console.log("========================================");
+    console.log(`Markets: ${stats.totalMarkets}`);
+    console.log(`Liquid: ${stats.liquidMarkets}`);
+    console.log(`Scanned: ${stats.scannedMarkets}`);
+    console.log(`Successful: ${stats.successful}`);
+    console.log(`Candidates: ${stats.candidates}`);
+    console.log(`Duration: ${stats.durationMs}ms`);
+    console.log("========================================\n");
+
+    console.log(report);
+
+    await sendTelegramReport(output);
+
+    return output;
+  } catch (error) {
+    console.error(
+      "[SCANNER FATAL ERROR]",
+      error.message
+    );
+
+    const output = {
+      success: false,
+      error: error.message,
+      scannedAt: new Date().toISOString(),
+    };
+
+    return output;
   }
-
-  console.log('\n✅ SCAN COMPLETED.');
 }
 
 // ============================================================
-// START
+// OPTIONAL DIRECT EXECUTION
 // ============================================================
 
-main().catch(error => {
-  console.error('\n❌ SCANNER FAILED:', error);
-  process.exitCode = 1;
-});
+const isDirectExecution =
+  process.argv[1] &&
+  import.meta.url.endsWith(
+    process.argv[1].replace(/\\/g, "/")
+  );
+
+if (isDirectExecution) {
+  scanGateMarkets()
+    .then((result) => {
+      console.log(
+        "[SCANNER RESULT]",
+        result.success
+          ? `${result.candidates?.length || 0} candidates`
+          : result.error
+      );
+
+      process.exitCode = result.success ? 0 : 1;
+    })
+    .catch((error) => {
+      console.error(error);
+      process.exitCode = 1;
+    });
+}
