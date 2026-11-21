@@ -5,17 +5,16 @@
  * LONG ONLY
  *
  * Strategy:
- * 15m = Fresh consolidation breakout detection
- * 1h  = Trend confirmation
+ * 1h  = Actual consolidation detection (up to 48 closed candles)
+ * 15m = Fresh breakout detection + candle strength + volume
+ * 1h  = EMA20 trend confirmation
  * 4h  = Overhead resistance / room-to-grow filter
  *
- * Diagnostics:
- * - Detailed 15m breakout rejection diagnostics
- * - Breakout volume details
- * - Detailed 1h EMA diagnostics
- * - Detailed 4h room diagnostics
- * - API rate-limit protection
- * - Reliable Telegram delivery
+ * Consolidation:
+ * - Backward scan from the latest closed 1h candle
+ * - Continuous candles only
+ * - Expanding window until range limit is exceeded
+ * - Actual candle count, duration, high, low and range
  *
  * File: src/scanner/marketScanner.js
  */
@@ -52,26 +51,27 @@ const CONFIG = {
   TELEGRAM_RETRIES: 4,
   TELEGRAM_REQUEST_TIMEOUT: 15000,
 
-  // Consolidation detection
-  CONSOLIDATION_CANDLES: 12,
+  // 1H Consolidation detection
+  MIN_CONSOLIDATION_CANDLES: 4,
+  MAX_CONSOLIDATION_CANDLES: 48,
   MAX_CONSOLIDATION_RANGE: 5.0,
 
-  // Breakout conditions
+  // 15M Breakout conditions
   MIN_BREAKOUT_PERCENT: 0.10,
   MAX_BREAKOUT_EXTENSION: 1.25,
   MIN_CANDLE_RETURN: 0.15,
   MIN_CLOSE_LOCATION: 0.65,
 
-  // Volume
+  // 15M Volume
   VOLUME_BASELINE_CANDLES: 20,
   MIN_VOLUME_RATIO: 1.35,
   MIN_CANDLE_ELAPSED_SECONDS: 180,
 
-  // Trend
+  // 1H Trend
   EMA_PERIOD: 20,
   EMA_SLOPE_LOOKBACK: 5,
 
-  // 4h resistance
+  // 4H resistance
   RESISTANCE_CANDLES_4H: 10,
   MIN_RESISTANCE_ROOM: 0.80,
 
@@ -186,6 +186,9 @@ function createDiagnostics() {
     validData: 0,
     consolidation: 0,
 
+    // Consolidation details
+    consolidationSamples: [],
+
     // Breakout diagnostics
     breakoutChecks: 0,
     breakoutBelowResistance: 0,
@@ -264,7 +267,6 @@ function formatBreakoutDiagnostics(d) {
 
   const samples = [...d.breakoutSamples]
     .sort((a, b) => {
-      // Show the samples with the strongest proximity/breakout first.
       return b.breakoutPercent - a.breakoutPercent;
     })
     .slice(0, 12);
@@ -276,7 +278,7 @@ function formatBreakoutDiagnostics(d) {
       const status = sample.passed ? '✅' : '❌';
 
       lines.push(
-        `${status} ${sample.symbol} | فاصله از مقاومت: ${formatPercent(sample.breakoutPercent)}`
+        `${status} ${sample.symbol} | فاصله از سقف تراکم 1H: ${formatPercent(sample.breakoutPercent)}`
       );
 
       lines.push(
@@ -284,7 +286,11 @@ function formatBreakoutDiagnostics(d) {
       );
 
       lines.push(
-        `   قیمت: ${formatPrice(sample.livePrice)} | مقاومت: ${formatPrice(sample.resistance)}`
+        `   قیمت: ${formatPrice(sample.livePrice)} | سقف تراکم: ${formatPrice(sample.resistance)}`
+      );
+
+      lines.push(
+        `   طول تراکم: ${sample.consolidationCandles} کندل | مدت: ${sample.consolidationDurationHours} ساعت | دامنه: ${sample.rangePercent.toFixed(2)}%`
       );
 
       if (sample.failedChecks.length) {
@@ -309,17 +315,40 @@ function formatDiagnostics(d) {
   const lines = [
     '🔬 مراحل عبور ارزها:',
     `1️⃣ داده معتبر: ${d.validData}`,
-    `2️⃣ تشکیل تراکم: ${d.consolidation}`,
-    `3️⃣ شکست معتبر: ${d.breakout}`,
-    `4️⃣ تأیید حجم: ${d.volume}`,
+    `2️⃣ تشکیل تراکم 1H: ${d.consolidation}`,
+    `3️⃣ شکست معتبر 15M: ${d.breakout}`,
+    `4️⃣ تأیید حجم 15M: ${d.volume}`,
     `5️⃣ تأیید روند 1H: ${d.trend}`,
     `6️⃣ فضای رشد 4H: ${d.room}`,
     `7️⃣ امتیاز نهایی: ${d.score}`,
     '',
+    '📦 جزئیات تراکم‌های شناسایی‌شده در 1H:'
+  ];
+
+  const consolidationSamples = [...d.consolidationSamples]
+    .sort((a, b) => b.candlesCount - a.candlesCount)
+    .slice(0, 8);
+
+  if (!consolidationSamples.length) {
+    lines.push('تراکم معتبر یک‌ساعته شناسایی نشد.');
+  } else {
+    for (const sample of consolidationSamples) {
+      lines.push(
+        `• ${sample.symbol} | ${sample.candlesCount} کندل | ${sample.durationHours} ساعت`
+      );
+
+      lines.push(
+        `   سقف: ${formatPrice(sample.resistance)} | کف: ${formatPrice(sample.support)} | دامنه: ${sample.rangePercent.toFixed(2)}%`
+      );
+    }
+  }
+
+  lines.push(
+    '',
     formatBreakoutDiagnostics(d),
     '',
     '📊 بررسی حجم شکست‌های معتبر:'
-  ];
+  );
 
   const volumeSamples = [...d.volumeSamples]
     .sort((a, b) => b.volumeRatio - a.volumeRatio)
@@ -659,20 +688,84 @@ function calculateEMA(values, period) {
 }
 
 // ============================================================
-// 15M CONSOLIDATION
+// 1H CONSOLIDATION DETECTION
 // ============================================================
 
-function analyzeConsolidation(candles) {
-  const count = CONFIG.CONSOLIDATION_CANDLES;
+function analyzeConsolidation1h(candles) {
+  const minCount = CONFIG.MIN_CONSOLIDATION_CANDLES;
+  const maxCount = CONFIG.MAX_CONSOLIDATION_CANDLES;
 
-  if (candles.length < count) return null;
+  if (candles.length < minCount) return null;
 
-  const rangeCandles = candles.slice(-count);
+  // Only the latest closed 1H candles are used.
+  const available = candles.slice(-maxCount);
 
-  const resistance = getMax(rangeCandles, 'high');
-  const support = getMin(rangeCandles, 'low');
+  if (available.length < minCount) return null;
 
-  if (resistance <= 0 || support <= 0) return null;
+  let resistance = 0;
+  let support = Infinity;
+  let acceptedCandles = [];
+
+  // Start from the latest closed candle and scan backward.
+  for (let i = available.length - 1; i >= 0; i--) {
+    const candle = available[i];
+
+    // Enforce continuity: no missing 1H candles.
+    if (acceptedCandles.length > 0) {
+      const newerCandle = acceptedCandles[0];
+
+      if (
+        newerCandle.time - candle.time !==
+        CONFIG.TIMEFRAMES['1h'].seconds
+      ) {
+        break;
+      }
+    }
+
+    const nextResistance = Math.max(
+      resistance,
+      candle.high
+    );
+
+    const nextSupport = Math.min(
+      support,
+      candle.low
+    );
+
+    if (
+      nextResistance <= 0 ||
+      nextSupport <= 0 ||
+      !Number.isFinite(nextSupport)
+    ) {
+      break;
+    }
+
+    const midpoint =
+      (nextResistance + nextSupport) / 2;
+
+    const nextRangePercent =
+      ((nextResistance - nextSupport) / midpoint) * 100;
+
+    // Stop when adding an older candle breaks the range limit.
+    // The previously accepted continuous range remains intact.
+    if (
+      !Number.isFinite(nextRangePercent) ||
+      nextRangePercent > CONFIG.MAX_CONSOLIDATION_RANGE
+    ) {
+      break;
+    }
+
+    resistance = nextResistance;
+    support = nextSupport;
+
+    acceptedCandles.unshift(candle);
+  }
+
+  const candlesCount = acceptedCandles.length;
+
+  if (candlesCount < minCount) {
+    return null;
+  }
 
   const midpoint = (resistance + support) / 2;
 
@@ -686,10 +779,30 @@ function analyzeConsolidation(candles) {
     return null;
   }
 
+  const startTime = acceptedCandles[0].time;
+
+  const lastCandle = acceptedCandles.at(-1);
+
+  const endTime =
+    lastCandle.time + CONFIG.TIMEFRAMES['1h'].seconds;
+
+  const durationHours =
+    (endTime - startTime) /
+    CONFIG.TIMEFRAMES['1h'].seconds;
+
   return {
     resistance,
     support,
-    rangePercent
+    rangePercent,
+
+    candlesCount,
+    durationHours,
+
+    startTime,
+    endTime,
+
+    startCandle: acceptedCandles[0],
+    endCandle: lastCandle
   };
 }
 
@@ -698,19 +811,19 @@ function analyzeConsolidation(candles) {
 // ============================================================
 
 function analyzeBreakout(
-  closed15m,
+  consolidation,
   current15m,
   livePrice,
   diagnostics,
   symbol
 ) {
-  if (!current15m || !livePrice) return null;
-
-  const consolidation = analyzeConsolidation(
-    closed15m
-  );
-
-  if (!consolidation) return null;
+  if (
+    !consolidation ||
+    !current15m ||
+    !livePrice
+  ) {
+    return null;
+  }
 
   diagnostics.consolidation++;
   diagnostics.breakoutChecks++;
@@ -718,12 +831,14 @@ function analyzeBreakout(
   const {
     resistance,
     support,
-    rangePercent
+    rangePercent,
+    candlesCount,
+    durationHours
   } = consolidation;
 
   // ----------------------------------------------------------
   // Calculate all breakout measurements first.
-  // This allows independent diagnostics for every condition.
+  // Breakout resistance comes from the actual 1H range.
   // ----------------------------------------------------------
 
   const breakoutPercent = pctChange(
@@ -786,7 +901,6 @@ function analyzeBreakout(
 
   // ----------------------------------------------------------
   // Update independent diagnostic counters
-  // One coin can be counted in multiple rejection categories.
   // ----------------------------------------------------------
 
   if (belowResistance) {
@@ -820,7 +934,7 @@ function analyzeBreakout(
   const failedChecks = [];
 
   if (belowResistance) {
-    failedChecks.push('قیمت هنوز زیر مقاومت است');
+    failedChecks.push('قیمت هنوز زیر سقف تراکم 1H است');
   } else if (nearResistance) {
     failedChecks.push('شکست کمتر از حداقل مجاز');
   }
@@ -848,8 +962,7 @@ function analyzeBreakout(
     !closeLocationRejected;
 
   // ----------------------------------------------------------
-  // Store a limited number of diagnostic samples.
-  // These samples do not affect trading decisions.
+  // Store diagnostic samples
   // ----------------------------------------------------------
 
   if (diagnostics.breakoutSamples.length < 30) {
@@ -866,13 +979,15 @@ function analyzeBreakout(
       support,
       rangePercent,
 
+      consolidationCandles: candlesCount,
+      consolidationDurationHours: durationHours,
+
       failedChecks
     });
   }
 
   // ----------------------------------------------------------
-  // Original acceptance logic preserved:
-  // All original conditions must pass.
+  // Original breakout acceptance conditions preserved.
   // ----------------------------------------------------------
 
   if (!passed) return null;
@@ -883,9 +998,16 @@ function analyzeBreakout(
     resistance,
     support,
     rangePercent,
+
     breakoutPercent,
     candleReturn,
-    closeLocation
+    closeLocation,
+
+    consolidationCandles: candlesCount,
+    consolidationDurationHours: durationHours,
+
+    consolidationStartTime: consolidation.startTime,
+    consolidationEndTime: consolidation.endTime
   };
 }
 
@@ -1024,7 +1146,6 @@ function analyze1hTrend(candles, livePrice) {
     lastClose,
     livePrice,
 
-    // Percentage distance from EMA20
     closeDistancePct: pctChange(
       lastClose,
       currentEMA
@@ -1201,9 +1322,34 @@ function analyzeCoin(data, diagnostics) {
 
   const multiplier = getContractMultiplier(contract);
 
-  // 1. Detect breakout
+  // ----------------------------------------------------------
+  // 1. Detect actual 1H consolidation.
+  // The same 1H candles are also used for EMA trend analysis.
+  // ----------------------------------------------------------
+
+  const consolidation = analyzeConsolidation1h(
+    candles1h
+  );
+
+  if (!consolidation) return null;
+
+  if (diagnostics.consolidationSamples.length < 30) {
+    diagnostics.consolidationSamples.push({
+      symbol,
+      candlesCount: consolidation.candlesCount,
+      durationHours: consolidation.durationHours,
+      resistance: consolidation.resistance,
+      support: consolidation.support,
+      rangePercent: consolidation.rangePercent
+    });
+  }
+
+  // ----------------------------------------------------------
+  // 2. Detect 15M breakout against the 1H consolidation high.
+  // ----------------------------------------------------------
+
   const breakout = analyzeBreakout(
-    candles15m,
+    consolidation,
     current15m,
     livePrice,
     diagnostics,
@@ -1212,7 +1358,10 @@ function analyzeCoin(data, diagnostics) {
 
   if (!breakout) return null;
 
-  // 2. Calculate volume details
+  // ----------------------------------------------------------
+  // 3. Calculate 15M volume details.
+  // ----------------------------------------------------------
+
   const volumeDetails = getCurrentVolumeDetails(
     candles15m,
     current15m,
@@ -1229,7 +1378,6 @@ function analyzeCoin(data, diagnostics) {
     elapsedSeconds
   } = volumeDetails;
 
-  // Save diagnostic sample BEFORE volume filtering.
   diagnostics.volumeSamples.push({
     symbol,
     volumeRatio,
@@ -1246,10 +1394,8 @@ function analyzeCoin(data, diagnostics) {
   diagnostics.volume++;
 
   // ----------------------------------------------------------
-  // 3. Evaluate BOTH 1h and 4h
-  //    4h is evaluated even when 1h fails.
-  //    This section is diagnostic and does not change
-  //    the original acceptance conditions.
+  // 4. Evaluate BOTH 1H and 4H.
+  // EMA20 trend confirmation is preserved.
   // ----------------------------------------------------------
 
   const trend = analyze1hTrend(
@@ -1262,8 +1408,6 @@ function analyzeCoin(data, diagnostics) {
     livePrice
   );
 
-  // Save detailed diagnostic sample for every
-  // volume-confirmed breakout.
   diagnostics.trendSamples.push({
     symbol,
     volumeRatio,
@@ -1300,17 +1444,19 @@ function analyzeCoin(data, diagnostics) {
     }
   });
 
-  // Original 1h acceptance condition preserved.
   if (!trend.passed) return null;
 
   diagnostics.trend++;
 
-  // Original 4h acceptance condition preserved.
   if (!room.passed) return null;
 
   diagnostics.room++;
 
+  // ----------------------------------------------------------
   // 5. Ranking
+  // Scoring formula is unchanged.
+  // ----------------------------------------------------------
+
   const ranking = calculateBreakoutScore({
     breakout,
     volumeRatio,
@@ -1375,7 +1521,12 @@ function analyzeCoin(data, diagnostics) {
       resistance: breakout.resistance,
       support: breakout.support,
       extension: breakout.breakoutPercent,
-      consolidationRange: breakout.rangePercent
+      consolidationRange: breakout.rangePercent,
+
+      consolidationCandles: breakout.consolidationCandles,
+      consolidationDurationHours: breakout.consolidationDurationHours,
+      consolidationStartTime: breakout.consolidationStartTime,
+      consolidationEndTime: breakout.consolidationEndTime
     },
 
     trend: {
@@ -1390,6 +1541,7 @@ function analyzeCoin(data, diagnostics) {
     },
 
     confirmations: [
+      '1h_CONSOLIDATION',
       '15m_BREAKOUT',
       '15m_VOLUME',
       '1h_TREND',
@@ -1732,8 +1884,8 @@ function buildReport(
   const lines = [
     '🚀 GATE.IO | EARLY LONG BREAKOUT RADAR',
     '━━━━━━━━━━━━━━━━━━',
-    '🎯 شکست تازه محدوده تراکم + تأیید حجم',
-    '⏱ تحلیل: 15M | 1H | 4H',
+    '🎯 تراکم واقعی 1H + شکست 15M + تأیید حجم',
+    '⏱ تحلیل: 1H CONSOLIDATION | 15M BREAKOUT | 1H TREND | 4H ROOM',
     '🔄 اجرای اسکن هر ۵ دقیقه؛ بدون دخالت در امتیاز',
     `📊 بازار: ${stats.active} | نقدشونده: ${stats.liquid}`,
     `✅ دریافت موفق: ${stats.success} | خطا: ${stats.errors}`,
@@ -1775,6 +1927,10 @@ function buildReport(
       `📊 حجم: ${coin.volume['15m'].toFixed(2)}x | شکست: +${coin.breakout.extension.toFixed(2)}% | محدوده: ${coin.breakout.consolidationRange.toFixed(2)}%`
     );
 
+    lines.push(
+      `⏳ تراکم 1H: ${coin.breakout.consolidationCandles} کندل | مدت: ${coin.breakout.consolidationDurationHours} ساعت`
+    );
+
     lines.push('');
   });
 
@@ -1798,8 +1954,11 @@ async function main() {
   console.log('\n🚀 GATE.IO EARLY LONG BREAKOUT RADAR');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━');
 
-  console.log('⏱ Analysis: 15m / 1h / 4h');
-  console.log('🎯 Strategy: Consolidation Breakout + Volume');
+  console.log('⏱ Analysis: 1h Consolidation / 15m Breakout / 1h Trend / 4h Room');
+  console.log('🎯 Strategy: Actual Consolidation + Fresh Breakout + Volume');
+  console.log(
+    `📦 Consolidation: ${CONFIG.MIN_CONSOLIDATION_CANDLES}-${CONFIG.MAX_CONSOLIDATION_CANDLES} closed 1h candles | Max range ${CONFIG.MAX_CONSOLIDATION_RANGE}%`
+  );
   console.log('🔄 Scan schedule does not affect score');
   console.log(
     `🛡 API protection: Concurrency ${CONFIG.CONCURRENCY} | Interval ${CONFIG.REQUEST_INTERVAL_MS}ms`
@@ -1897,7 +2056,6 @@ async function main() {
         );
       }
 
-      // Valid market data received.
       diagnostics.validData++;
 
       const coin = analyzeCoin({
@@ -1968,7 +2126,7 @@ async function main() {
     .slice(0, CONFIG.TOP_COUNT)
     .forEach((coin, index) => {
       console.log(
-        `${index + 1}. ${coin.symbol} | ${coin.score}/100 | Volume ${coin.volume['15m'].toFixed(2)}x | Breakout ${coin.breakout?.extension?.toFixed(2) ?? '-'}%`
+        `${index + 1}. ${coin.symbol} | ${coin.score}/100 | Volume ${coin.volume['15m'].toFixed(2)}x | Breakout ${coin.breakout?.extension?.toFixed(2) ?? '-'}% | Consolidation ${coin.breakout?.consolidationCandles ?? '-'} candles`
       );
     });
 
