@@ -120,7 +120,7 @@ function isValidCandle(c) {
  * no older page / no progress.
  */
 async function getClosedHourlyCandles(contract) {
-  const currentBucket = Math.floor(Date.now() / CONFIG.CANDLE_SECONDS) * CONFIG.CANDLE_SECONDS;
+  const currentBucket = Math.floor((Date.now() / 1000) / CONFIG.CANDLE_SECONDS) * CONFIG.CANDLE_SECONDS;
   const byTime = new Map();
   let pageEnd = currentBucket - 1;
   let pageCount = 0;
@@ -522,22 +522,8 @@ async function main() {
     return analyzeTrend(market.symbol, history.candles, market.quoteVolume, history.pages);
   });
 
-  const sampleErrors = [];
-  for (let i = 0; i < results.length; i++) {
-    const result = results[i];
-    if (result?.error) {
-      failed++;
-      if (sampleErrors.length < 8) {
-        const error = result.error;
-        sampleErrors.push({
-          symbol: markets[i]?.symbol || 'UNKNOWN',
-          name: error?.name || 'Error',
-          message: error?.message || String(error),
-          code: error?.cause?.code || error?.code || null,
-          status: error?.status || null,
-        });
-      }
-    }
+  for (const result of results) {
+    if (result?.error) failed++;
   }
 
   const analyzed = results.filter((r) => r && !r.error);
@@ -565,10 +551,6 @@ async function main() {
   console.log(`Markets analyzed with complete available closed ${CONFIG.TIMEFRAME} history: ${checked}`);
   console.log(`Markets with insufficient history: ${insufficient}`);
   console.log(`Markets with data errors: ${failed}`);
-  if (sampleErrors.length) {
-    console.log('Sample candle/API errors (up to 8):');
-    for (const item of sampleErrors) console.log(JSON.stringify(item));
-  }
   console.log(`Historical candles processed: ${totalCandles}`);
   console.log(`Historical API pages processed: ${totalPages}`);
   console.log(`Bullish-potential candidates: ${candidates.length}`);
