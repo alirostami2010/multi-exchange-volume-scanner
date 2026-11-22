@@ -51,16 +51,11 @@ const CONFIG = {
   WATCHLIST_RETENTION_DAYS: 30,
   HISTORY_RETENTION_DAYS: 30,
   TRADE_STATE_RETENTION_DAYS: 11,
-  ACTIVE_MEMORY_RETENTION_HOURS: 24,
 
   // مقایسه تاریخی
   HISTORY_MIN_INTERVAL_MINUTES: 10,
   HISTORY_MAX_SNAPSHOTS: 300,
   HISTORY_BASELINE_SNAPSHOTS: 24,
-
-  // برتری لازم برای جایگزینی عضو فهرست فعال
-  REPLACEMENT_PRIORITY_ADVANTAGE: 10,
-  REPLACEMENT_STRUCTURE_ADVANTAGE: 8,
 
   // جلوگیری از تغییر رتبه با نوسان‌های کوچک
   RANK_STABILITY_MARGIN: 5,
@@ -1805,11 +1800,14 @@ function classifyOpportunity(coin) {
   return 'SCALP';
 }
 
-function buildTradeSetup(coin, candles15m, candles5m) {
+function buildTradeSetup(coin, candles15m, candles5m = []) {
   const price = number(coin.livePrice, coin.price);
   const atr = calculateATR(candles15m, 14);
+  const safeCandles5m = Array.isArray(candles5m) ? candles5m : [];
 
-  if (!price || !atr) return null;
+  if (!price || !atr || !Array.isArray(candles15m) || candles15m.length < 25) {
+    return null;
+  }
 
   const ema21 = number(coin._analysis?.tf15?.ema21);
 
@@ -1867,8 +1865,8 @@ function buildTradeSetup(coin, candles15m, candles5m) {
   const tp2 = target(2.5, 1);
   const tp3 = target(4, 2);
 
-  const last5m = candles5m.at(-1);
-  const previous5m = candles5m.at(-2);
+  const last5m = safeCandles5m.at(-1);
+  const previous5m = safeCandles5m.at(-2);
 
   const strength5m = last5m
     ? getCandleStrength(last5m)
@@ -2174,6 +2172,10 @@ function isActiveCandidate(coin) {
 
   if (number(coin.moveScore) < 65) return false;
   if (number(coin.growthScore) < 58) return false;
+  if (number(coin.structuralScore) < 58) return false;
+  if (number(coin.potentialScore) < 60) return false;
+  if (number(coin.energyScore) < 52) return false;
+  if (number(coin.entryQualityScore) < 55) return false;
 
   const flags = coin.flags || {};
 
@@ -2188,10 +2190,16 @@ function isActiveCandidate(coin) {
 
   if (
     coin.moveAgeMinutes != null &&
-    coin.moveAgeMinutes > CONFIG.MAX_ACTIVE_AGE_MINUTES
+    number(coin.moveAgeMinutes, Infinity) > CONFIG.MAX_ACTIVE_AGE_MINUTES
   ) {
     return false;
   }
+
+  const historyCount = number(coin.relativeSelf?.historyCount);
+  const relativeScore = number(coin.relativeSelf?.score, 50);
+
+  // امتیاز خنثیِ سابقه ناکافی نباید باعث حذف ارز تازه‌وارد شود.
+  if (historyCount >= 6 && relativeScore < 35) return false;
 
   return true;
 }
@@ -2251,7 +2259,7 @@ function stableSortByPriority(coins, previousActiveList) {
       const previous = sorted[j - 1];
 
       const difference =
-        current.activePriority - previous.activePriority;
+        previous.activePriority - current.activePriority;
 
       if (
         difference <= CONFIG.RANK_STABILITY_MARGIN
@@ -2279,109 +2287,33 @@ function stableSortByPriority(coins, previousActiveList) {
 }
 
 function assignStableRanks(candidates, previousMemory, nowMs) {
-  const previousActiveList =
-    previousMemory.activeList || {};
+  const previousActiveList = previousMemory.activeList || {};
 
+  // همه واجدین شرایط در هر اسکن دوباره رتبه‌بندی می‌شوند؛
+  // سابقه فقط در اختلاف‌های کوچکِ رتبه اثر دارد، نه در انتخاب اجباری اعضا.
   const eligible = candidates
     .filter(isActiveCandidate)
     .map((coin) => {
       coin.activePriority = calculateActivePriority(coin);
-
-      coin.structuralPriority =
-        calculateStructuralAdvantage(coin);
-
+      coin.structuralPriority = calculateStructuralAdvantage(coin);
       return coin;
     });
 
-  const bySymbol = new Map(
-    eligible.map((coin) => [coin.symbol, coin])
-  );
-
-  const previousEntries = Object.entries(previousActiveList)
-    .map(([symbol, item]) => ({
-      symbol,
-      item,
-      coin: bySymbol.get(symbol),
-    }))
-    .filter(({ item }) => {
-      const lastSeen = Date.parse(
-        item.lastSeen || item.firstSeen || ''
-      );
-
-      return lastSeen > 0 &&
-        nowMs - lastSeen <=
-          CONFIG.ACTIVE_MEMORY_RETENTION_HOURS * 3600000;
-    });
-
-  // عضو قبلی فقط در صورت تحلیل موفق و واجد شرایط بودن حفظ می‌شود.
-  const incumbents = previousEntries
-    .filter(({ coin }) => Boolean(coin))
-    .map(({ coin }) => coin);
-
-  const selected = [];
-  const selectedSymbols = new Set();
-
-  // حفظ اعضای قبلی واجد شرایط؛ حضور قبلی هیچ امتیازی به آن‌ها نمی‌دهد.
-  for (const coin of incumbents) {
-    if (selected.length >= CONFIG.TOP_COUNT) break;
-
-    if (!selectedSymbols.has(coin.symbol)) {
-      selected.push(coin);
-      selectedSymbols.add(coin.symbol);
-    }
-  }
-
-  const challengers = eligible
-    .filter((coin) => !selectedSymbols.has(coin.symbol))
-    .sort((a, b) =>
-      b.activePriority - a.activePriority
-    );
-
-  // ورود عضو جدید فقط با برتری واقعی نسبت به ضعیف‌ترین عضو فعلی.
-  for (const challenger of challengers) {
-    if (selected.length < CONFIG.TOP_COUNT) {
-      selected.push(challenger);
-      selectedSymbols.add(challenger.symbol);
-      continue;
-    }
-
-    const weakest = [...selected].sort(
-      (a, b) => a.activePriority - b.activePriority
-    )[0];
-
-    const priorityAdvantage =
-      challenger.activePriority - weakest.activePriority;
-
-    const structuralAdvantage =
-      challenger.structuralPriority - weakest.structuralPriority;
-
-    if (
-      priorityAdvantage >=
-        CONFIG.REPLACEMENT_PRIORITY_ADVANTAGE &&
-      structuralAdvantage >=
-        CONFIG.REPLACEMENT_STRUCTURE_ADVANTAGE
-    ) {
-      const index = selected.findIndex(
-        (coin) => coin.symbol === weakest.symbol
-      );
-
-      selected[index] = challenger;
-
-      selectedSymbols.delete(weakest.symbol);
-      selectedSymbols.add(challenger.symbol);
-    }
-  }
-
-  const ranked = stableSortByPriority(
-    selected,
+  const rankedAll = stableSortByPriority(
+    eligible,
     previousActiveList
   );
+
+  const ranked = rankedAll.slice(0, CONFIG.TOP_COUNT);
 
   ranked.forEach((coin, index) => {
     coin.activeRank = index + 1;
   });
 
+  // activeList فقط اعضای واجد شرایط همین اسکن را نگه می‌دارد؛
+  // هیچ عضو قدیمی یا تحلیل‌نشده‌ای وارد فهرست فعال نمی‌شود.
   const activeList = {};
+  const now = new Date(nowMs).toISOString();
 
   for (const coin of ranked) {
     const previous = previousActiveList[coin.symbol];
@@ -2394,33 +2326,16 @@ function assignStableRanks(candidates, previousMemory, nowMs) {
       structuralScore: coin.structuralScore,
       potentialScore: coin.potentialScore,
       relativeSelfScore: coin.relativeSelf?.score ?? 50,
-      firstSeen: previous?.firstSeen || new Date(nowMs).toISOString(),
-      lastSeen: new Date(nowMs).toISOString(),
+      firstSeen: previous?.firstSeen || now,
+      lastSeen: now,
       moveStatus: coin.moveStatus,
       snapshot: {
         growthScore: coin.growthScore,
         moveScore: coin.moveScore,
         energyScore: coin.energyScore,
+        entryQualityScore: coin.entryQualityScore,
       },
     };
-  }
-
-  // اگر داده یک ارز موقتاً دریافت نشد، حافظه‌اش فوراً حذف نمی‌شود.
-  for (const [symbol, item] of Object.entries(previousActiveList)) {
-    if (activeList[symbol]) continue;
-
-    const lastSeen = Date.parse(
-      item.lastSeen || item.firstSeen || ''
-    );
-
-    if (
-      lastSeen > 0 &&
-      nowMs - lastSeen <=
-        CONFIG.ACTIVE_MEMORY_RETENTION_HOURS * 3600000 &&
-      !candidates.some((coin) => coin.symbol === symbol)
-    ) {
-      activeList[symbol] = item;
-    }
   }
 
   return {
@@ -2450,7 +2365,8 @@ function isWatchCandidate(coin) {
   if (
     flags.structuralDamage ||
     flags.bearishFlow ||
-    flags.overheated
+    flags.overheated ||
+    flags.oiDanger
   ) {
     return false;
   }
@@ -3296,7 +3212,9 @@ async function main() {
         getContractStats(market.symbol).catch(() => []),
       ]);
 
-      const candles5m = candles5mData.closed;
+      const candles5m = Array.isArray(candles5mData?.closed)
+        ? candles5mData.closed
+        : [];
       const candles15m = candles15mData.closed;
       const candles1d = candles1dData.closed;
 
