@@ -18,6 +18,9 @@ const CONFIG = {
   CANDLE_LIMIT: 72,
   MIN_CANDLES: 40,
   MIN_QUOTE_VOLUME_24H: 100000,
+  // Gate.io contract_type is the exchange-provided asset classification.
+  // Unknown or non-crypto classifications are rejected (fail closed).
+  ALLOWED_CRYPTO_CONTRACT_TYPES: new Set(['crypto', 'cryptocurrency']),
   CONCURRENCY: 8,
   REQUEST_TIMEOUT: 15000,
   RETRIES: 3,
@@ -69,6 +72,20 @@ async function getContracts() {
 
 async function getTickers() {
   return fetchJSON(`${CONFIG.API_BASE}/futures/usdt/tickers`);
+}
+
+/**
+ * Accept only contracts explicitly classified by Gate.io as cryptocurrency.
+ * Missing/unknown classifications are rejected rather than guessed from symbols.
+ */
+function isSupportedCryptoContract(contract) {
+  const classification = String(contract?.contract_type ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_');
+  return CONFIG.ALLOWED_CRYPTO_CONTRACT_TYPES.has(classification) &&
+    String(contract?.status ?? '').toLowerCase() === 'trading' &&
+    contract?.in_delisting !== true;
 }
 
 async function getClosedHourlyCandles(contract) {
@@ -384,17 +401,24 @@ async function main() {
   }
 
   const tickerMap = new Map(tickers.map((ticker) => [ticker.contract, ticker]));
-  const markets = contracts
-    .filter((contract) =>
-      contract?.name && contract.name !== 'BTC_USDT' &&
-      contract.in_delisting !== true && tickerMap.has(contract.name)
-    )
+  const namedContracts = contracts.filter((contract) => contract?.name);
+  const cryptoContracts = namedContracts.filter(isSupportedCryptoContract);
+  const rejectedNonCryptoOrUnknown = namedContracts.length - cryptoContracts.length;
+  const rejectedMissingTicker = cryptoContracts.filter((contract) => !tickerMap.has(contract.name)).length;
+
+  const markets = cryptoContracts
+    .filter((contract) => contract.name !== 'BTC_USDT' && tickerMap.has(contract.name))
     .map((contract) => ({
       symbol: contract.name,
       quoteVolume: num(tickerMap.get(contract.name).volume_24h_quote),
     }))
     .filter((market) => market.quoteVolume >= CONFIG.MIN_QUOTE_VOLUME_24H)
     .sort((a, b) => b.quoteVolume - a.quoteVolume);
+
+  const btcContract = contracts.find((contract) => contract?.name === 'BTC_USDT');
+  if (!btcContract || !isSupportedCryptoContract(btcContract)) {
+    throw new Error('قرارداد مرجع BTC_USDT در Gate.io صراحتاً به‌عنوان رمزارز فعال تأیید نشد.');
+  }
 
   const btcCandles = await getClosedHourlyCandles('BTC_USDT');
   if (btcCandles.length < CONFIG.MIN_CANDLES) {
@@ -426,7 +450,11 @@ async function main() {
   const selected = candidates.slice(0, CONFIG.MAX_RESULTS);
   const telegramSymbols = selected.map((item) => item.symbol.replace(/_USDT$/, ''));
 
-  console.log(`Markets eligible by 24h liquidity: ${markets.length}`);
+  console.log(`Contracts received from Gate.io: ${contracts.length}`);
+  console.log(`Contracts explicitly classified as active crypto: ${cryptoContracts.length}`);
+  console.log(`Contracts rejected (non-crypto, unknown type, or inactive): ${rejectedNonCryptoOrUnknown}`);
+  console.log(`Crypto contracts missing ticker data: ${rejectedMissingTicker}`);
+  console.log(`Crypto markets eligible by 24h liquidity: ${markets.length}`);
   console.log(`Markets analyzed with sufficient hourly candles: ${checked}`);
   console.log(`Markets with data errors: ${failed}`);
   console.log(`Qualified hourly bullish structures: ${candidates.length}`);
