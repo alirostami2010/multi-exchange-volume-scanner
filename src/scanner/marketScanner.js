@@ -20,6 +20,9 @@ const CONFIG = {
   CANDLE_SECONDS: 3600,
   // Gate.io futures candlestick endpoint maximum page size.
   CANDLE_PAGE_SIZE: 2000,
+  // Gate.io currently rejects futures candles older than its latest 10,000
+  // hourly points. Use a small safety margin to avoid boundary rejections.
+  MAX_RECENT_CANDLES: 9900,
   MIN_CANDLES: 48,
   MIN_QUOTE_VOLUME_24H: 100000,
   ALLOWED_CRYPTO_CONTRACT_TYPES: new Set(['crypto', 'cryptocurrency']),
@@ -146,22 +149,25 @@ function isValidCandle(c) {
 }
 
 /**
- * Fetch all available closed hourly candles. Each page asks Gate.io for the
- * latest page ending before the previous page's oldest candle. There is no
- * configured historical lookback cap; paging ends when the exchange returns
- * no older page / no progress.
+ * Fetch all closed hourly candles that Gate.io currently exposes for a contract.
+ * Gate.io enforces a rolling recent-history boundary of 10,000 points for this
+ * endpoint. We deliberately stay inside 9,900 points as a safety margin.
+ * Older lifetime candles are not retrievable from this endpoint; do not send
+ * requests outside the supported window because Gate.io rejects the whole call.
  */
 async function getClosedHourlyCandles(contract) {
   const currentBucket = Math.floor((Date.now() / 1000) / CONFIG.CANDLE_SECONDS) * CONFIG.CANDLE_SECONDS;
+  const oldestAllowed = currentBucket - (CONFIG.MAX_RECENT_CANDLES * CONFIG.CANDLE_SECONDS);
   const byTime = new Map();
   let pageEnd = currentBucket - 1;
   let pageCount = 0;
   let oldestSeen = Infinity;
 
-  while (true) {
-    // Gate.io rejects `limit` together with `from` or `to`. Use an explicit
-    // 2000-hour time window per page instead (2000 points maximum per query).
-    const pageStart = Math.max(1, pageEnd - ((CONFIG.CANDLE_PAGE_SIZE - 1) * CONFIG.CANDLE_SECONDS));
+  while (pageEnd >= oldestAllowed) {
+    const pageStart = Math.max(
+      oldestAllowed,
+      pageEnd - ((CONFIG.CANDLE_PAGE_SIZE - 1) * CONFIG.CANDLE_SECONDS),
+    );
     const params = new URLSearchParams({
       contract,
       interval: CONFIG.TIMEFRAME,
@@ -173,7 +179,8 @@ async function getClosedHourlyCandles(contract) {
     if (raw.length === 0) break;
 
     const page = raw.map(normalizeCandle).filter((c) =>
-      isValidCandle(c) && c.time < currentBucket && c.time <= pageEnd
+      isValidCandle(c) && c.time < currentBucket &&
+      c.time >= oldestAllowed && c.time <= pageEnd
     );
     if (page.length === 0) break;
 
@@ -189,8 +196,9 @@ async function getClosedHourlyCandles(contract) {
     pageEnd = pageOldest - 1;
     pageCount++;
 
-    // A short page means the exchange has no earlier data for this contract.
-    if (raw.length < CONFIG.CANDLE_PAGE_SIZE) break;
+    // Continue even after a short page: sparse markets can have gaps while
+    // still containing older candles in the preceding time window.
+    if (pageEnd < oldestAllowed) break;
     await sleep(CONFIG.PAGE_PAUSE_MS);
   }
 
@@ -535,8 +543,8 @@ function formatTelegramCandidate(item, index) {
 }
 
 async function main() {
-  console.log('\nGATE.IO FULL-HISTORY HOURLY TREND SCANNER');
-  console.log('Mode: one engine | all available closed 1h history | resilient paced API retrieval | past + current trend + bullish-potential assessment | max 10');
+  console.log('\nGATE.IO HOURLY TREND SCANNER');
+  console.log(`Mode: one engine | latest ${CONFIG.MAX_RECENT_CANDLES} Gate.io-accessible closed 1h candles per market | paginated API retrieval | past + current trend + bullish-potential assessment | max 10`);
 
   const [contracts, tickers] = await Promise.all([getContracts(), getTickers()]);
   if (!Array.isArray(contracts) || !Array.isArray(tickers)) {
@@ -606,7 +614,7 @@ async function main() {
   console.log(`Rejected non-crypto/inactive/unknown: ${rejectedNonCryptoOrInactive}`);
   console.log(`Crypto contracts missing ticker: ${rejectedMissingTicker}`);
   console.log(`Markets eligible by minimum 24h liquidity: ${markets.length}`);
-  console.log(`Markets analyzed with complete available closed ${CONFIG.TIMEFRAME} history: ${checked}`);
+  console.log(`Markets analyzed with available closed ${CONFIG.TIMEFRAME} history inside Gate.io recent-history window: ${checked}`);
   console.log(`Markets with insufficient history: ${insufficient}`);
   console.log(`Markets with data errors after retries: ${failed}`);
   if (failedMarkets.length) {
@@ -638,7 +646,7 @@ async function main() {
   if (telegramLines.length) {
     await sendTelegram([
       'GATE.IO | HOURLY BULLISH-POTENTIAL RADAR',
-      'تحلیل تاریخچه کامل کندل‌های بسته‌شده یک‌ساعته',
+      `تحلیل آخرین تاریخچه قابل‌دسترسی کندل‌های بسته‌شده یک‌ساعته (حداکثر ${CONFIG.MAX_RECENT_CANDLES} کندل)`,
       'این فهرست ارزیابی احتمال صعود است، نه سیگنال ورود یا تضمین حرکت.',
       '━━━━━━━━━━━━━━━━━━',
       ...telegramLines,
