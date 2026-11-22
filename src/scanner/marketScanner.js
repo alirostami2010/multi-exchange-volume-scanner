@@ -213,150 +213,139 @@ function relativeStrength(coinCandles, btcCandles) {
 function detectHourlyStructure(candles) {
   if (!Array.isArray(candles) || candles.length < CONFIG.MIN_CANDLES) return null;
 
-  const recent = candles.slice(-4);
-  const prior = candles.slice(-12, -4);
-  const earlier = candles.slice(-20, -12);
-  if (recent.length !== 4 || prior.length !== 8 || earlier.length !== 8) return null;
+  // Only fully closed hourly candles reach this function.
+  // The final candle is the possible ignition candle; it is evaluated
+  // against the preceding 8-bar base and 6-bar local resistance.
+  const trigger = candles.at(-1);
+  const preTrigger = candles.slice(-4, -1); // 3 closed bars before trigger
+  const base = candles.slice(-12, -4);      // preceding 8 closed bars
+  const resistanceWindow = candles.slice(-10, -1); // prior 9 bars, excluding trigger
+  if (preTrigger.length !== 3 || base.length !== 8 || resistanceWindow.length !== 9) return null;
 
-  const rf = recent.map(candleFacts);
-  const pf = prior.map(candleFacts);
-  const ef = earlier.map(candleFacts);
-  const last = recent.at(-1);
-  const first = recent[0];
-  const priorLast = prior.at(-1);
-  const priorFirst = prior[0];
-  const earlierLast = earlier.at(-1);
-  const earlierFirst = earlier[0];
+  const baseFirst = base[0];
+  const baseLast = base.at(-1);
+  const baseReturn = pct(baseLast.close, baseFirst.open);
+  const baseHigh = Math.max(...base.map((c) => c.high));
+  const baseLow = Math.min(...base.map((c) => c.low));
+  const baseRangePct = pct(baseHigh, baseLow);
+  const resistance6 = Math.max(...candles.slice(-7, -1).map((c) => c.high));
+  const resistance3 = Math.max(...preTrigger.map((c) => c.high));
 
-  const recentReturn = pct(last.close, first.open);
-  const priorReturn = pct(priorLast.close, priorFirst.open);
-  const earlierReturn = pct(earlierLast.close, earlierFirst.open);
-  const recentLow = Math.min(...recent.map((c) => c.low));
-  const priorLow = Math.min(...prior.map((c) => c.low));
-  const priorHigh = Math.max(...prior.map((c) => c.high));
-  const earlierHigh = Math.max(...earlier.map((c) => c.high));
-  const recentHigh = Math.max(...recent.map((c) => c.high));
+  const triggerFacts = candleFacts(trigger);
+  const preFacts = preTrigger.map(candleFacts);
+  const baseFacts = base.map(candleFacts);
 
-  const bullishCount = rf.filter((f) => f.bullish).length;
-  const bearishCount = rf.filter((f) => f.bearish).length;
-  const closeStrength = mean(rf.map((f) => f.closePosition));
-  const lowerWick = mean(rf.map((f) => f.lowerWick));
-  const upperWick = mean(rf.map((f) => f.upperWick));
-  const recentActivity = mean(rf.map((f) => f.activity));
-  const priorActivity = mean(pf.map((f) => f.activity));
-  const activityRatio = priorActivity > 0 ? recentActivity / priorActivity : 1;
-  const bullishActivity = rf.filter((f) => f.bullish).reduce((sum, f) => sum + f.activity, 0);
-  const bearishActivity = rf.filter((f) => f.bearish).reduce((sum, f) => sum + f.activity, 0);
-  const directionalActivityRatio = bullishActivity / Math.max(bearishActivity, 1);
+  const triggerReturn = pct(trigger.close, trigger.open);
+  const last4Return = pct(trigger.close, candles.at(-4).open);
+  const preHigh = Math.max(...preTrigger.map((c) => c.high));
+  const preLow = Math.min(...preTrigger.map((c) => c.low));
+
+  const baseActivity = mean(baseFacts.map((f) => f.activity));
+  const preActivity = mean(preFacts.map((f) => f.activity));
+  const triggerActivityRatio = baseActivity > 0 ? triggerFacts.activity / baseActivity : 0;
+  const preActivityRatio = baseActivity > 0 ? preActivity / baseActivity : 0;
 
   let higherLowSteps = 0;
-  for (let i = 1; i < recent.length; i++) {
-    if (recent[i].low > recent[i - 1].low) higherLowSteps++;
+  for (let i = 1; i < preTrigger.length; i++) {
+    if (preTrigger[i].low > preTrigger[i - 1].low) higherLowSteps++;
   }
-  const heldPriorLow = recentLow >= priorLow * 0.997;
-  const reclaimedRecentHigh = last.close > Math.max(...recent.slice(0, -1).map((c) => c.high));
-  const brokePriorHigh = last.close > priorHigh * 1.001;
-  const closeAbovePriorMid = last.close > (priorHigh + priorLow) / 2;
 
-  // Evidence that sellers are losing control and buyers are absorbing supply.
-  const sellersFading =
-    (priorReturn <= -0.35 || earlierReturn <= -0.65) &&
-    recentReturn > priorReturn && heldPriorLow &&
-    (higherLowSteps >= 2 || lowerWick >= 0.22) && closeStrength >= 0.55;
+  const baseWasQuietOrWeak =
+    (Math.abs(baseReturn) <= 2.0 || baseReturn < -0.45) &&
+    baseRangePct <= 5.5;
+  const sellersLostMomentum =
+    baseFacts.filter((f) => f.bearish).length >= 3 &&
+    mean(baseFacts.slice(-3).map((f) => f.closePosition)) >=
+      mean(baseFacts.slice(0, 3).map((f) => f.closePosition)) - 0.05;
 
-  const supplyAbsorption =
-    activityRatio >= 1.08 && heldPriorLow &&
-    closeStrength >= 0.56 && lowerWick >= 0.18 && recentReturn >= -0.25;
+  // The first meaningful close above nearby resistance is the key event.
+  // Keep the permitted move small so the scanner does not select a mature rebound.
+  const freshBreakout =
+    trigger.close > resistance6 * 1.0005 &&
+    trigger.close > trigger.open &&
+    triggerFacts.closePosition >= 0.72 &&
+    triggerFacts.upperWick <= 0.22 &&
+    triggerReturn >= 0.10 &&
+    triggerReturn <= 2.0 &&
+    last4Return <= 3.2;
 
-  const buyersTakingControl =
-    bullishCount >= 3 && closeStrength >= 0.62 &&
-    directionalActivityRatio >= 1.12 && bearishCount <= 1;
+  const volumeIgnition =
+    triggerActivityRatio >= 1.35 ||
+    (triggerActivityRatio >= 1.15 && preActivityRatio >= 1.08);
 
-  const demandBuilding =
-    buyersTakingControl && heldPriorLow &&
-    (higherLowSteps >= 2 || reclaimedRecentHigh || lowerWick >= 0.22);
+  const preBreakoutDemand =
+    higherLowSteps >= 1 &&
+    preTrigger.filter((c) => c.close > c.open).length >= 2 &&
+    mean(preFacts.map((f) => f.closePosition)) >= 0.56;
 
-  const volumeConfirmation = activityRatio >= 1.10 || directionalActivityRatio >= 1.35;
-  const priceConfirmation = closeAbovePriorMid &&
-    (reclaimedRecentHigh || higherLowSteps >= 2 || brokePriorHigh);
+  const baseBreakout =
+    baseWasQuietOrWeak && freshBreakout && volumeIgnition &&
+    (sellersLostMomentum || preBreakoutDemand);
 
-  // Setup A: a new trend emerging from a flat/weak/downward base.
-  const wasQuietOrWeak = Math.abs(priorReturn) <= 2.2 || priorReturn < -0.35 || earlierReturn < 0.2;
-  const newTrendScore =
-    (sellersFading ? 2 : 0) +
-    (supplyAbsorption ? 2 : 0) +
-    (demandBuilding ? 2 : 0) +
-    (volumeConfirmation ? 1 : 0) +
-    (priceConfirmation ? 1 : 0) +
-    (higherLowSteps >= 2 ? 1 : 0) +
-    (brokePriorHigh ? 1 : 0);
-  const newTrend = wasQuietOrWeak &&
-    recentReturn >= CONFIG.MIN_RECENT_4H_GAIN &&
-    recentReturn <= CONFIG.MAX_RECENT_4H_GAIN &&
-    buyersTakingControl && demandBuilding &&
-    (sellersFading || supplyAbsorption) && volumeConfirmation &&
-    priceConfirmation && newTrendScore >= 7;
+  // A second path catches the first renewed push after a shallow pullback:
+  // a small three-bar pause, then a close above its micro-range.
+  const pauseReturn = pct(preTrigger.at(-1).close, preTrigger[0].open);
+  const shallowPause =
+    Math.abs(pauseReturn) <= 1.35 ||
+    (pauseReturn < -0.25 && pauseReturn >= -2.0);
+  const microBreakout =
+    trigger.close > resistance3 * 1.0005 &&
+    trigger.close > trigger.open &&
+    triggerFacts.closePosition >= 0.74 &&
+    triggerReturn >= 0.10 &&
+    triggerReturn <= 1.8 &&
+    last4Return <= 3.0;
+  const resumption =
+    shallowPause && microBreakout && volumeIgnition &&
+    (higherLowSteps >= 1 || preBreakoutDemand) &&
+    mean(preFacts.map((f) => f.closePosition)) >= 0.52;
 
-  // Setup B: correction/pause is defended, then buyers regain control.
-  const correctionOrPause =
-    priorReturn <= -0.55 ||
-    (Math.abs(priorReturn) <= 1.35 && Math.abs(earlierReturn) <= 2.8) ||
-    (earlierReturn < -0.8 && priorReturn > earlierReturn);
-  const correctionHeld = recentLow >= priorLow * 0.995 && closeAbovePriorMid;
-  const resumedDemand = buyersTakingControl && demandBuilding &&
-    (reclaimedRecentHigh || last.close > priorLast.close) && volumeConfirmation;
-  const resumptionScore =
-    (correctionHeld ? 2 : 0) +
-    (resumedDemand ? 2 : 0) +
-    (sellersFading ? 1 : 0) +
-    (supplyAbsorption ? 1 : 0) +
-    (higherLowSteps >= 2 ? 1 : 0) +
-    (closeStrength >= 0.66 ? 1 : 0) +
-    (reclaimedRecentHigh ? 1 : 0);
-  const resumption = correctionOrPause && correctionHeld && resumedDemand &&
-    recentReturn >= CONFIG.MIN_RECENT_4H_GAIN &&
-    recentReturn <= CONFIG.MAX_RECENT_4H_GAIN &&
-    (sellersFading || supplyAbsorption || higherLowSteps >= 2) &&
-    resumptionScore >= 7;
+  // Reject a late chase, an oversized impulse candle, or clear rejection.
+  const exhaustion =
+    last4Return > 3.2 ||
+    triggerReturn > 2.0 ||
+    triggerFacts.upperWick > 0.32 ||
+    (trigger.close < trigger.open && triggerFacts.closePosition < 0.42);
 
-  // Reject late/unstable moves, heavy rejection at highs and renewed selling.
-  const distribution = recentReturn < -0.35 && bearishCount >= 3 &&
-    closeStrength < 0.43 && (recentLow < priorLow * 0.995 || upperWick >= 0.32);
-  const exhaustion = recentReturn > CONFIG.MAX_RECENT_4H_GAIN ||
-    (upperWick >= 0.42 && closeStrength < 0.55) ||
-    (bearishCount >= 3 && closeStrength < 0.48);
+  if ((!baseBreakout && !resumption) || exhaustion) return null;
 
-  if ((!newTrend && !resumption) || distribution || exhaustion) return null;
+  const type = baseBreakout && resumption ? "EARLY_BASE_BREAKOUT_AND_RESUMPTION" :
+    baseBreakout ? "EARLY_BASE_BREAKOUT" : "EARLY_PAUSE_BREAKOUT";
 
-  const type = newTrend && resumption ? 'NEW_TREND_AND_RESUMPTION' :
-    newTrend ? 'NEW_TREND' : 'RESUMPTION_AFTER_PAUSE';
-  const quality = Math.max(newTrend ? newTrendScore : 0, resumption ? resumptionScore : 0);
   const confirmation =
-    (buyersTakingControl ? 2 : 0) +
-    (volumeConfirmation ? 1 : 0) +
-    (priceConfirmation ? 1 : 0) +
-    (heldPriorLow ? 1 : 0) +
-    (closeStrength >= 0.66 ? 1 : 0);
+    (freshBreakout ? 2 : 0) +
+    (volumeIgnition ? 2 : 0) +
+    (preBreakoutDemand ? 1 : 0) +
+    (sellersLostMomentum ? 1 : 0) +
+    (triggerFacts.closePosition >= 0.80 ? 1 : 0) +
+    (higherLowSteps >= 2 ? 1 : 0);
+
+  const quality =
+    (baseBreakout ? 4 : 0) +
+    (resumption ? 3 : 0) +
+    confirmation +
+    (triggerActivityRatio >= 1.8 ? 1 : 0);
 
   return {
     type,
     quality,
     confirmation,
-    recentReturn,
-    activityRatio,
-    directionalActivityRatio,
-    closeStrength,
+    recentReturn: last4Return,
+    activityRatio: triggerActivityRatio,
+    directionalActivityRatio: triggerActivityRatio,
+    closeStrength: triggerFacts.closePosition,
     higherLowSteps,
     evidence: {
-      sellersFading,
-      supplyAbsorption,
-      buyersTakingControl,
-      demandBuilding,
-      volumeConfirmation,
-      priceConfirmation,
-      heldPriorLow,
-      reclaimedRecentHigh,
-      brokePriorHigh,
+      baseWasQuietOrWeak,
+      sellersLostMomentum,
+      freshBreakout,
+      volumeIgnition,
+      preBreakoutDemand,
+      baseBreakout,
+      shallowPause,
+      microBreakout,
+      resumption,
+      triggerActivityRatio,
     },
   };
 }
