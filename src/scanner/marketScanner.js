@@ -2,9 +2,9 @@
  * GATE.IO USDT PERPETUAL — HOURLY BULLISH BEHAVIOR SCANNER
  * -------------------------------------------------------
  * Single timeframe: CLOSED 1h candles only.
- * Finds (1) fresh bullish trend starts and (2) bullish resumption after
- * a correction/pause. Requires hourly relative strength versus BTC and
- * several independent price/turnover confirmations.
+ * Finds early demand after an hourly rest/consolidation, including a new
+ * accumulation phase after an earlier rally. Prior gains are not an exclusion.
+ * Uses closed 1h candles and relative strength versus BTC.
  * Telegram: up to five symbols only; no message when none qualify.
  * Node.js 20+
  */
@@ -25,11 +25,7 @@ const CONFIG = {
   REQUEST_TIMEOUT: 15000,
   RETRIES: 3,
   MAX_RESULTS: 5,
-  // Conservative gates: a candidate must pass every hard gate below.
-  MIN_RELATIVE_STRENGTH_6H: 0.35,
-  MIN_RELATIVE_STRENGTH_12H: 0.10,
-  MAX_RECENT_4H_GAIN: 5.5,
-  MIN_RECENT_4H_GAIN: 0.25,
+  // Relative strength thresholds are applied adaptively in relativeStrength().
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -172,33 +168,58 @@ function relativeStrength(coinCandles, btcCandles) {
   const aligned = alignCandles(coinCandles, btcCandles);
   if (aligned.length < 14) return null;
 
-  const six = aligned.slice(-7);
-  const twelve = aligned.slice(-13);
-  const coin6h = pct(six.at(-1).coin.close, six[0].coin.close);
-  const btc6h = pct(six.at(-1).btc.close, six[0].btc.close);
-  const coin12h = pct(twelve.at(-1).coin.close, twelve[0].coin.close);
-  const btc12h = pct(twelve.at(-1).btc.close, twelve[0].btc.close);
-  const relative6h = coin6h - btc6h;
-  const relative12h = coin12h - btc12h;
+  const relativeMove = (bars) => {
+    if (aligned.length < bars + 1) return 0;
+    const current = aligned.at(-1);
+    const previous = aligned.at(-(bars + 1));
+    const coinMove = pct(current.coin.close, previous.coin.close);
+    const btcMove = pct(current.btc.close, previous.btc.close);
+    return {
+      coinMove,
+      btcMove,
+      relative: coinMove - btcMove,
+    };
+  };
 
-  const btcFalling = btc6h <= -0.45;
-  const btcFlat = btc6h > -0.45 && btc6h < 0.45;
-  const btcRising = btc6h >= 0.45;
-  const resilience = btcFalling && relative6h >= 0.15 && coin6h >= -0.35;
-  const independentDemand = btcFlat && coin6h >= 0.35 && relative6h >= 0.35;
-  const outperformance = btcRising && relative6h >= 0.35 && coin6h > 0;
+  const one = relativeMove(1);
+  const three = relativeMove(3);
+  const six = relativeMove(6);
+  const twelve = relativeMove(12);
+
+  const btcFalling = six.btcMove <= -0.45;
+  const btcFlat = six.btcMove > -0.45 && six.btcMove < 0.45;
+  const btcRising = six.btcMove >= 0.45;
+  const resilience = btcFalling && six.relative >= 0.10 && six.coinMove >= -0.50;
+  const independentDemand = btcFlat && six.coinMove >= 0.15 && six.relative >= 0.15;
+  const outperformance = btcRising && six.relative >= 0.15 && six.coinMove > 0;
+
+  // A quiet-base candidate may show only a small early relative-strength turn.
+  // Require at least one positive short-term relative window, while preventing
+  // a severely weak 12h structure from passing on a single green candle.
+  const shortTermStrength =
+    (one.relative >= 0.05 && six.relative >= -0.35) ||
+    (three.relative >= 0.10 && six.relative >= -0.55) ||
+    six.relative >= 0.10;
+  const mediumTermNotBroken = twelve.relative >= -1.25;
+  const confirmed = shortTermStrength && mediumTermNotBroken;
+  const conditionalConfirmed = resilience || independentDemand || outperformance;
 
   return {
-    coin6h,
-    btc6h,
-    coin12h,
-    btc12h,
-    relative6h,
-    relative12h,
+    coin1h: one.coinMove,
+    btc1h: one.btcMove,
+    relative1h: one.relative,
+    coin3h: three.coinMove,
+    btc3h: three.btcMove,
+    relative3h: three.relative,
+    coin6h: six.coinMove,
+    btc6h: six.btcMove,
+    coin12h: twelve.coinMove,
+    btc12h: twelve.btcMove,
+    relative6h: six.relative,
+    relative12h: twelve.relative,
     btcCondition: btcFalling ? 'DOWN' : btcRising ? 'UP' : 'FLAT',
-    confirmed: relative6h >= CONFIG.MIN_RELATIVE_STRENGTH_6H &&
-      relative12h >= CONFIG.MIN_RELATIVE_STRENGTH_12H,
-    conditionalConfirmed: resilience || independentDemand || outperformance,
+    confirmed,
+    conditionalConfirmed,
     resilience,
     independentDemand,
     outperformance,
@@ -206,146 +227,169 @@ function relativeStrength(coinCandles, btcCandles) {
 }
 
 /**
- * Detects only early, confirmed hourly structures.
- * Uses the last 4 closed bars for current behavior, the prior 8 for context,
- * and the preceding 8 to determine whether price was correcting or resting.
+ * Detects the beginning of renewed demand after a quiet/resting base.
+ * Prior rallies are allowed; the detector judges the current base and its
+ * latest closed candles rather than applying a historical-gain ban.
  */
 function detectHourlyStructure(candles) {
   if (!Array.isArray(candles) || candles.length < CONFIG.MIN_CANDLES) return null;
 
-  // Only fully closed hourly candles reach this function.
-  // The final candle is the possible ignition candle; it is evaluated
-  // against the preceding 8-bar base and 6-bar local resistance.
+  // All windows use fully closed 1h candles only.
+  // The 8-bar base is allowed to follow any earlier rally: prior performance
+  // is context, never an automatic exclusion rule.
   const trigger = candles.at(-1);
-  const preTrigger = candles.slice(-4, -1); // 3 closed bars before trigger
-  const base = candles.slice(-12, -4);      // preceding 8 closed bars
-  const resistanceWindow = candles.slice(-10, -1); // prior 9 bars, excluding trigger
-  if (preTrigger.length !== 3 || base.length !== 8 || resistanceWindow.length !== 9) return null;
+  const recent = candles.slice(-4, -1);       // 3 closed candles before trigger
+  const base = candles.slice(-12, -4);        // 8-candle rest / consolidation
+  const priorContext = candles.slice(-32, -12); // volatility reference only
+  if (recent.length !== 3 || base.length !== 8 || priorContext.length < 12) return null;
 
-  const baseFirst = base[0];
-  const baseLast = base.at(-1);
-  const baseReturn = pct(baseLast.close, baseFirst.open);
+  const triggerFacts = candleFacts(trigger);
+  const recentFacts = recent.map(candleFacts);
+  const baseFacts = base.map(candleFacts);
+
   const baseHigh = Math.max(...base.map((c) => c.high));
   const baseLow = Math.min(...base.map((c) => c.low));
   const baseRangePct = pct(baseHigh, baseLow);
-  const resistance6 = Math.max(...candles.slice(-7, -1).map((c) => c.high));
-  const resistance3 = Math.max(...preTrigger.map((c) => c.high));
+  const baseReturn = pct(base.at(-1).close, base[0].open);
+  const baseAverageRangePct = mean(base.map((c) => pct(c.high, c.low)));
+  const contextAverageRangePct = mean(priorContext.map((c) => pct(c.high, c.low)));
+  const dynamicRangeLimit = clamp(contextAverageRangePct * 3.6, 2.2, 8.0);
+  const maxRestCorrectionPct = clamp(contextAverageRangePct * 2.8, 4.5, 10.0);
 
-  const triggerFacts = candleFacts(trigger);
-  const preFacts = preTrigger.map(candleFacts);
-  const baseFacts = base.map(candleFacts);
+  const baseActivity = mean(baseFacts.map((f) => f.activity));
+  const recentActivity = mean(recentFacts.map((f) => f.activity));
+  const triggerActivityRatio = baseActivity > 0 ? triggerFacts.activity / baseActivity : 0;
+  const recentActivityRatio = baseActivity > 0 ? recentActivity / baseActivity : 0;
+
+  // Candle-pressure proxy: combines signed body and close location, weighted
+  // by turnover. Gate.io candle data does not expose aggressor-side buy volume,
+  // so this is deliberately described as price/turnover pressure, not true
+  // taker-buy volume.
+  const pressure = (facts) => {
+    const weighted = facts.reduce((acc, f) => {
+      const bodyPressure = (f.bullish ? 1 : f.bearish ? -1 : 0) *
+        Math.abs(f.closePosition - 0.5) * 0.7;
+      const closePressure = (f.closePosition - 0.5) * 1.3;
+      const weight = Math.max(f.activity, 0);
+      acc.weighted += (bodyPressure + closePressure) * weight;
+      acc.weight += weight;
+      return acc;
+    }, { weighted: 0, weight: 0 });
+    return weighted.weight > 0 ? weighted.weighted / weighted.weight : 0;
+  };
+
+  const basePressure = pressure(baseFacts);
+  const recentPressure = pressure(recentFacts);
+  const pressureImproving = recentPressure >= basePressure + 0.035 || recentPressure >= 0.12;
+
+  let higherLowSteps = 0;
+  for (let i = 1; i < recent.length; i++) {
+    if (recent[i].low > recent[i - 1].low) higherLowSteps++;
+  }
+
+  const bullishRecent = recent.filter((c) => c.close > c.open).length;
+  const averageRecentClosePosition = mean(recentFacts.map((f) => f.closePosition));
+  const recentDemand =
+    pressureImproving &&
+    averageRecentClosePosition >= 0.55 &&
+    bullishRecent >= 1 &&
+    (higherLowSteps >= 1 || averageRecentClosePosition >= 0.64);
+
+  // Quiet/rest phase: accepts a shallow correction after an earlier rally.
+  // It rejects a still-active steep selloff, not the fact that a rally existed.
+  const baseWasResting =
+    baseRangePct <= dynamicRangeLimit &&
+    baseAverageRangePct <= Math.max(contextAverageRangePct * 1.35, 0.35) &&
+    baseReturn >= -maxRestCorrectionPct &&
+    baseReturn <= 4.0 &&
+    base.at(-1).close >= baseLow * 1.002;
 
   const triggerReturn = pct(trigger.close, trigger.open);
   const last4Return = pct(trigger.close, candles.at(-4).open);
-  const preHigh = Math.max(...preTrigger.map((c) => c.high));
-  const preLow = Math.min(...preTrigger.map((c) => c.low));
+  const distanceFromBaseHigh = pct(trigger.close, baseHigh);
+  const nearBaseHigh = distanceFromBaseHigh >= -3.5 && distanceFromBaseHigh <= 2.0;
 
-  const baseActivity = mean(baseFacts.map((f) => f.activity));
-  const preActivity = mean(preFacts.map((f) => f.activity));
-  const triggerActivityRatio = baseActivity > 0 ? triggerFacts.activity / baseActivity : 0;
-  const preActivityRatio = baseActivity > 0 ? preActivity / baseActivity : 0;
-
-  let higherLowSteps = 0;
-  for (let i = 1; i < preTrigger.length; i++) {
-    if (preTrigger[i].low > preTrigger[i - 1].low) higherLowSteps++;
-  }
-
-  const baseWasQuietOrWeak =
-    (Math.abs(baseReturn) <= 2.0 || baseReturn < -0.45) &&
-    baseRangePct <= 5.5;
-  const sellersLostMomentum =
-    baseFacts.filter((f) => f.bearish).length >= 3 &&
-    mean(baseFacts.slice(-3).map((f) => f.closePosition)) >=
-      mean(baseFacts.slice(0, 3).map((f) => f.closePosition)) - 0.05;
-
-  // The first meaningful close above nearby resistance is the key event.
-  // Keep the permitted move small so the scanner does not select a mature rebound.
-  const freshBreakout =
-    trigger.close > resistance6 * 1.0005 &&
-    trigger.close > trigger.open &&
-    triggerFacts.closePosition >= 0.72 &&
-    triggerFacts.upperWick <= 0.22 &&
-    triggerReturn >= 0.10 &&
-    triggerReturn <= 2.0 &&
-    last4Return <= 3.2;
-
-  const volumeIgnition =
-    triggerActivityRatio >= 1.35 ||
-    (triggerActivityRatio >= 1.15 && preActivityRatio >= 1.08);
-
-  const preBreakoutDemand =
-    higherLowSteps >= 1 &&
-    preTrigger.filter((c) => c.close > c.open).length >= 2 &&
-    mean(preFacts.map((f) => f.closePosition)) >= 0.56;
-
-  const baseBreakout =
-    baseWasQuietOrWeak && freshBreakout && volumeIgnition &&
-    (sellersLostMomentum || preBreakoutDemand);
-
-  // A second path catches the first renewed push after a shallow pullback:
-  // a small three-bar pause, then a close above its micro-range.
-  const pauseReturn = pct(preTrigger.at(-1).close, preTrigger[0].open);
-  const shallowPause =
-    Math.abs(pauseReturn) <= 1.35 ||
-    (pauseReturn < -0.25 && pauseReturn >= -2.0);
-  const microBreakout =
-    trigger.close > resistance3 * 1.0005 &&
-    trigger.close > trigger.open &&
-    triggerFacts.closePosition >= 0.74 &&
-    triggerReturn >= 0.10 &&
+  // No single huge candle is required. A modest pickup is enough when the
+  // preceding candles already show improving pressure and price behavior.
+  const activityImproving =
+    recentActivityRatio >= 0.88 &&
+    triggerActivityRatio >= 0.78;
+  const triggerNotExhausted =
+    triggerReturn >= -0.65 &&
     triggerReturn <= 1.8 &&
-    last4Return <= 3.0;
-  const resumption =
-    shallowPause && microBreakout && volumeIgnition &&
-    (higherLowSteps >= 1 || preBreakoutDemand) &&
-    mean(preFacts.map((f) => f.closePosition)) >= 0.52;
+    last4Return <= 3.5 &&
+    triggerFacts.upperWick <= 0.38 &&
+    triggerFacts.closePosition >= 0.52;
 
-  // Reject a late chase, an oversized impulse candle, or clear rejection.
-  const exhaustion =
-    last4Return > 3.2 ||
-    triggerReturn > 2.0 ||
-    triggerFacts.upperWick > 0.32 ||
-    (trigger.close < trigger.open && triggerFacts.closePosition < 0.42);
+  // Type A: accumulation is strengthening just below the range ceiling.
+  // Type B: the first small close above the ceiling after the same quiet base.
+  const earlyAccumulation =
+    baseWasResting &&
+    recentDemand &&
+    activityImproving &&
+    nearBaseHigh &&
+    trigger.close <= baseHigh * 1.002 &&
+    triggerNotExhausted;
 
-  if ((!baseBreakout && !resumption) || exhaustion) return null;
+  const freshBaseBreakout =
+    baseWasResting &&
+    recentDemand &&
+    activityImproving &&
+    trigger.close > baseHigh * 1.0005 &&
+    trigger.close <= baseHigh * 1.025 &&
+    trigger.close > trigger.open &&
+    triggerFacts.closePosition >= 0.68 &&
+    triggerReturn <= 1.8 &&
+    last4Return <= 3.5 &&
+    triggerFacts.upperWick <= 0.28;
 
-  const type = baseBreakout && resumption ? "EARLY_BASE_BREAKOUT_AND_RESUMPTION" :
-    baseBreakout ? "EARLY_BASE_BREAKOUT" : "EARLY_PAUSE_BREAKOUT";
+  if (!earlyAccumulation && !freshBaseBreakout) return null;
 
-  const confirmation =
-    (freshBreakout ? 2 : 0) +
-    (volumeIgnition ? 2 : 0) +
-    (preBreakoutDemand ? 1 : 0) +
-    (sellersLostMomentum ? 1 : 0) +
-    (triggerFacts.closePosition >= 0.80 ? 1 : 0) +
-    (higherLowSteps >= 2 ? 1 : 0);
-
+  const type = freshBaseBreakout ? 'FRESH_BASE_BREAKOUT' : 'EARLY_ACCUMULATION';
   const quality =
-    (baseBreakout ? 4 : 0) +
-    (resumption ? 3 : 0) +
-    confirmation +
-    (triggerActivityRatio >= 1.8 ? 1 : 0);
+    (baseWasResting ? 3 : 0) +
+    (recentDemand ? 3 : 0) +
+    (pressureImproving ? 2 : 0) +
+    (activityImproving ? 1 : 0) +
+    (higherLowSteps >= 1 ? 1 : 0) +
+    (higherLowSteps >= 2 ? 1 : 0) +
+    (averageRecentClosePosition >= 0.62 ? 1 : 0) +
+    (triggerFacts.closePosition >= 0.72 ? 1 : 0) +
+    (triggerActivityRatio >= 1.15 ? 1 : 0) +
+    (freshBaseBreakout ? 2 : 0);
 
   return {
     type,
     quality,
-    confirmation,
+    confirmation: quality,
     recentReturn: last4Return,
     activityRatio: triggerActivityRatio,
-    directionalActivityRatio: triggerActivityRatio,
+    recentActivityRatio,
+    directionalActivityRatio: recentActivityRatio,
     closeStrength: triggerFacts.closePosition,
     higherLowSteps,
+    distanceFromBaseHigh,
+    baseRangePct,
+    baseReturn,
+    basePressure,
+    recentPressure,
     evidence: {
-      baseWasQuietOrWeak,
-      sellersLostMomentum,
-      freshBreakout,
-      volumeIgnition,
-      preBreakoutDemand,
-      baseBreakout,
-      shallowPause,
-      microBreakout,
-      resumption,
+      baseWasResting,
+      recentDemand,
+      pressureImproving,
+      activityImproving,
+      nearBaseHigh,
+      earlyAccumulation,
+      freshBaseBreakout,
+      higherLowSteps,
+      bullishRecent,
+      averageRecentClosePosition,
       triggerActivityRatio,
+      recentActivityRatio,
+      distanceFromBaseHigh,
+      // Diagnostic only: historical growth is intentionally not a rejection.
+      prior12hReturn: pct(candles.at(-1).close, candles.at(-13).close),
+      prior24hReturn: pct(candles.at(-1).close, candles.at(-25).close),
     },
   };
 }
@@ -353,17 +397,18 @@ function detectHourlyStructure(candles) {
 function analyzeMarket(symbol, candles, btcCandles) {
   const relative = relativeStrength(candles, btcCandles);
   if (!relative) return null;
-  // Relative strength is a hard requirement, not a soft ranking bonus.
   if (!relative.confirmed && !relative.conditionalConfirmed) return null;
 
   const structure = detectHourlyStructure(candles);
   if (!structure) return null;
 
   const relativeQuality =
-    (relative.relative6h >= 0.8 ? 2 : relative.relative6h >= 0.35 ? 1 : 0) +
-    (relative.relative12h >= 0.5 ? 1 : 0) +
+    (relative.relative1h >= 0.10 ? 1 : 0) +
+    (relative.relative3h >= 0.20 ? 1 : 0) +
+    (relative.relative6h >= 0.35 ? 2 : relative.relative6h >= 0.10 ? 1 : 0) +
+    (relative.relative12h >= 0.25 ? 1 : 0) +
     (relative.resilience || relative.independentDemand || relative.outperformance ? 1 : 0);
-  const totalQuality = structure.quality * 2 + structure.confirmation + relativeQuality;
+  const totalQuality = structure.quality * 2 + relativeQuality;
 
   return { symbol, structure, relative, totalQuality };
 }
@@ -391,7 +436,7 @@ async function sendTelegram(symbols) {
 
 async function main() {
   console.log('\nGATE.IO HOURLY BULLISH BEHAVIOR SCANNER');
-  console.log('Timeframe: CLOSED 1h candles only | relative strength vs BTC | max 5 symbols');
+  console.log('Mode: CLOSED 1h quiet-base accumulation / fresh base breakout | relative strength vs BTC | max 5 symbols');
 
   const [contracts, tickers] = await Promise.all([getContracts(), getTickers()]);
   if (!Array.isArray(contracts) || !Array.isArray(tickers)) {
@@ -463,9 +508,11 @@ async function main() {
     for (const item of candidates) {
       console.log(
         `${item.symbol} | ${item.structure.type} | quality=${item.totalQuality} | ` +
+        `relative1h=${item.relative.relative1h.toFixed(2)}% | ` +
+        `relative3h=${item.relative.relative3h.toFixed(2)}% | ` +
         `relative6h=${item.relative.relative6h.toFixed(2)}% | ` +
-        `relative12h=${item.relative.relative12h.toFixed(2)}% | ` +
-        `1h-structure=${item.structure.recentReturn.toFixed(2)}%`
+        `baseRange=${item.structure.baseRangePct.toFixed(2)}% | ` +
+        `pressure=${item.structure.basePressure.toFixed(3)}>${item.structure.recentPressure.toFixed(3)}`
       );
     }
   }
