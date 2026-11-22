@@ -23,11 +23,15 @@ const CONFIG = {
   MIN_CANDLES: 48,
   MIN_QUOTE_VOLUME_24H: 100000,
   ALLOWED_CRYPTO_CONTRACT_TYPES: new Set(['crypto', 'cryptocurrency']),
-  CONCURRENCY: 5,
-  REQUEST_TIMEOUT: 20000,
-  RETRIES: 4,
+  // Conservative request pacing prevents transient Gate.io throttling.
+  CONCURRENCY: 3,
+  REQUEST_TIMEOUT: 45000,
+  RETRIES: 6,
+  MARKET_HISTORY_RETRIES: 2,
+  REQUEST_SPACING_MS: 300,
+  MAX_RETRY_DELAY_MS: 60000,
   MAX_RESULTS: 10,
-  PAGE_PAUSE_MS: 90,
+  PAGE_PAUSE_MS: 180,
   // These are analysis horizons, NOT history download limits.
   CURRENT_CONTEXT_HOURS: 72,
   SHORT_CONTEXT_HOURS: 24,
@@ -38,6 +42,30 @@ const CONFIG = {
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+let nextRequestAt = 0;
+
+async function waitForRequestSlot() {
+  const now = Date.now();
+  const wait = Math.max(0, nextRequestAt - now);
+  nextRequestAt = Math.max(now, nextRequestAt) + CONFIG.REQUEST_SPACING_MS;
+  if (wait > 0) await sleep(wait);
+}
+
+function isRetryableError(error) {
+  const status = Number(error?.status || 0);
+  if ([408, 425, 429, 500, 502, 503, 504].includes(status)) return true;
+  if (status >= 400 && status < 500) return false;
+  return true;
+}
+
+function retryDelay(error, attempt) {
+  if (Number(error?.status) === 429) {
+    const retryAfter = Number(error?.retryAfterSeconds || 0) * 1000;
+    if (retryAfter > 0) return Math.min(retryAfter, CONFIG.MAX_RETRY_DELAY_MS);
+  }
+  const base = Number(error?.status) >= 500 ? 2500 : 1500;
+  return Math.min(base * (2 ** (attempt - 1)), CONFIG.MAX_RETRY_DELAY_MS);
+}
 const num = (value, fallback = 0) => {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
@@ -54,22 +82,26 @@ async function fetchJSON(url) {
   let lastError;
   for (let attempt = 1; attempt <= CONFIG.RETRIES; attempt++) {
     try {
+      await waitForRequestSlot();
       const response = await fetch(url, {
         headers: { Accept: 'application/json' },
         signal: AbortSignal.timeout(CONFIG.REQUEST_TIMEOUT),
       });
       if (!response.ok) {
-        const error = new Error(`Gate.io HTTP ${response.status}: ${(await response.text()).slice(0, 180)}`);
+        const body = (await response.text()).slice(0, 240);
+        const error = new Error(`Gate.io HTTP ${response.status}: ${body}`);
         error.status = response.status;
+        const retryAfter = response.headers.get('retry-after');
+        if (retryAfter) error.retryAfterSeconds = Number(retryAfter) || 0;
         throw error;
       }
       return await response.json();
     } catch (error) {
       lastError = error;
-      if (attempt < CONFIG.RETRIES) {
-        const delay = error.status === 429 ? 2200 * attempt : 700 * attempt;
-        await sleep(delay);
-      }
+      if (attempt >= CONFIG.RETRIES || !isRetryableError(error)) break;
+      const delay = retryDelay(error, attempt);
+      console.warn(`[API RETRY ${attempt}/${CONFIG.RETRIES - 1}] ${error.status ? `HTTP ${error.status}` : error.name || 'Network'}; waiting ${Math.round(delay / 1000)}s`);
+      await sleep(delay);
     }
   }
   throw lastError;
@@ -164,6 +196,27 @@ async function getClosedHourlyCandles(contract) {
 
   const candles = [...byTime.values()].sort((a, b) => a.time - b.time);
   return { candles, pages: pageCount };
+}
+
+async function getClosedHourlyCandlesWithRetry(contract) {
+  let lastError;
+  for (let attempt = 0; attempt <= CONFIG.MARKET_HISTORY_RETRIES; attempt++) {
+    try {
+      return await getClosedHourlyCandles(contract);
+    } catch (error) {
+      lastError = error;
+      if (attempt >= CONFIG.MARKET_HISTORY_RETRIES || !isRetryableError(error)) break;
+      const delay = Math.min(3000 * (2 ** attempt), CONFIG.MAX_RETRY_DELAY_MS);
+      console.warn(`[HISTORY RETRY] ${contract} attempt ${attempt + 1}/${CONFIG.MARKET_HISTORY_RETRIES}; ${error.message}; waiting ${Math.round(delay / 1000)}s`);
+      await sleep(delay);
+    }
+  }
+  throw lastError;
+}
+
+function errorSummary(error) {
+  const message = String(error?.message || error || 'Unknown error').replace(/\s+/g, ' ').trim();
+  return message.slice(0, 300);
 }
 
 async function mapLimit(items, limit, worker) {
@@ -483,7 +536,7 @@ function formatTelegramCandidate(item, index) {
 
 async function main() {
   console.log('\nGATE.IO FULL-HISTORY HOURLY TREND SCANNER');
-  console.log('Mode: one engine | all available closed 1h history | past + current trend + bullish-potential assessment | max 10');
+  console.log('Mode: one engine | all available closed 1h history | resilient paced API retrieval | past + current trend + bullish-potential assessment | max 10');
 
   const [contracts, tickers] = await Promise.all([getContracts(), getTickers()]);
   if (!Array.isArray(contracts) || !Array.isArray(tickers)) {
@@ -511,7 +564,7 @@ async function main() {
   let totalPages = 0;
 
   const results = await mapLimit(markets, CONFIG.CONCURRENCY, async (market) => {
-    const history = await getClosedHourlyCandles(market.symbol);
+    const history = await getClosedHourlyCandlesWithRetry(market.symbol);
     if (history.candles.length < CONFIG.MIN_CANDLES) {
       insufficient++;
       return null;
@@ -522,8 +575,13 @@ async function main() {
     return analyzeTrend(market.symbol, history.candles, market.quoteVolume, history.pages);
   });
 
-  for (const result of results) {
-    if (result?.error) failed++;
+  const failedMarkets = [];
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i];
+    if (result?.error) {
+      failed++;
+      failedMarkets.push({ symbol: markets[i].symbol, reason: errorSummary(result.error) });
+    }
   }
 
   const analyzed = results.filter((r) => r && !r.error);
@@ -550,7 +608,11 @@ async function main() {
   console.log(`Markets eligible by minimum 24h liquidity: ${markets.length}`);
   console.log(`Markets analyzed with complete available closed ${CONFIG.TIMEFRAME} history: ${checked}`);
   console.log(`Markets with insufficient history: ${insufficient}`);
-  console.log(`Markets with data errors: ${failed}`);
+  console.log(`Markets with data errors after retries: ${failed}`);
+  if (failedMarkets.length) {
+    console.log('Failed market details:');
+    for (const item of failedMarkets) console.log(`DATA_ERROR ${item.symbol} | ${item.reason}`);
+  }
   console.log(`Historical candles processed: ${totalCandles}`);
   console.log(`Historical API pages processed: ${totalPages}`);
   console.log(`Bullish-potential candidates: ${candidates.length}`);
