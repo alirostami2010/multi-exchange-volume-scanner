@@ -245,6 +245,133 @@ function readBehavior(candles) {
   };
 }
 
+/**
+ * SECOND ENGINE — hourly buy-structure discovery.
+ * Input is ONLY the candidate pool accepted by the first (1h/4h/1d) engine.
+ * Every calculation below uses fully closed 1h candles supplied by
+ * getClosedCandles(). This classifies developing structures; it is not
+ * an execution/entry signal.
+ */
+function averageRangePct(candles) {
+  if (!candles.length) return 0;
+  return mean(candles.map((c) => ((c.high - c.low) / Math.max(c.open, Number.EPSILON)) * 100));
+}
+
+function discoverHourlyBuyStructure(candles) {
+  if (!Array.isArray(candles) || candles.length < 30) return null;
+
+  const recent = candles.slice(-4);
+  const base = candles.slice(-12, -4);
+  const earlier = candles.slice(-20, -12);
+  if (recent.length !== 4 || base.length !== 8 || earlier.length !== 8) return null;
+
+  const recentFacts = recent.map(candleFacts);
+  const baseFacts = base.map(candleFacts);
+  const recentLast = recent.at(-1);
+  const recentFirst = recent[0];
+  const recentReturn = pct(recentLast.close, recentFirst.open);
+  const baseReturn = pct(base.at(-1).close, base[0].open);
+  const earlierReturn = pct(earlier.at(-1).close, earlier[0].open);
+
+  const recentLow = Math.min(...recent.map((c) => c.low));
+  const baseLow = Math.min(...base.map((c) => c.low));
+  const priorResistance = Math.max(...candles.slice(-12, -4).map((c) => c.high));
+  const distanceToResistance = priorResistance > 0
+    ? ((priorResistance - recentLast.close) / recentLast.close) * 100
+    : Infinity;
+
+  const recentCloseStrength = mean(recentFacts.map((f) => f.closePosition));
+  const recentLowerWick = mean(recentFacts.map((f) => f.lowerWick));
+  const recentUpperWick = mean(recentFacts.map((f) => f.upperWick));
+  const recentBullish = recentFacts.filter((f) => f.bullish).length;
+  const recentBearish = recentFacts.filter((f) => f.bearish).length;
+  const recentActivity = mean(recentFacts.map((f) => f.volume));
+  const baseActivity = mean(baseFacts.map((f) => f.volume));
+  const activityRatio = baseActivity > 0 ? recentActivity / baseActivity : 1;
+  const bullishActivity = recentFacts.filter((f) => f.bullish).reduce((sum, f) => sum + f.volume, 0);
+  const bearishActivity = recentFacts.filter((f) => f.bearish).reduce((sum, f) => sum + f.volume, 0);
+  const directionalActivityRatio = bullishActivity / Math.max(bearishActivity, 1);
+
+  let higherLowSteps = 0;
+  for (let i = 1; i < recent.length; i++) {
+    if (recent[i].low > recent[i - 1].low) higherLowSteps++;
+  }
+
+  const heldBaseLow = recentLow >= baseLow * 0.997;
+  const rangeCompression = averageRangePct(recent) /
+    Math.max(averageRangePct(base), 0.0001);
+  const sellersWerePressing = baseReturn <= -0.45 || earlierReturn <= -0.8;
+  const sellingPressureFading = sellersWerePressing &&
+    recentReturn > baseReturn && heldBaseLow &&
+    (recentCloseStrength >= 0.53 || recentLowerWick >= 0.24);
+  const supplyAbsorption = activityRatio >= 1.08 && heldBaseLow &&
+    recentCloseStrength >= 0.54 && recentLowerWick >= 0.20 && recentReturn >= -0.45;
+  const buyersTakingControl = recentBullish >= 2 && recentCloseStrength >= 0.59 &&
+    directionalActivityRatio >= 1.05;
+  const demandBuilding = buyersTakingControl && heldBaseLow &&
+    (higherLowSteps >= 2 || recentLowerWick >= 0.24);
+  const volatilityContracting = rangeCompression <= 0.88;
+  const nearResistance = distanceToResistance >= 0 && distanceToResistance <= 2.5;
+  const brokeResistance = recentLast.close > priorResistance * 1.001;
+
+  // Phase A: pre-breakout structure. It must still be relatively close to
+  // the base; do not call a move that has already run far a fresh setup.
+  const preBreakoutScore =
+    (sellingPressureFading ? 2 : 0) +
+    (supplyAbsorption ? 2 : 0) +
+    (demandBuilding ? 2 : 0) +
+    (higherLowSteps >= 2 ? 1 : 0) +
+    (volatilityContracting ? 1 : 0) +
+    (nearResistance ? 1 : 0) +
+    (activityRatio >= 1.08 ? 1 : 0);
+
+  const preBreakout = !brokeResistance && nearResistance &&
+    preBreakoutScore >= 6 && demandBuilding &&
+    (sellingPressureFading || supplyAbsorption);
+
+  // Phase B: first expansion after the base. A very extended candle sequence
+  // is intentionally excluded so the engine does not chase late movement.
+  const earlyImpulseScore =
+    (buyersTakingControl ? 2 : 0) +
+    (activityRatio >= 1.15 ? 2 : 0) +
+    (recentCloseStrength >= 0.67 ? 1 : 0) +
+    (brokeResistance ? 2 : 0) +
+    (heldBaseLow ? 1 : 0) +
+    (recentBullish >= 3 ? 1 : 0);
+  const earlyImpulse = brokeResistance && recentReturn >= 0.55 &&
+    recentReturn <= 5.5 && buyersTakingControl &&
+    (activityRatio >= 1.10 || recentCloseStrength >= 0.70) &&
+    recentUpperWick < 0.38 && earlyImpulseScore >= 6;
+
+  if (!preBreakout && !earlyImpulse) return null;
+
+  const phase = earlyImpulse ? 'EARLY_IMPULSE' : 'PRE_BREAKOUT';
+  const quality = earlyImpulse ? earlyImpulseScore : preBreakoutScore;
+  const freshness =
+    (sellingPressureFading ? 2 : 0) +
+    (supplyAbsorption ? 2 : 0) +
+    (demandBuilding ? 2 : 0) +
+    (brokeResistance ? 1 : 0);
+
+  return {
+    phase,
+    quality,
+    freshness,
+    recentReturn,
+    activityRatio,
+    distanceToResistance,
+    reasons: {
+      sellingPressureFading,
+      supplyAbsorption,
+      demandBuilding,
+      volatilityContracting,
+      higherLowStructure: higherLowSteps >= 2,
+      buyersTakingControl,
+      brokeResistance,
+    },
+  };
+}
+
 function alignCandles(coinCandles, btcCandles) {
   const btcByTime = new Map(btcCandles.map((c) => [c.time, c]));
   return coinCandles
@@ -385,36 +512,78 @@ async function main() {
     const candles = Object.fromEntries(entries);
     if (Object.values(candles).some((bars) => bars.length < CONFIG.MIN_CANDLES)) return null;
     checked++;
-    return analyzeCoin(market.symbol, candles, btcCandles);
+    const firstEngine = analyzeCoin(market.symbol, candles, btcCandles);
+    return firstEngine ? { firstEngine, hourlyCandles: candles['1h'] } : null;
   });
 
   for (const result of results) {
     if (result?.error) failed++;
   }
 
-  const selected = results
+  // All first-engine candidates are retained here. The five-symbol Telegram
+  // cap applies only to its presentation, never to the second-engine input.
+  const firstEngineCandidates = results
     .filter((result) => result && !result.error)
+    .map((result) => result.firstEngine)
     .sort((a, b) =>
       b.freshnessRank - a.freshnessRank ||
       b.btcRank - a.btcRank ||
       b.qualityRank - a.qualityRank ||
       a.symbol.localeCompare(b.symbol)
-    )
+    );
+
+  const firstEngineTelegram = firstEngineCandidates
     .slice(0, CONFIG.MAX_RESULTS)
-    .map((result) => result.symbol.replace(/_USDT$/, ''));
+    .map((candidate) => candidate.symbol.replace(/_USDT$/, ''));
+
+  const hourlySetups = results
+    .filter((result) => result && !result.error)
+    .map((result) => ({
+      symbol: result.firstEngine.symbol,
+      setup: discoverHourlyBuyStructure(result.hourlyCandles),
+    }))
+    .filter((item) => item.setup)
+    .sort((a, b) =>
+      b.setup.quality - a.setup.quality ||
+      b.setup.freshness - a.setup.freshness ||
+      (a.setup.phase === 'PRE_BREAKOUT' ? -1 : 1) -
+        (b.setup.phase === 'PRE_BREAKOUT' ? -1 : 1) ||
+      a.symbol.localeCompare(b.symbol)
+    );
+
+  const hourlyTelegram = hourlySetups
+    .slice(0, CONFIG.MAX_RESULTS)
+    .map((item) => item.symbol.replace(/_USDT$/, ''));
 
   console.log(`Markets eligible by liquidity: ${markets.length}`);
   console.log(`Markets analyzed: ${checked}`);
   console.log(`Markets with data errors: ${failed}`);
-  console.log(`Behavior candidates: ${selected.length}`);
-
-  if (selected.length === 0) {
-    console.log('No coin met the behavior conditions. No Telegram message sent.');
-    return;
+  console.log(`First-engine strong candidates: ${firstEngineCandidates.length}`);
+  console.log(`First-engine Telegram symbols: ${firstEngineTelegram.length}`);
+  console.log(`Second-engine 1h buy structures: ${hourlySetups.length}`);
+  console.log(`  Pre-breakout: ${hourlySetups.filter((x) => x.setup.phase === 'PRE_BREAKOUT').length}`);
+  console.log(`  Early impulse: ${hourlySetups.filter((x) => x.setup.phase === 'EARLY_IMPULSE').length}`);
+  if (hourlySetups.length) {
+    console.log('Second-engine ranked structures:');
+    for (const item of hourlySetups) {
+      console.log(
+        `${item.symbol} | ${item.setup.phase} | quality=${item.setup.quality} | ` +
+        `freshness=${item.setup.freshness} | 1h return=${item.setup.recentReturn.toFixed(2)}%`
+      );
+    }
   }
 
-  await sendTelegram(selected);
-  console.log('Telegram message sent:', selected.join(', '));
+  // The first engine remains active internally, but its Telegram message is
+  // intentionally disabled. Its full candidate pool still feeds engine two.
+  console.log('First-engine Telegram message disabled; candidates retained for engine two.');
+
+  // The only Telegram message is the names-only output from second-engine discoveries.
+  if (hourlyTelegram.length) {
+    await sendTelegram(hourlyTelegram);
+    console.log('Second-engine Telegram message sent:', hourlyTelegram.join(', '));
+  } else {
+    console.log('No hourly buy structure met the second-engine conditions.');
+  }
 }
 
 main().catch((error) => {
