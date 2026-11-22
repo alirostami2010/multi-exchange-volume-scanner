@@ -18,8 +18,8 @@ const CONFIG = {
   CANDLE_LIMIT: 72,
   MIN_CANDLES: 40,
   MIN_QUOTE_VOLUME_24H: 100000,
-  // Gate.io contract_type is the exchange-provided asset classification.
-  // Unknown or non-crypto classifications are rejected (fail closed).
+  // Gate.io leaves contract_type empty for ordinary crypto contracts;
+  // non-crypto instruments are explicitly tagged (stocks, indices, etc.).
   ALLOWED_CRYPTO_CONTRACT_TYPES: new Set(['crypto', 'cryptocurrency']),
   CONCURRENCY: 8,
   REQUEST_TIMEOUT: 15000,
@@ -75,17 +75,26 @@ async function getTickers() {
 }
 
 /**
- * Accept only contracts explicitly classified by Gate.io as cryptocurrency.
- * Missing/unknown classifications are rejected rather than guessed from symbols.
+ * Gate.io's Futures Contract schema makes contract_type optional. Ordinary
+ * crypto contracts (including BTC_USDT) commonly omit it; non-crypto markets
+ * are explicitly tagged, e.g. stocks, metals, indices, forex or commodities.
+ * Therefore an empty classification is accepted only for a well-formed
+ * BASE_USDT perpetual symbol with an active trading status. Any explicit
+ * non-crypto/unknown classification is rejected.
  */
 function isSupportedCryptoContract(contract) {
+  const name = String(contract?.name ?? '').trim().toUpperCase();
   const classification = String(contract?.contract_type ?? '')
     .trim()
     .toLowerCase()
     .replace(/[\s-]+/g, '_');
-  return CONFIG.ALLOWED_CRYPTO_CONTRACT_TYPES.has(classification) &&
-    String(contract?.status ?? '').toLowerCase() === 'trading' &&
+  const active = String(contract?.status ?? '').toLowerCase() === 'trading' &&
     contract?.in_delisting !== true;
+  const validUsdtPerpetualName = /^[A-Z0-9]{2,30}_USDT$/.test(name);
+
+  if (!active || !validUsdtPerpetualName) return false;
+  if (!classification) return true;
+  return CONFIG.ALLOWED_CRYPTO_CONTRACT_TYPES.has(classification);
 }
 
 async function getClosedHourlyCandles(contract) {
