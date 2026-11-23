@@ -3,11 +3,9 @@
  * -----------------------------------------------------------------
  * ONE ENGINE ONLY. No Motor 2.
  * - Closed 1h candles only.
- * - Price structure only: no volume and no BTC comparison.
- * - Finds early bullish transitions after sideways bases, downtrend exhaustion,
- *   or pauses/pullbacks inside an existing uptrend.
- * - Scores seller exhaustion, improving buyer pressure, higher lows,
- *   early structure recovery and freshness before the main upward expansion.
+ * - Implements five H1 bullish methods adapted from the referenced article.
+ * - Uses closed candles only; no volume and no BTC comparison.
+ * - Detects early setups, not trade entries or guaranteed predictions.
  * - Rejects late/extended moves and weak one-candle spikes.
  * - No entry, trade signal, or price target.
  * Node.js 20+
@@ -49,7 +47,10 @@ const CONFIG = {
   MAX_RECENT_12H_RISE_PCT: 3.8,
   MAX_RECENT_6H_RISE_PCT: 2.4,
   MAX_LATEST_CANDLE_RANGE_PCT: 3.8,
-  MIN_BULLISH_SCORE: 67,
+  MIN_BULLISH_SCORE: 48,
+  EMA_FAST: 50,
+  EMA_SLOW: 200,
+  RSI_PERIOD: 14,
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -237,16 +238,72 @@ async function mapLimit(items, limit, worker) {
 function candleFacts(c) {
   const range = Math.max(c.high - c.low, Number.EPSILON);
   const body = c.close - c.open;
-  const closePosition = clamp((c.close - c.low) / range, 0, 1);
   return {
     bullish: body > 0,
     bearish: body < 0,
     bodyRatio: body / range,
-    closePosition,
+    closePosition: clamp((c.close - c.low) / range, 0, 1),
     lowerWick: clamp((Math.min(c.open, c.close) - c.low) / range, 0, 1),
     upperWick: clamp((c.high - Math.max(c.open, c.close)) / range, 0, 1),
-    rangePct: c.close > 0 ? (range / c.close) * 100 : 0,
+    rangePct: candleRangePct(c),
   };
+}
+
+function directionalPressure(candles) {
+  return mean(candles.map((c) => {
+    const f = candleFacts(c);
+    return (f.bodyRatio * 0.55) + ((f.closePosition - 0.5) * 0.9);
+  }));
+}
+
+function linearRegressionSlope(values) {
+  if (values.length < 3) return 0;
+  const logs = values.map((v) => Math.log(Math.max(v, Number.EPSILON)));
+  const n = logs.length;
+  const xMean = (n - 1) / 2;
+  const yMean = mean(logs);
+  let numerator = 0;
+  let denominator = 0;
+  for (let i = 0; i < n; i++) {
+    numerator += (i - xMean) * (logs[i] - yMean);
+    denominator += (i - xMean) ** 2;
+  }
+  return denominator ? (numerator / denominator) * 100 : 0;
+}
+
+function findPivots(candles, left = CONFIG.PIVOT_LEFT, right = CONFIG.PIVOT_RIGHT) {
+  const highs = [];
+  const lows = [];
+  for (let i = left; i < candles.length - right; i++) {
+    const c = candles[i];
+    let isHigh = true;
+    let isLow = true;
+    for (let j = i - left; j <= i + right; j++) {
+      if (j === i) continue;
+      if (candles[j].high >= c.high) isHigh = false;
+      if (candles[j].low <= c.low) isLow = false;
+      if (!isHigh && !isLow) break;
+    }
+    if (isHigh) highs.push({ index: i, price: c.high, time: c.time });
+    if (isLow) lows.push({ index: i, price: c.low, time: c.time });
+  }
+  return { highs, lows };
+}
+
+function structuralDirection(pivots) {
+  const highs = pivots.highs.slice(-5);
+  const lows = pivots.lows.slice(-5);
+  const highUp = highs.length >= 2 ? highs.slice(1).filter((p, i) => p.price > highs[i].price).length : 0;
+  const highDown = highs.length >= 2 ? highs.slice(1).filter((p, i) => p.price < highs[i].price).length : 0;
+  const lowUp = lows.length >= 2 ? lows.slice(1).filter((p, i) => p.price > lows[i].price).length : 0;
+  const lowDown = lows.length >= 2 ? lows.slice(1).filter((p, i) => p.price < lows[i].price).length : 0;
+  const bullish = highUp + lowUp;
+  const bearish = highDown + lowDown;
+  let direction = 'MIXED';
+  if (bullish >= bearish + 2) direction = 'UP';
+  else if (bearish >= bullish + 2) direction = 'DOWN';
+  else if (bullish === 0 && bearish === 0) direction = 'UNCONFIRMED';
+  return { direction, highUp, highDown, lowUp, lowDown, bullishSteps: bullish, bearishSteps: bearish };
 }
 
 function median(values) {
@@ -256,235 +313,410 @@ function median(values) {
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
-function meanRangePct(candles) {
-  return mean(candles.map(c => candleFacts(c).rangePct));
-}
-
-function pctRange(candles) {
+function rangePct(candles) {
   if (!candles.length) return 0;
-  const high = Math.max(...candles.map(c => c.high));
-  const low = Math.min(...candles.map(c => c.low));
-  const reference = mean(candles.map(c => c.close));
+  const high = Math.max(...candles.map((c) => c.high));
+  const low = Math.min(...candles.map((c) => c.low));
+  const reference = mean(candles.map((c) => c.close));
   return reference > 0 ? ((high - low) / reference) * 100 : 0;
 }
 
-function logSlope(candles) {
-  if (candles.length < 3) return 0;
-  const values = candles.map(c => Math.log(Math.max(c.close, Number.EPSILON)));
-  const xMean = (values.length - 1) / 2;
-  const yMean = mean(values);
-  let numerator = 0;
-  let denominator = 0;
-  for (let i = 0; i < values.length; i++) {
-    numerator += (i - xMean) * (values[i] - yMean);
-    denominator += (i - xMean) ** 2;
-  }
-  return denominator ? (numerator / denominator) * 100 : 0;
+function summarizeCandleBehavior(candles) {
+  if (!candles.length) return null;
+  const facts = candles.map(candleFacts);
+  const closes = candles.map((c) => c.close);
+  const pivots = findPivots(candles);
+  const structure = structuralDirection(pivots);
+  const slope = linearRegressionSlope(closes);
+  const bullish = facts.filter((f) => f.bullish).length;
+  const bearish = facts.filter((f) => f.bearish).length;
+  const low = Math.min(...candles.map((c) => c.low));
+  const high = Math.max(...candles.map((c) => c.high));
+  return {
+    slope, structure, pivots, bullish, bearish,
+    closePosition: mean(facts.map((f) => f.closePosition)),
+    lowerWick: mean(facts.map((f) => f.lowerWick)),
+    upperWick: mean(facts.map((f) => f.upperWick)),
+    low, high,
+    returnPct: pct(candles.at(-1).close, candles[0].open),
+    rangePct: rangePct(candles),
+    closeFromLowPct: pct(candles.at(-1).close, low),
+    rangePosition: clamp(safeDiv(candles.at(-1).close - low, high - low, 0.5), 0, 1),
+    pressure: directionalPressure(candles),
+  };
 }
 
-function pressure(candles) {
-  if (!candles.length) return 0;
-  return mean(candles.map(c => {
-    const f = candleFacts(c);
-    return (f.bodyRatio * 0.55) + ((f.closePosition - 0.5) * 0.9);
-  }));
-}
-
-function sellerPressure(candles) {
-  if (!candles.length) return 0;
-  return mean(candles.map(c => {
-    const f = candleFacts(c);
-    return f.bearish ? Math.abs(f.bodyRatio) * (1.15 - f.closePosition) : 0;
-  }));
-}
-
-function directionalEfficiency(candles, direction = 'down') {
-  if (candles.length < 2) return 0;
-  let path = 0;
-  for (let i = 1; i < candles.length; i++) {
-    path += Math.abs(pct(candles[i].close, candles[i - 1].close));
-  }
-  const net = pct(candles.at(-1).close, candles[0].open);
-  const favorable = direction === 'down' ? Math.max(0, -net) : Math.max(0, net);
-  return path > 0 ? favorable / path : 0;
-}
-
-function pivotLows(candles) {
-  const points = [];
-  for (let i = 2; i < candles.length - 2; i++) {
-    const low = candles[i].low;
-    if (candles[i - 1].low > low && candles[i - 2].low > low &&
-        candles[i + 1].low > low && candles[i + 2].low > low) {
-      points.push({ index: i, price: low });
-    }
-  }
-  return points;
-}
-
-function countHigherLows(points) {
+function countHigherSteps(points, field = 'price', tolerance = 0.001) {
+  if (points.length < 2) return 0;
   let count = 0;
   for (let i = 1; i < points.length; i++) {
-    if (points[i].price > points[i - 1].price * 1.001) count++;
+    if (points[i][field] > points[i - 1][field] * (1 + tolerance)) count++;
   }
   return count;
 }
 
-function analyzeSetup(candles, baseLength, triggerLength) {
-  const baseEnd = candles.length - triggerLength;
+function countLowerSteps(points, field = 'price', tolerance = 0.001) {
+  if (points.length < 2) return 0;
+  let count = 0;
+  for (let i = 1; i < points.length; i++) {
+    if (points[i][field] < points[i - 1][field] * (1 - tolerance)) count++;
+  }
+  return count;
+}
+
+function downsidePressure(candles) {
+  if (!candles.length) return 0;
+  return mean(candles.map((c) => {
+    const f = candleFacts(c);
+    return f.bearish ? Math.abs(f.bodyRatio) * (1.2 - f.closePosition) : 0;
+  }));
+}
+
+function analyzeWindow(candles, baseLength) {
+  const activationLength = CONFIG.ACTIVATION_HOURS;
+  const setupLength = CONFIG.SETUP_HOURS;
+  const baseEnd = candles.length - activationLength;
   const baseStart = baseEnd - baseLength;
-  const contextLength = Math.min(36, Math.max(18, Math.floor(baseLength * 0.5)));
-  const contextStart = baseStart - contextLength;
-  if (contextStart < 0) return null;
+  if (baseStart < setupLength + 12) return null;
 
-  const context = candles.slice(contextStart, baseStart);
   const base = candles.slice(baseStart, baseEnd);
-  const trigger = candles.slice(baseEnd);
-  if (base.length !== baseLength || trigger.length !== triggerLength) return null;
+  const recent = candles.slice(baseEnd);
+  const setup = candles.slice(baseStart - setupLength, baseStart);
+  const older = candles.slice(Math.max(0, baseStart - setupLength - 24), baseStart - setupLength);
+  if (base.length < CONFIG.MIN_BASE_HOURS || recent.length !== activationLength || setup.length !== setupLength || older.length < 12) return null;
 
-  const firstBase = base.slice(0, Math.floor(base.length / 2));
-  const secondBase = base.slice(Math.floor(base.length / 2));
+  const baseStats = summarizeCandleBehavior(base);
+  const setupStats = summarizeCandleBehavior(setup);
+  const olderStats = summarizeCandleBehavior(older);
+  const recentStats = summarizeCandleBehavior(recent);
   const last = candles.at(-1);
-  const baseLow = Math.min(...base.map(c => c.low));
   const baseHigh = Math.max(...base.map(c => c.high));
-  const triggerLow = Math.min(...trigger.map(c => c.low));
-  const triggerHigh = Math.max(...trigger.map(c => c.high));
-  const atrPct = Math.max(median(candles.slice(-80).map(c => candleFacts(c).rangePct)), 0.01);
-  const baseRange = pctRange(base);
-  const baseRangeInAtr = baseRange / (atrPct * Math.sqrt(baseLength));
-  const contextReturn = pct(context.at(-1).close, context[0].open);
-  const baseReturn = pct(base.at(-1).close, base[0].open);
-  const triggerReturn = pct(last.close, trigger[0].open);
-  const totalRiseFromLow = pct(last.close, Math.min(baseLow, triggerLow));
-  const triggerMoveInAtr = triggerReturn / (atrPct * Math.sqrt(triggerLength));
+  const baseLow = Math.min(...base.map(c => c.low));
+  const riseFromBaseLowPct = pct(last.close, baseLow);
+  const recent6hRisePct = pct(last.close, candles.at(-7).close);
+  const recent12hRisePct = pct(last.close, candles.at(-13).close);
+  const recent18hRisePct = pct(last.close, candles.at(-19).close);
 
-  const contextDownEfficiency = directionalEfficiency(context, 'down');
-  const firstHalfDownPressure = sellerPressure(firstBase);
-  const secondHalfDownPressure = sellerPressure(secondBase);
-  const sellerFade = secondHalfDownPressure < firstHalfDownPressure * 0.88 ||
-    (secondHalfDownPressure <= firstHalfDownPressure + 0.025 &&
-     mean(secondBase.map(c => candleFacts(c).lowerWick)) > mean(firstBase.map(c => candleFacts(c).lowerWick)) + 0.025);
+  const basePivots = findPivots(base);
+  const recentPivots = findPivots(candles.slice(-30));
+  const baseLows = basePivots.lows.slice(-6);
+  const recentLows = recentPivots.lows.slice(-4);
+  const higherLows = countHigherSteps(baseLows);
+  const lowerLows = countLowerSteps(baseLows);
+  const recentHigherLows = countHigherSteps(recentLows);
+  const recentLowerLows = countLowerSteps(recentLows);
 
-  const lows = pivotLows(base);
-  const higherLowCount = countHigherLows(lows);
-  const firstHalfLow = Math.min(...firstBase.map(c => c.low));
-  const secondHalfLow = Math.min(...secondBase.map(c => c.low));
-  const lowHold = secondHalfLow >= firstHalfLow * 0.992;
-  const baseStable = lowHold || higherLowCount > 0;
-  const contraction = meanRangePct(secondBase) <= meanRangePct(firstBase) * 1.08;
-  const baseQuiet = baseRangeInAtr <= 2.65 || contraction;
+  const baseCompressed = baseStats.rangePct <= CONFIG.MAX_BASE_RANGE_PCT &&
+    Math.abs(baseStats.slope) <= CONFIG.MAX_BASE_SLOPE_ABS;
+  const recentRange = rangePct(recent);
+  const setupRange = rangePct(setup);
+  const volatilityContracting = recentRange <= setupRange * 1.12 || baseRangeContraction(base);
 
-  const basePressure = pressure(base.slice(-12));
-  const triggerPressure = pressure(trigger);
-  const pressureShift = triggerPressure - basePressure;
-  const triggerFacts = trigger.map(candleFacts);
-  const bullishCount = triggerFacts.filter(f => f.bullish).length;
-  const bearishCount = triggerFacts.filter(f => f.bearish).length;
-  const triggerClosePosition = mean(triggerFacts.map(f => f.closePosition));
-  const bullishQuality = triggerClosePosition >= 0.57 &&
-    (bullishCount >= Math.ceil(triggerLength * 0.5) ||
-     triggerFacts.filter(f => f.bullish && f.closePosition >= 0.68).length >= 2);
+  const pressureImprovement = directionalPressure(recent) - directionalPressure(setup);
+  const sellerPressureChange = downsidePressure(recent) - downsidePressure(setup);
+  const sellerExhaustion = sellerPressureChange <= 0.015 ||
+    (recentStats.lowerWick >= setupStats.lowerWick + 0.025 && recentLowerLows === 0);
 
-  const microWindow = base.slice(-8);
-  const microHigh = Math.max(...microWindow.map(c => c.high));
-  const reclaimed = last.close > microHigh;
-  const aboveBaseMean = last.close > mean(base.slice(-10).map(c => c.close));
-  const buyerTurn = (pressureShift >= 0.06 && triggerClosePosition >= 0.54) ||
-    (bullishCount > bearishCount && triggerClosePosition >= 0.62);
+  const recentBullish = recent.filter(c => c.close > c.open).length;
+  const recentBearish = recent.filter(c => c.close < c.open).length;
+  const recentClosePosition = mean(recent.map(c => candleFacts(c).closePosition));
+  const recentBodyStrength = mean(recent.map(c => candleFacts(c).bodyRatio));
+  const greenBody = mean(recent.filter(c => c.close > c.open).map(c => (c.close-c.open)/Math.max(c.high-c.low, Number.EPSILON)));
+  const redBody = mean(recent.filter(c => c.close < c.open).map(c => Math.abs(c.close-c.open)/Math.max(c.high-c.low, Number.EPSILON)));
+  const bullishCandleQuality = recentClosePosition >= 0.53 &&
+    (greenBody >= redBody * 0.85 || recentBullish > recentBearish);
 
-  const contextSlope = logSlope(context);
-  const baseSlope = logSlope(base);
-  const priorTrend = logSlope(candles.slice(Math.max(0, contextStart - 36), contextStart));
-  let phase = 'SIDEWAYS_BASE';
-  if (contextReturn <= -Math.max(1.2, atrPct * 2.2) || contextSlope < -0.055) phase = 'DOWNTREND_EXHAUSTION';
-  else if (priorTrend > 0.045 && contextReturn < -Math.max(0.8, atrPct * 1.4)) phase = 'UPTREND_PULLBACK';
+  const noFreshLow = Math.min(...recent.map(c => c.low)) >= baseLow * 0.985;
+  const lowsStabilizing = recentLowerLows === 0 &&
+    (higherLows >= 1 || recentHigherLows >= 1 || noFreshLow);
+  const closeAboveShortBase = last.close > mean(base.slice(-8).map(c => c.close));
+  const localHigh = Math.max(...candles.slice(-18, -6).map(c => c.high));
+  const earlyReclaim = last.close > localHigh * 0.992;
+  const buyersImproving = (pressureImprovement >= 0.015 && recentClosePosition >= 0.52) ||
+    (recentBullish >= 3 && recentClosePosition >= 0.57 && recentBodyStrength > -0.02);
+  const structureTurning = lowsStabilizing && (closeAboveShortBase || earlyReclaim);
 
-  const fresh = totalRiseFromLow <= Math.max(5.5, atrPct * 7.5) &&
-    pct(last.close, candles.at(-7).close) <= Math.max(2.8, atrPct * 4.2) &&
-    pct(last.close, candles.at(-13).close) <= Math.max(4.5, atrPct * 6.5);
-  const notFalling = logSlope(trigger) > -0.025 && !(triggerLow < baseLow * 0.985 && triggerReturn < 0);
-  const notExploded = triggerHigh <= baseHigh * 1.045 && triggerReturn <= Math.max(4.0, atrPct * 6.0);
-  const contextRelevant = phase !== 'SIDEWAYS_BASE' || Math.abs(contextReturn) <= Math.max(4.5, atrPct * 7.0);
+  const priorSlope = olderStats.slope;
+  let context = 'SIDEWAYS_BASE';
+  if (priorSlope < -0.045) context = 'DOWNTREND_EXHAUSTION';
+  else if (priorSlope > 0.045) context = 'UPTREND_PULLBACK';
 
-  const parts = {
-    sellerExhaustion: (sellerFade ? 13 : 0) + (contextDownEfficiency > 0.22 && secondHalfDownPressure < firstHalfDownPressure ? 7 : 0),
-    baseFormation: (baseStable ? 10 : 0) + (baseQuiet ? 9 : 0) + (contraction ? 4 : 0),
-    buyerActivation: (buyerTurn ? 12 : 0) + (bullishQuality ? 9 : 0) + (pressureShift > 0 ? clamp(pressureShift * 35, 0, 6) : 0),
-    structureReclaim: (reclaimed ? 9 : 0) + (aboveBaseMean ? 5 : 0) + Math.min(4, higherLowCount * 2),
-    freshness: fresh ? 12 : 0,
-    context: contextRelevant ? 4 : 0,
+  const priceNotExtended = riseFromBaseLowPct <= CONFIG.MAX_ADVANCE_FROM_BASE_LOW_PCT &&
+    recent12hRisePct <= CONFIG.MAX_RECENT_12H_RISE_PCT &&
+    recent6hRisePct <= CONFIG.MAX_RECENT_6H_RISE_PCT &&
+    candleRangePct(last) <= CONFIG.MAX_LATEST_CANDLE_RANGE_PCT;
+  const notActivelyFalling = recentStats.slope >= CONFIG.MAX_RECENT_DOWNSLOPE &&
+    !(recentLowerLows >= 2 && recentStats.slope < -0.015);
+  const notAlreadyBrokenOut = last.close <= baseHigh * 1.012 && recent18hRisePct <= 5.0;
+
+  // Continuous scoring prevents the old saturation problem (many assets at 98/100).
+  const scoreParts = {
+    sellerFading: clamp((0.035 - sellerPressureChange) / 0.10, 0, 1) * 18,
+    buyerPressure: clamp((pressureImprovement + 0.015) / 0.10, 0, 1) * 20,
+    candleQuality: clamp((recentClosePosition - 0.42) / 0.38, 0, 1) * 12,
+    lowStability: (higherLows > 0 ? 7 : 0) + (recentHigherLows > 0 ? 5 : 0) + (noFreshLow ? 5 : 0),
+    structureRecovery: (closeAboveShortBase ? 7 : 0) + (earlyReclaim ? 6 : 0),
+    volatility: (baseCompressed ? 6 : 0) + (volatilityContracting ? 5 : 0),
+    freshness: priceNotExtended ? 9 : 0,
+    downsidePenalty: Math.min(18, lowerLows * 3 + recentLowerLows * 4),
+    extensionPenalty: Math.max(0, riseFromBaseLowPct - 4) * 2 + Math.max(0, recent12hRisePct - 2.5) * 2,
   };
-  const penalties = {
-    falling: notFalling ? 0 : 16,
-    extended: fresh ? 0 : Math.min(18, Math.max(0, totalRiseFromLow - 4) * 2),
-    breakoutLate: notExploded ? 0 : 14,
-    weakBase: baseRangeInAtr > 4.2 ? 8 : 0,
-  };
-  const score = Math.round(clamp(Object.values(parts).reduce((a, b) => a + b, 0) -
-    Object.values(penalties).reduce((a, b) => a + b, 0), 0, 100));
+  let score = scoreParts.sellerFading + scoreParts.buyerPressure + scoreParts.candleQuality +
+    scoreParts.lowStability + scoreParts.structureRecovery + scoreParts.volatility +
+    scoreParts.freshness - scoreParts.downsidePenalty - scoreParts.extensionPenalty;
+  score = Math.round(clamp(score, 0, 100));
 
-  const coreEvidence = [baseStable, baseQuiet, buyerTurn, bullishQuality, reclaimed || aboveBaseMean, fresh]
-    .filter(Boolean).length;
-  const qualifies = score >= CONFIG.MIN_BULLISH_SCORE && coreEvidence >= 4 &&
-    baseStable && buyerTurn && bullishQuality && fresh && notFalling && notExploded;
+  const qualifies = score >= CONFIG.MIN_BULLISH_SCORE && sellerExhaustion &&
+    buyersImproving && bullishCandleQuality && structureTurning && priceNotExtended &&
+    notActivelyFalling && notAlreadyBrokenOut && (baseCompressed || volatilityContracting) &&
+    (noFreshLow || higherLows > 0 || recentHigherLows > 0);
 
   return {
-    qualifies, score, phase,
+    qualifies, score, context,
     metrics: {
-      baseHours: baseLength, triggerHours: triggerLength,
-      baseRangePct: baseRange, baseRangeInAtr,
-      contextReturnPct: contextReturn, baseReturnPct: baseReturn,
-      triggerReturnPct: triggerReturn, triggerMoveInAtr,
-      pressureImprovement: pressureShift,
-      sellerPressureChange: secondHalfDownPressure - firstHalfDownPressure,
-      sellerFade, buyerTurn, bullishQuality,
-      higherLows: higherLowCount, lowHold, baseStable, baseQuiet, contraction,
-      reclaimed, aboveBaseMean, fresh, notFalling, notExploded,
-      riseFromBaseLowPct: totalRiseFromLow,
-      recent6hRisePct: pct(last.close, candles.at(-7).close),
-      recent12hRisePct: pct(last.close, candles.at(-13).close),
-      recentBullish: bullishCount, recentBearish: bearishCount,
-      recentClosePosition: triggerClosePosition, coreEvidence,
-      scoreParts: parts, penalties,
-      reasons: [
-        sellerFade ? 'کاهش فشار فروش' : null,
-        baseStable ? 'تثبیت کف‌ها' : null,
-        baseQuiet ? 'تشکیل پایه کم‌نوسان' : null,
-        buyerTurn ? 'چرخش فشار به نفع خریداران' : null,
-        bullishQuality ? 'کیفیت مناسب کندل‌های صعودی' : null,
-        reclaimed ? 'بازپس‌گیری سقف کوتاه‌مدت' : aboveBaseMean ? 'بازگشت بالای میانگین پایه' : null,
-        fresh ? 'حرکت هنوز کشیده نشده' : null,
-      ].filter(Boolean),
+      baseHours: base.length, baseRangePct: baseStats.rangePct,
+      baseSlope: baseStats.slope, priorSlope, recentSlope: recentStats.slope,
+      pressureImprovement, sellerPressureChange, sellerExhaustion, buyersImproving,
+      bullishCandleQuality, higherLows, recentHigherLows, lowerLows, recentLowerLows,
+      noFreshLow, lowsStabilizing, closeAboveShortBase, earlyReclaim, structureTurning,
+      volatilityContracting, priceNotExtended, riseFromBaseLowPct,
+      recent6hRisePct, recent12hRisePct, recent18hRisePct,
+      recentBullish, recentBearish, recentClosePosition, scoreParts,
     },
   };
 }
 
-function analyzeTrend(symbol, candles, pageCount) {
-  if (!Array.isArray(candles) || candles.length < CONFIG.MIN_CANDLES) return null;
-  let best = null;
-  for (let baseLength = 24; baseLength <= 84; baseLength += 6) {
-    for (let triggerLength = 4; triggerLength <= 8; triggerLength += 2) {
-      const result = analyzeSetup(candles, baseLength, triggerLength);
-      if (!result) continue;
-      if (!best || result.score > best.score) best = result;
+function baseRangeContraction(candles) {
+  if (candles.length < 24) return false;
+  const split = Math.floor(candles.length / 2);
+  const first = rangePct(candles.slice(0, split));
+  const second = rangePct(candles.slice(split));
+  return second < first * 0.88;
+}
+
+function calculateEMA(values, period) {
+  if (values.length < period) return [];
+  const out = new Array(values.length).fill(null);
+  const multiplier = 2 / (period + 1);
+  let seed = mean(values.slice(0, period));
+  out[period - 1] = seed;
+  for (let i = period; i < values.length; i++) {
+    seed = (values[i] - seed) * multiplier + seed;
+    out[i] = seed;
+  }
+  return out;
+}
+
+function calculateRSI(values, period = 14) {
+  const out = new Array(values.length).fill(null);
+  if (values.length <= period) return out;
+  let gains = 0;
+  let losses = 0;
+  for (let i = 1; i <= period; i++) {
+    const change = values[i] - values[i - 1];
+    if (change > 0) gains += change;
+    else losses -= change;
+  }
+  let avgGain = gains / period;
+  let avgLoss = losses / period;
+  const value = () => avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss));
+  out[period] = value();
+  for (let i = period + 1; i < values.length; i++) {
+    const change = values[i] - values[i - 1];
+    avgGain = (avgGain * (period - 1) + Math.max(change, 0)) / period;
+    avgLoss = (avgLoss * (period - 1) + Math.max(-change, 0)) / period;
+    out[i] = value();
+  }
+  return out;
+}
+
+function evaluateArticleStrategies(candles) {
+  const closes = candles.map(c => c.close);
+  const ema50 = calculateEMA(closes, CONFIG.EMA_FAST);
+  const ema200 = calculateEMA(closes, CONFIG.EMA_SLOW);
+  const rsi = calculateRSI(closes, CONFIG.RSI_PERIOD);
+  const i = candles.length - 1;
+  const last = candles[i];
+  const prev = candles[i - 1];
+  const facts = candleFacts(last);
+  const rsiNow = rsi[i];
+  const rsiPrev = rsi[i - 1];
+  const strategies = [];
+  const details = {};
+
+  if (ema50[i] == null || ema200[i] == null || rsiNow == null || rsiPrev == null) {
+    return { strategies, details, indicatorsReady: false };
+  }
+
+  const trendUp = ema50[i] > ema200[i] && last.close > ema200[i];
+  const ema50Distance = Math.abs(pct(last.close, ema50[i]));
+  const ema200Distance = Math.abs(pct(last.close, ema200[i]));
+  const ema200Rising = ema200[i] > ema200[i - 12];
+  const rsiRising = rsiNow > rsiPrev && rsiPrev >= rsi[i - 3];
+  const notExtended = pct(last.close, candles.at(-13).close) <= 5.5 &&
+    pct(last.close, candles.at(-7).close) <= 3.5 && facts.rangePct <= 4.5;
+  const recent = candles.slice(-12);
+  const recentBullish = recent.filter(c => c.close > c.open).length;
+  const buyerCandle = facts.closePosition >= 0.58 &&
+    (facts.bullish || facts.lowerWick >= 0.35) &&
+    (last.close > prev.close || facts.lowerWick >= 0.48);
+
+  // 1) Trend following: established EMA trend, controlled pullback to EMA50,
+  // then a closed-candle recovery. Avoid chasing a stretched move.
+  const trendPullback = trendUp && ema50Distance <= 2.0 &&
+    last.low <= ema50[i] * 1.018 && last.close >= ema50[i] * 0.995 &&
+    rsiNow >= 42 && rsiNow <= 66 && rsiRising && buyerCandle && notExtended;
+  if (trendPullback) strategies.push('TREND_PULLBACK');
+  details.trendPullback = trendPullback;
+
+  // 2) Range breakout + retest: a recent closed breakout followed by a retest
+  // that holds the former ceiling. The breakout itself must be recent.
+  let rangeBreakoutRetest = false;
+  let rangeLevel = 0;
+  for (let lookback = 1; lookback <= 8 && !rangeBreakoutRetest; lookback++) {
+    const breakoutIndex = i - lookback;
+    const rangeStart = Math.max(0, breakoutIndex - 48);
+    const priorRange = candles.slice(rangeStart, breakoutIndex);
+    if (priorRange.length < 24) continue;
+    const ceiling = Math.max(...priorRange.map(c => c.high));
+    const floor = Math.min(...priorRange.map(c => c.low));
+    const width = pct(ceiling, floor);
+    const breakout = candles[breakoutIndex];
+    const hadBreakout = breakout.close > ceiling * 1.002;
+    const heldRetest = last.low <= ceiling * 1.012 && last.close >= ceiling * 0.998;
+    if (width <= 12 && hadBreakout && heldRetest && rsiNow >= 48 && rsiNow < 72 && buyerCandle && notExtended) {
+      rangeBreakoutRetest = true;
+      rangeLevel = ceiling;
     }
   }
-  if (!best) return {
-    symbol, bullishCandidate: false, bullishScore: 0,
-    currentPhase: 'NO_EARLY_BULLISH_TRANSITION', pattern: 'NONE',
-    metrics: { candlesAvailable: candles.length, historyPages: pageCount },
-  };
+  if (rangeBreakoutRetest) strategies.push('RANGE_BREAKOUT_RETEST');
+  details.rangeBreakoutRetest = rangeBreakoutRetest;
+  details.rangeLevel = rangeLevel;
+
+  // 3) RSI oversold near a confirmed local support, with RSI turning upward.
+  const supportPivots = findPivots(candles.slice(-100)).lows;
+  const supports = supportPivots.map(p => p.price).filter(price => price <= last.close * 1.025);
+  const support = supports.length ? supports.at(-1) : 0;
+  const nearSupport = support > 0 && Math.abs(pct(last.close, support)) <= 2.0;
+  const oversoldTurn = rsiNow >= 28 && rsiNow <= 42 && rsiRising &&
+    (rsi.slice(-4).some(v => v != null && v < 32) || rsiNow <= 35);
+  const rsiSupportBounce = nearSupport && oversoldTurn && buyerCandle && notExtended;
+  if (rsiSupportBounce) strategies.push('RSI_SUPPORT_BOUNCE');
+  details.rsiSupportBounce = rsiSupportBounce;
+  details.support = support;
+
+  // 4) Liquidity sweep / false breakdown: a closed candle pierces a prior
+  // confirmed swing low then closes back above it with a rejection wick.
+  const recentPivotLow = findPivots(candles.slice(-45, -3)).lows.at(-1);
+  let liquiditySweep = false;
+  let sweepLevel = 0;
+  if (recentPivotLow) {
+    const level = recentPivotLow.price;
+    const swept = last.low < level * 0.998 && last.low >= level * 0.975;
+    const reclaimed = last.close > level * 1.001;
+    liquiditySweep = swept && reclaimed && facts.lowerWick >= 0.30 &&
+      facts.closePosition >= 0.62 && rsiRising && rsiNow < 68 && notExtended;
+    if (liquiditySweep) sweepLevel = level;
+  }
+  if (liquiditySweep) strategies.push('LIQUIDITY_SWEEP_RECLAIM');
+  details.liquiditySweep = liquiditySweep;
+  details.sweepLevel = sweepLevel;
+
+  // 5) EMA200 trend filter + RSI 40-50 pullback/recovery.
+  const ema200RsiPullback = trendUp && ema200Rising && ema200Distance <= 8 &&
+    rsiNow >= 40 && rsiNow <= 52 && rsiRising &&
+    (ema50Distance <= 3.0 || last.low <= ema50[i] * 1.025) &&
+    buyerCandle && notExtended;
+  if (ema200RsiPullback) strategies.push('EMA200_RSI_PULLBACK');
+  details.ema200RsiPullback = ema200RsiPullback;
+
+  details.ema50 = ema50[i];
+  details.ema200 = ema200[i];
+  details.rsi = rsiNow;
+  details.trendUp = trendUp;
+  details.ema200Rising = ema200Rising;
+  details.rsiRising = rsiRising;
+  details.notExtended = notExtended;
+  details.recentBullish = recentBullish;
+  return { strategies, details, indicatorsReady: true };
+}
+
+function analyzeTrend(symbol, candles, pageCount) {
+  if (!Array.isArray(candles) || candles.length < Math.max(CONFIG.MIN_CANDLES, CONFIG.EMA_SLOW + 20)) return null;
+
+  const article = evaluateArticleStrategies(candles);
+  const last = candles.at(-1);
+  const prev = candles.at(-2);
+  const recent = candles.slice(-18);
+  const base = candles.slice(-54, -6);
+  const baseHigh = Math.max(...base.map(c => c.high));
+  const baseLow = Math.min(...base.map(c => c.low));
+  const riseFromBaseLowPct = pct(last.close, baseLow);
+  const recent6hRisePct = pct(last.close, candles.at(-7).close);
+  const recent12hRisePct = pct(last.close, candles.at(-13).close);
+  const recent18hRisePct = pct(last.close, candles.at(-19).close);
+  const pressureImprovement = directionalPressure(recent) - directionalPressure(candles.slice(-36, -18));
+  const sellerPressureChange = downsidePressure(recent) - downsidePressure(candles.slice(-36, -18));
+  const pivots = findPivots(candles.slice(-100));
+  const higherLows = countHigherSteps(pivots.lows.slice(-5));
+  const baseRangePct = rangePct(base);
+  const freshness = riseFromBaseLowPct <= 7.0 && recent6hRisePct <= 3.5 &&
+    recent12hRisePct <= 5.0 && candleRangePct(last) <= 4.5;
+  const methods = article.strategies;
+  const methodCount = methods.length;
+  const candleConfirmation = candleFacts(last).closePosition >= 0.55 &&
+    (last.close > last.open || last.close > prev.close);
+
+  // A method can qualify alone, but weak/late setups are filtered. Confluence
+  // increases rank; score is a ranking index, not a probability percentage.
+  const qualifies = article.indicatorsReady && methodCount > 0 && freshness && candleConfirmation;
+  const score = Math.round(clamp(
+    43 + methodCount * 13 + (pressureImprovement > 0.025 ? 7 : 0) +
+    (sellerPressureChange < 0 ? 5 : 0) + (higherLows > 0 ? 4 : 0) +
+    (article.details.trendUp ? 3 : 0) - Math.max(0, riseFromBaseLowPct - 4) * 1.5,
+    0, 96,
+  ));
+
   const labels = {
-    SIDEWAYS_BASE: 'پایان سکون و تقویت تدریجی خریداران',
-    DOWNTREND_EXHAUSTION: 'تضعیف روند نزولی و احتمال آغاز صعود',
-    UPTREND_PULLBACK: 'پایان اصلاح و احتمال شروع موج بعدی',
+    TREND_PULLBACK: 'پولبک در روند صعودی (EMA50/EMA200)',
+    RANGE_BREAKOUT_RETEST: 'شکست محدوده و تثبیت روی مقاومت شکسته‌شده',
+    RSI_SUPPORT_BOUNCE: 'برگشت RSI از ناحیه اشباع فروش در حمایت',
+    LIQUIDITY_SWEEP_RECLAIM: 'جمع‌آوری نقدینگی و بازپس‌گیری کف قبلی',
+    EMA200_RSI_PULLBACK: 'پایان پولبک با فیلتر EMA200 و RSI',
   };
+  const strategyLabels = methods.map(key => labels[key]);
+  const primaryMethod = methods[0] || 'NONE';
+  const phase = primaryMethod === 'TREND_PULLBACK' || primaryMethod === 'EMA200_RSI_PULLBACK'
+    ? 'UPTREND_PULLBACK'
+    : primaryMethod === 'RANGE_BREAKOUT_RETEST'
+      ? 'RANGE_BREAKOUT_RETEST'
+      : primaryMethod === 'LIQUIDITY_SWEEP_RECLAIM'
+        ? 'LIQUIDITY_SWEEP_RECLAIM'
+        : primaryMethod === 'RSI_SUPPORT_BOUNCE' ? 'SUPPORT_REVERSAL' : 'NONE';
+
   return {
     symbol,
-    bullishCandidate: best.qualifies,
-    bullishScore: best.score,
-    currentPhase: best.phase,
-    currentPhaseLabel: labels[best.phase],
-    metrics: { candlesAvailable: candles.length, historyPages: pageCount, ...best.metrics },
+    bullishCandidate: qualifies,
+    bullishScore: qualifies ? score : 0,
+    currentPhase: phase,
+    currentPhaseLabel: strategyLabels.join(' + '),
+    strategies: methods,
+    metrics: {
+      candlesAvailable: candles.length, historyPages: pageCount,
+      baseHours: base.length, baseRangePct,
+      pressureImprovement, sellerPressureChange, higherLows,
+      riseFromBaseLowPct, recent6hRisePct, recent12hRisePct, recent18hRisePct,
+      rsi: article.details.rsi,
+      ema50: article.details.ema50,
+      ema200: article.details.ema200,
+      trendUp: article.details.trendUp,
+      strategyCount: methodCount,
+      strategyLabels,
+      rangeLevel: article.details.rangeLevel,
+      support: article.details.support,
+      sweepLevel: article.details.sweepLevel,
+      freshness,
+    },
   };
 }
 
@@ -512,19 +744,18 @@ function formatTelegramCandidate(item, index) {
   const name = item.symbol.replace(/_USDT$/, '');
   const m = item.metrics;
   return [
-    `${index + 1} — ${name} | امتیاز ساختار پیش‌صعود: ${item.bullishScore}/100`,
-    `وضعیت: ${item.currentPhaseLabel}`,
-    `پایه: ${m.baseHours} ساعت | فعال‌سازی: ${m.triggerHours} ساعت | دامنه پایه: ${m.baseRangePct.toFixed(2)}%`,
-    `چرخش فشار خریدار: ${m.pressureImprovement.toFixed(3)} | تغییر فشار فروش: ${m.sellerPressureChange.toFixed(3)}`,
-    `ثبات کف: ${m.baseStable ? 'بله' : 'خیر'} | بازپس‌گیری سقف: ${m.reclaimed ? 'بله' : 'خیر'} | رشد از کف: ${m.riseFromBaseLowPct.toFixed(2)}%`,
-    `شواهد: ${m.reasons.join('، ')}`,
+    `${index + 1} — ${name} | امتیاز احتمال پیش‌صعود: ${item.bullishScore}/100`,
+    `روش شناسایی: ${item.currentPhaseLabel}`,
+    `RSI(14): ${m.rsi.toFixed(1)} | EMA50: ${m.ema50.toPrecision(7)} | EMA200: ${m.ema200.toPrecision(7)}`,
+    `تعداد روش‌های هم‌زمان: ${m.strategyCount} | روند EMA صعودی: ${m.trendUp ? 'بله' : 'خیر'}`,
+    `رشد از کف بازه: ${m.riseFromBaseLowPct.toFixed(2)}% | رشد ۶ساعت: ${m.recent6hRisePct.toFixed(2)}% | رشد ۱۲ساعت: ${m.recent12hRisePct.toFixed(2)}%`,
   ].join('\n');
 }
 async function main() {
   console.log('\nGATE.IO | ONE-HOUR EARLY BULLISH TRANSITION ENGINE 1');
-  console.log('Closed 1h candles only | price structure only | no volume | no BTC comparison');
-  console.log('Target: identify early price-behavior transition before the main expansion');
-  console.log('One engine | closed 1h candles | price structure only | no indicators, volume or BTC comparison');
+  console.log('Closed 1h candles only | five H1 strategy patterns | no volume | no BTC comparison');
+  console.log('Target: detect early bullish setups before the main expansion; not entry signals');
+  console.log('Methods: EMA trend pullback | range breakout-retest | RSI support bounce | liquidity sweep | EMA200+RSI pullback');
 
   const contracts = await getContracts();
   if (!Array.isArray(contracts)) throw new Error('داده قراردادهای Gate.io معتبر نیست.');
@@ -562,6 +793,7 @@ async function main() {
   const candidates = analyzed
     .filter((r) => r.bullishCandidate)
     .sort((a, b) => b.bullishScore - a.bullishScore ||
+      b.metrics.strategyCount - a.metrics.strategyCount ||
       b.metrics.pressureImprovement - a.metrics.pressureImprovement ||
       b.metrics.higherLows - a.metrics.higherLows ||
       a.metrics.riseFromBaseLowPct - b.metrics.riseFromBaseLowPct ||
@@ -585,6 +817,11 @@ async function main() {
     return acc;
   }, {});
   console.log('Pattern counts:', JSON.stringify(patternCounts));
+  const strategyCounts = analyzed.reduce((acc, item) => {
+    for (const method of (item.strategies || [])) acc[method] = (acc[method] || 0) + 1;
+    return acc;
+  }, {});
+  console.log('Strategy detections:', JSON.stringify(strategyCounts));
   for (const item of candidates) {
     const m = item.metrics;
     console.log(
@@ -592,16 +829,17 @@ async function main() {
       ` | base=${m.baseHours}h | range=${m.baseRangePct.toFixed(2)}%` +
       ` | pressureDelta=${m.pressureImprovement.toFixed(3)} | sellerDelta=${m.sellerPressureChange.toFixed(3)}` +
       ` | higherLows=${m.higherLows} | rise=${m.riseFromBaseLowPct.toFixed(2)}%` +
-      ` | 6h=${m.recent6hRisePct.toFixed(2)}% | 12h=${m.recent12hRisePct.toFixed(2)}%`
+      ` | 6h=${m.recent6hRisePct.toFixed(2)}% | 12h=${m.recent12hRisePct.toFixed(2)}%` +
+      ` | RSI=${m.rsi.toFixed(1)} | methods=${(item.strategies || []).join(',')}`
     );
   }
 
   if (telegramLines.length) {
     await sendTelegram([
       'GATE.IO | ENGINE 1 — EARLY BULLISH TRANSITION RADAR',
-      'فقط کندل‌های بسته‌شده یک‌ساعته | فقط ساختار قیمت',
+      'فقط کندل‌های بسته‌شده یک‌ساعته | پنج روش استراتژی H1',
       'بدون استفاده از حجم معاملات و بدون مقایسه با بیت‌کوین',
-      'تمرکز: شناسایی احتمال صعود پیش از شروع حرکت اصلی',
+      'هشدار الگوی احتمالی؛ نه سیگنال ورود یا تضمین صعود',
       '━━━━━━━━━━━━━━━━━━',
       ...telegramLines,
     ]);
