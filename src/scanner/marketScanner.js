@@ -38,16 +38,18 @@ const CONFIG = {
   PIVOT_RIGHT: 2,
 
   // Candidate context windows, all measured in CLOSED 1h candles.
-  MIN_BASE_HOURS: 18,
-  MAX_BASE_HOURS: 96,
+  MIN_BASE_HOURS: 24,
+  MAX_BASE_HOURS: 120,
   ACTIVATION_HOURS: 6,
-  MAX_BASE_RANGE_PCT: 9.5,
-  MAX_BASE_SLOPE_ABS: 0.085,
-  MAX_RECENT_DOWNSLOPE: -0.035,
-  MAX_ADVANCE_FROM_BASE_LOW_PCT: 8.0,
-  MAX_RECENT_12H_RISE_PCT: 4.8,
-  MAX_RECENT_6H_RISE_PCT: 3.2,
-  MIN_BULLISH_SCORE: 68,
+  SETUP_HOURS: 18,
+  MAX_BASE_RANGE_PCT: 10.0,
+  MAX_BASE_SLOPE_ABS: 0.075,
+  MAX_RECENT_DOWNSLOPE: -0.020,
+  MAX_ADVANCE_FROM_BASE_LOW_PCT: 6.0,
+  MAX_RECENT_12H_RISE_PCT: 3.8,
+  MAX_RECENT_6H_RISE_PCT: 2.4,
+  MAX_LATEST_CANDLE_RANGE_PCT: 3.8,
+  MIN_BULLISH_SCORE: 72,
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -371,120 +373,124 @@ function downsidePressure(candles) {
 
 function analyzeWindow(candles, baseLength) {
   const activationLength = CONFIG.ACTIVATION_HOURS;
+  const setupLength = CONFIG.SETUP_HOURS;
   const baseEnd = candles.length - activationLength;
   const baseStart = baseEnd - baseLength;
-  if (baseStart < 12) return null;
+  if (baseStart < setupLength + 12) return null;
 
   const base = candles.slice(baseStart, baseEnd);
   const recent = candles.slice(baseEnd);
-  const prior = candles.slice(Math.max(0, baseStart - 18), baseStart);
-  if (base.length < CONFIG.MIN_BASE_HOURS || recent.length !== activationLength || prior.length < 8) return null;
+  const setup = candles.slice(baseStart - setupLength, baseStart);
+  const older = candles.slice(Math.max(0, baseStart - setupLength - 24), baseStart - setupLength);
+  if (base.length < CONFIG.MIN_BASE_HOURS || recent.length !== activationLength || setup.length !== setupLength || older.length < 12) return null;
 
   const baseStats = summarizeCandleBehavior(base);
-  const priorStats = summarizeCandleBehavior(prior);
+  const setupStats = summarizeCandleBehavior(setup);
+  const olderStats = summarizeCandleBehavior(older);
   const recentStats = summarizeCandleBehavior(recent);
-  const baseHigh = Math.max(...base.map((c) => c.high));
-  const baseLow = Math.min(...base.map((c) => c.low));
   const last = candles.at(-1);
-  const distanceFromBaseHighPct = pct(baseHigh, last.close);
+  const baseHigh = Math.max(...base.map(c => c.high));
+  const baseLow = Math.min(...base.map(c => c.low));
   const riseFromBaseLowPct = pct(last.close, baseLow);
   const recent6hRisePct = pct(last.close, candles.at(-7).close);
   const recent12hRisePct = pct(last.close, candles.at(-13).close);
+  const recent18hRisePct = pct(last.close, candles.at(-19).close);
 
   const basePivots = findPivots(base);
   const recentPivots = findPivots(candles.slice(-30));
-  const lows = basePivots.lows.slice(-5);
-  const higherLows = countHigherSteps(lows);
-  const lowerLows = countLowerSteps(lows);
-  const highs = basePivots.highs.slice(-5);
-  const lowerHighs = countLowerSteps(highs);
+  const baseLows = basePivots.lows.slice(-6);
+  const recentLows = recentPivots.lows.slice(-4);
+  const higherLows = countHigherSteps(baseLows);
+  const lowerLows = countLowerSteps(baseLows);
+  const recentHigherLows = countHigherSteps(recentLows);
+  const recentLowerLows = countLowerSteps(recentLows);
 
-  const baseRange = baseStats.rangePct;
-  const baseCompressed = baseRange <= CONFIG.MAX_BASE_RANGE_PCT &&
+  const baseCompressed = baseStats.rangePct <= CONFIG.MAX_BASE_RANGE_PCT &&
     Math.abs(baseStats.slope) <= CONFIG.MAX_BASE_SLOPE_ABS;
-  const priceNearUpperArea = distanceFromBaseHighPct >= -0.8 && distanceFromBaseHighPct <= 3.8;
+  const recentRange = rangePct(recent);
+  const setupRange = rangePct(setup);
+  const volatilityContracting = recentRange <= setupRange * 1.12 || baseRangeContraction(base);
+
+  const pressureImprovement = directionalPressure(recent) - directionalPressure(setup);
+  const sellerPressureChange = downsidePressure(recent) - downsidePressure(setup);
+  const sellerExhaustion = sellerPressureChange <= 0.015 ||
+    (recentStats.lowerWick >= setupStats.lowerWick + 0.025 && recentLowerLows === 0);
+
+  const recentBullish = recent.filter(c => c.close > c.open).length;
+  const recentBearish = recent.filter(c => c.close < c.open).length;
+  const recentClosePosition = mean(recent.map(c => candleFacts(c).closePosition));
+  const recentBodyStrength = mean(recent.map(c => candleFacts(c).bodyRatio));
+  const greenBody = mean(recent.filter(c => c.close > c.open).map(c => (c.close-c.open)/Math.max(c.high-c.low, Number.EPSILON)));
+  const redBody = mean(recent.filter(c => c.close < c.open).map(c => Math.abs(c.close-c.open)/Math.max(c.high-c.low, Number.EPSILON)));
+  const bullishCandleQuality = recentClosePosition >= 0.53 &&
+    (greenBody >= redBody * 0.85 || recentBullish > recentBearish);
+
+  const noFreshLow = Math.min(...recent.map(c => c.low)) >= baseLow * 0.985;
+  const lowsStabilizing = recentLowerLows === 0 &&
+    (higherLows >= 1 || recentHigherLows >= 1 || noFreshLow);
+  const closeAboveShortBase = last.close > mean(base.slice(-8).map(c => c.close));
+  const localHigh = Math.max(...candles.slice(-18, -6).map(c => c.high));
+  const earlyReclaim = last.close > localHigh * 0.992;
+  const buyersImproving = (pressureImprovement >= 0.015 && recentClosePosition >= 0.52) ||
+    (recentBullish >= 3 && recentClosePosition >= 0.57 && recentBodyStrength > -0.02);
+  const structureTurning = lowsStabilizing && (closeAboveShortBase || earlyReclaim);
+
+  const priorSlope = olderStats.slope;
+  let context = 'SIDEWAYS_BASE';
+  if (priorSlope < -0.045) context = 'DOWNTREND_EXHAUSTION';
+  else if (priorSlope > 0.045) context = 'UPTREND_PULLBACK';
+
   const priceNotExtended = riseFromBaseLowPct <= CONFIG.MAX_ADVANCE_FROM_BASE_LOW_PCT &&
     recent12hRisePct <= CONFIG.MAX_RECENT_12H_RISE_PCT &&
-    recent6hRisePct <= CONFIG.MAX_RECENT_6H_RISE_PCT;
+    recent6hRisePct <= CONFIG.MAX_RECENT_6H_RISE_PCT &&
+    candleRangePct(last) <= CONFIG.MAX_LATEST_CANDLE_RANGE_PCT;
+  const notActivelyFalling = recentStats.slope >= CONFIG.MAX_RECENT_DOWNSLOPE &&
+    !(recentLowerLows >= 2 && recentStats.slope < -0.015);
+  const notAlreadyBrokenOut = last.close <= baseHigh * 1.012 && recent18hRisePct <= 5.0;
 
-  const recentBullish = recent.filter((c) => c.close > c.open).length;
-  const recentBearish = recent.filter((c) => c.close < c.open).length;
-  const recentClosePosition = mean(recent.map((c) => candleFacts(c).closePosition));
-  const recentBodyStrength = mean(recent.map((c) => candleFacts(c).bodyRatio));
-  const pressureImprovement = recentStats.pressure - baseStats.pressure;
-  const sellerPressureChange = downsidePressure(recent) - downsidePressure(prior);
-  const sellerExhaustion = sellerPressureChange < 0.015 ||
-    (baseStats.lowerWick > priorStats.lowerWick + 0.025 && lowerLows === 0);
-
-  const higherLowEvidence = higherLows >= 1 ||
-    (recentPivots.lows.length >= 2 && countHigherSteps(recentPivots.lows.slice(-3)) >= 1);
-  const noFreshLow = last.low > baseLow * 0.992;
-  const buyersTakingControl = (
-    pressureImprovement >= 0.025 && recentClosePosition >= 0.54
-  ) || (
-    recentBullish >= recentBearish && recentClosePosition >= 0.60
-  ) || (
-    recentBodyStrength > 0.12 && recentStats.slope > 0.015
-  );
-  const microStructureRecovery = last.close > mean(base.slice(-6).map((c) => c.close)) &&
-    (higherLowEvidence || recentStats.slope > 0.025);
-  const notFalling = recentStats.slope >= CONFIG.MAX_RECENT_DOWNSLOPE &&
-    !(lowerLows >= 2 && recentStats.slope < 0);
-
-  // A preceding decline is allowed, but it must be losing control. A prior
-  // rise is also allowed, provided this is a fresh pause rather than a late run.
-  const priorWasFalling = priorStats.slope < -0.045;
-  const declineNeutralized = !priorWasFalling || (sellerExhaustion && noFreshLow && buyersTakingControl);
-
-  let score = 0;
-  score += baseCompressed ? 15 : Math.max(0, 15 - Math.max(0, baseRange - CONFIG.MAX_BASE_RANGE_PCT) * 2);
-  score += sellerExhaustion ? 18 : 0;
-  score += higherLowEvidence ? 15 : 0;
-  score += noFreshLow ? 8 : 0;
-  score += buyersTakingControl ? 20 : 0;
-  score += microStructureRecovery ? 12 : 0;
-  score += priceNearUpperArea ? 7 : 0;
-  score += priceNotExtended ? 10 : 0;
-  score -= lowerLows * 7;
-  score -= lowerHighs >= 3 && !higherLowEvidence ? 8 : 0;
+  // Continuous scoring prevents the old saturation problem (many assets at 98/100).
+  const scoreParts = {
+    sellerFading: clamp((0.035 - sellerPressureChange) / 0.10, 0, 1) * 18,
+    buyerPressure: clamp((pressureImprovement + 0.015) / 0.10, 0, 1) * 20,
+    candleQuality: clamp((recentClosePosition - 0.42) / 0.38, 0, 1) * 12,
+    lowStability: (higherLows > 0 ? 7 : 0) + (recentHigherLows > 0 ? 5 : 0) + (noFreshLow ? 5 : 0),
+    structureRecovery: (closeAboveShortBase ? 7 : 0) + (earlyReclaim ? 6 : 0),
+    volatility: (baseCompressed ? 6 : 0) + (volatilityContracting ? 5 : 0),
+    freshness: priceNotExtended ? 9 : 0,
+    downsidePenalty: Math.min(18, lowerLows * 3 + recentLowerLows * 4),
+    extensionPenalty: Math.max(0, riseFromBaseLowPct - 4) * 2 + Math.max(0, recent12hRisePct - 2.5) * 2,
+  };
+  let score = scoreParts.sellerFading + scoreParts.buyerPressure + scoreParts.candleQuality +
+    scoreParts.lowStability + scoreParts.structureRecovery + scoreParts.volatility +
+    scoreParts.freshness - scoreParts.downsidePenalty - scoreParts.extensionPenalty;
   score = Math.round(clamp(score, 0, 100));
 
-  const structuralProof = (higherLowEvidence && buyersTakingControl) ||
-    (sellerExhaustion && microStructureRecovery && buyersTakingControl);
-  const qualifies = score >= CONFIG.MIN_BULLISH_SCORE && baseCompressed &&
-    sellerExhaustion && buyersTakingControl && microStructureRecovery &&
-    priceNotExtended && notFalling && declineNeutralized && structuralProof;
-
-  let context = 'SIDEWAYS_BASE';
-  if (priorWasFalling) context = 'DOWNTREND_EXHAUSTION';
-  else if (priorStats.slope > 0.045) context = 'UPTREND_PULLBACK';
+  const qualifies = score >= CONFIG.MIN_BULLISH_SCORE && sellerExhaustion &&
+    buyersImproving && bullishCandleQuality && structureTurning && priceNotExtended &&
+    notActivelyFalling && notAlreadyBrokenOut && (baseCompressed || volatilityContracting) &&
+    (noFreshLow || higherLows > 0 || recentHigherLows > 0);
 
   return {
     qualifies, score, context,
     metrics: {
-      baseHours: base.length,
-      baseRangePct: baseRange,
-      baseSlope: baseStats.slope,
-      priorSlope: priorStats.slope,
-      recentSlope: recentStats.slope,
-      pressureImprovement,
-      sellerPressureChange,
-      sellerExhaustion,
-      buyersTakingControl,
-      higherLows,
-      lowerLows,
-      lowerHighs,
-      noFreshLow,
-      microStructureRecovery,
-      distanceFromBaseHighPct,
-      riseFromBaseLowPct,
-      recent6hRisePct,
-      recent12hRisePct,
-      recentBullish,
-      recentBearish,
-      recentClosePosition,
+      baseHours: base.length, baseRangePct: baseStats.rangePct,
+      baseSlope: baseStats.slope, priorSlope, recentSlope: recentStats.slope,
+      pressureImprovement, sellerPressureChange, sellerExhaustion, buyersImproving,
+      bullishCandleQuality, higherLows, recentHigherLows, lowerLows, recentLowerLows,
+      noFreshLow, lowsStabilizing, closeAboveShortBase, earlyReclaim, structureTurning,
+      volatilityContracting, priceNotExtended, riseFromBaseLowPct,
+      recent6hRisePct, recent12hRisePct, recent18hRisePct,
+      recentBullish, recentBearish, recentClosePosition, scoreParts,
     },
   };
+}
+
+function baseRangeContraction(candles) {
+  if (candles.length < 24) return false;
+  const split = Math.floor(candles.length / 2);
+  const first = rangePct(candles.slice(0, split));
+  const second = rangePct(candles.slice(split));
+  return second < first * 0.88;
 }
 
 function analyzeTrend(symbol, candles, pageCount) {
@@ -552,6 +558,7 @@ async function main() {
   console.log('\nGATE.IO | ONE-HOUR EARLY BULLISH TRANSITION ENGINE 1');
   console.log('Closed 1h candles only | price structure only | no volume | no BTC comparison');
   console.log('Target: identify likely bullish transition BEFORE the main upward move');
+  console.log('ENGINE 1 ONLY | price structure only | no MACD | no Bollinger | no volume | no BTC comparison');
 
   const contracts = await getContracts();
   if (!Array.isArray(contracts)) throw new Error('داده قراردادهای Gate.io معتبر نیست.');
