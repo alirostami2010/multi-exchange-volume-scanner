@@ -4,16 +4,19 @@
  * File: src/scanner/marketScanner.js
  * Node.js 20+
  *
- * Logic changed to LONG ONLY:
+ * Logic:
  * - BTC 4h regime filter
+ * - LONG_MODE=STRICT   : اگر BTC نزولی باشد، هیچ لانگی بررسی نمی‌شود
+ * - LONG_MODE=BALANCED : اگر BTC نزولی باشد، فقط ستاپ‌های استثنایی قوی قبول می‌شوند
  * - Coin 4h uptrend filter: close > EMA50 > EMA200
  * - Entry only on 15m Pullback to support/Fibonacci OR Breakout
  * - Mandatory 15m trigger: MACD cross / RSI bounce / Engulfing / Hammer / Divergence
  * - Live taker buy pressure + candle volume used only as confirmation
  * - Entry zone, structural Stop Loss and real resistance ceilings TP1/TP2/TP3
- * - Telegram sends a compact list: max 5 signals, score >= 70 only
+ * - Telegram sends a compact list: max 5 signals only
+ * - Filter statistics are logged as [FILTER STATS]
  *
- * Kept unchanged:
+ * Kept:
  * - Gate request queue / retries / rate spacing
  * - marketStorage snapshot saving
  * - Telegram delivery behaviour: telegram errors do not fail the scan
@@ -26,11 +29,11 @@ import { saveMarketSnapshot } from '../storage/marketStorage.js';
 const CONFIG = {
   API_BASE: 'https://api.gateio.ws/api/v4',
   SETTLE: 'usdt',
-  MIN_QUOTE_VOLUME_24H: Number(process.env.MIN_QUOTE_VOLUME_24H ?? 75000),
+  MIN_QUOTE_VOLUME_24H: Number(process.env.MIN_QUOTE_VOLUME_24H ?? 1000000),
   TRADE_LIMIT: 1000,
   HISTORY_HOURS: 24,
   HISTORY_REPORT_HOURS: 6,
-  TOP_COUNT: Number(process.env.TOP_COUNT ?? 5), // Telegram list stays compact
+  TOP_COUNT: Number(process.env.TOP_COUNT ?? 5),
   CONCURRENCY: 5,
   REQUEST_SPACING_MS: 120,
   REQUEST_TIMEOUT_MS: 15000,
@@ -45,8 +48,11 @@ const CONFIG = {
   // ---- LONG ONLY logic ----
   CANDLES_15M_LIMIT: 300,
   CANDLES_4H_LIMIT: 300,
+  LONG_MODE: String(process.env.LONG_MODE ?? 'BALANCED').toUpperCase(), // STRICT | BALANCED
   MIN_LONG_SCORE: Number(process.env.MIN_LONG_SCORE ?? 70),
   MIN_LONG_SCORE_NEUTRAL: Number(process.env.MIN_LONG_SCORE_NEUTRAL ?? 75),
+  MIN_LONG_SCORE_BEARISH: Number(process.env.MIN_LONG_SCORE_BEARISH ?? 82),
+  SCAN_LIMIT: Number(process.env.SCAN_LIMIT ?? 80),
   MIN_RR_TP1: Number(process.env.MIN_RR_TP1 ?? 1.0),
   MIN_RR_TP2: Number(process.env.MIN_RR_TP2 ?? 1.8),
   MAX_RSI_ENTRY: Number(process.env.MAX_RSI_ENTRY ?? 70),
@@ -78,9 +84,16 @@ const signedPct = (price, target) => {
   const p = pctFrom(price, target);
   return `${p >= 0 ? '+' : ''}${p.toFixed(1)}%`;
 };
+const intScore = v => Math.round(clamp(v, 0, 100));
 
 let lastRequestAt = 0;
 let requestQueue = Promise.resolve();
+
+let currentRejectStats = {};
+const reject = reason => {
+  currentRejectStats[reason] = (currentRejectStats[reason] ?? 0) + 1;
+  return null;
+};
 
 async function requestGate(path, params = {}) {
   const url = new URL(`${CONFIG.API_BASE}${path}`);
@@ -330,7 +343,7 @@ function analyzeHourlyHistory(history) {
   };
 }
 
-/* ---------------- Indicators (NEW LONG LOGIC) ---------------- */
+/* ---------------- Indicators ---------------- */
 function emaSeries(values, period) {
   const k = 2 / (period + 1);
   const out = new Array(values.length).fill(null);
@@ -358,7 +371,10 @@ function smaSeries(values, period) {
   let sum = 0;
   values.forEach((value, i) => {
     sum += Number.isFinite(value) ? value : 0;
-    if (i >= period) sum -= Number.isFinite(values[i - period]) ? values[i - period] : 0;
+    if (i >= period) {
+      const old = values[i - period];
+      sum -= Number.isFinite(old) ? old : 0;
+    }
     out[i] = sum / Math.min(period, i + 1);
   });
   return out;
@@ -467,27 +483,29 @@ async function getBtcRegime() {
 
 /* ---------------- LONG ONLY ANALYZER ---------------- */
 function analyzeLong(market, metrics, hourly, raw15m, raw4h, nowSeconds, marketRegime) {
-  if (marketRegime === 'BEARISH') return null;
+  const btcBearish = marketRegime === 'BEARISH';
+  if (btcBearish && CONFIG.LONG_MODE === 'STRICT') return reject('BTC_BEARISH_STRICT');
 
   const candles4h = addIndicators(toClosedCandles(raw4h, 4 * 3600, nowSeconds));
   const candles15 = addIndicators(toClosedCandles(raw15m, 15 * 60, nowSeconds));
-  if (candles4h.length < 210 || candles15.length < 60) return null;
+  if (candles4h.length < 210 || candles15.length < 60) return reject('INSUFFICIENT_CANDLES');
 
   const l4 = candles4h.at(-1), l = candles15.at(-1), p = candles15.at(-2);
-  const price = positive(num(market.ticker?.last)) ? num(market.ticker.last) : l.close;
-  if (!positive(price) || !positive(l.atr) || !positive(l.ema20)) return null;
-  if (Math.abs(price - l.close) / l.close > 0.025) return null; // price ran away after closed trigger candle
+  const tickerPrice = num(market.ticker?.last);
+  const price = positive(tickerPrice) ? tickerPrice : l.close;
+  if (!positive(price) || !positive(l.atr) || !positive(l.ema20)) return reject('BAD_PRICE_OR_INDICATOR');
+  if (Math.abs(price - l.close) / l.close > 0.025) return reject('PRICE_MOVED_AWAY_FROM_TRIGGER');
 
   const funding = num(market.contract?.funding_rate) ?? num(market.ticker?.funding_rate) ?? 0;
 
   // Hard filters — no long outside an uptrend / at overbought / crowded funding
-  if (!(l4.close > l4.ema50 && l4.ema50 > l4.ema200)) return null;
-  if (l.rsi > CONFIG.MAX_RSI_ENTRY || l4.rsi > CONFIG.MAX_RSI_4H) return null;
-  if ((price - l.ema20) / l.ema20 * 100 > 4) return null; // no chasing
-  if (funding > CONFIG.MAX_FUNDING_RATE) return null;
+  if (!(l4.close > l4.ema50 && l4.ema50 > l4.ema200)) return reject('COIN_4H_TREND');
+  if (l.rsi > CONFIG.MAX_RSI_ENTRY || l4.rsi > CONFIG.MAX_RSI_4H) return reject('RSI_OVERBOUGHT');
+  if ((price - l.ema20) / l.ema20 * 100 > 4) return reject('PRICE_CHASING');
+  if (funding > CONFIG.MAX_FUNDING_RATE) return reject('FUNDING_CROWDED');
 
   const prevWindow = candles15.slice(-41, -1);
-  if (prevWindow.length < 20) return null;
+  if (prevWindow.length < 20) return reject('INSUFFICIENT_15M_WINDOW');
   const support = Math.min(...prevWindow.map(c => c.low));
   const prevResistance = Math.max(...prevWindow.map(c => c.high));
   const recentSwingLow = Math.min(...candles15.slice(-21, -1).map(c => c.low));
@@ -520,7 +538,7 @@ function analyzeLong(market, metrics, hourly, raw15m, raw4h, nowSeconds, marketR
   }
   if (l.bbLower != null && price <= l.bbMid && price >= l.bbLower) { setupScore += 5; reasons.push('اصلاح سالم تا میانه Bollinger'); }
   if (p.close <= prevResistance && l.close > prevResistance) {
-    if ((l.close - prevResistance) / prevResistance * 100 > 2) return null; // late chase after breakout
+    if ((l.close - prevResistance) / prevResistance * 100 > 2) return reject('LATE_BREAKOUT_CHASE');
     setupScore += 12; setup = 'Breakout'; reasons.push('شکست و تثبیت بالای مقاومت 15m');
   }
   setupScore = clamp(setupScore, 0, 25);
@@ -532,7 +550,7 @@ function analyzeLong(market, metrics, hourly, raw15m, raw4h, nowSeconds, marketR
   if (isBullishEngulfing(candles15)) { triggerScore += 7; hasTrigger = true; reasons.push('کندل Engulfing صعودی'); }
   if (isHammer(candles15)) { triggerScore += 5; hasTrigger = true; reasons.push('کندل Hammer برگشتی'); }
   if (hasBullishDivergence(candles15)) { triggerScore += 8; hasTrigger = true; reasons.push('واگرایی مثبت RSI در 15m'); }
-  if (!hasTrigger) return null;
+  if (!hasTrigger) return reject('NO_15M_TRIGGER');
   triggerScore = clamp(triggerScore, 0, 25);
 
   // 4) Volume / live buy pressure — 15
@@ -551,25 +569,32 @@ function analyzeLong(market, metrics, hourly, raw15m, raw4h, nowSeconds, marketR
   let stopLoss = Math.min(support, recentSwingLow) - atr * 0.5;
   let risk = price - stopLoss;
   if (!positive(risk) || risk < atr * 0.8) { stopLoss = price - atr * 1.5; risk = price - stopLoss; }
-  if (!positive(risk) || risk > atr * 5) return null;
+  if (!positive(risk) || risk > atr * 5) return reject('BAD_RISK');
 
   // Ceilings from real swing resistances; fallback to RR levels, always increasing
   const resistances = findResistanceLevels(candles15, candles4h, price).filter(x => x > price + risk);
   const tp1 = resistances[0] ?? price + risk * 1.5;
   const tp2 = resistances[1] ?? Math.max(price + risk * 2.5, tp1 + risk * 0.8);
   const tp3 = resistances[2] ?? Math.max(price + risk * 4, tp2 + risk);
-  if (!(price < tp1 && tp1 < tp2 && tp2 < tp3)) return null;
+  if (!(price < tp1 && tp1 < tp2 && tp2 < tp3)) return reject('BAD_TP_ORDER');
 
   const rr1 = (tp1 - price) / risk, rr2 = (tp2 - price) / risk;
-  if (rr1 < CONFIG.MIN_RR_TP1 || rr2 < CONFIG.MIN_RR_TP2) return null;
+  if (rr1 < CONFIG.MIN_RR_TP1 || rr2 < CONFIG.MIN_RR_TP2) return reject('LOW_RR');
+
+  // در BTC نزولی فقط ستاپ واقعاً قوی قبول است
+  if (btcBearish && (l4.adx < 25 || rr2 < 2.2)) return reject('BTC_BEARISH_WEAK_SETUP');
 
   let score = trendScore + setupScore + triggerScore + volumeScore;
   if (rr2 >= 2.5) { score += 5; reasons.push(`سود به ضرر عالی تا سقف۲: 1:${fmt(rr2, 1)}`); }
   else if (rr2 >= 2) score += 3;
   score = intScore(score);
 
-  const minScore = marketRegime === 'NEUTRAL' ? CONFIG.MIN_LONG_SCORE_NEUTRAL : CONFIG.MIN_LONG_SCORE;
-  if (score < minScore) return null;
+  const minScore = btcBearish
+    ? CONFIG.MIN_LONG_SCORE_BEARISH
+    : marketRegime === 'NEUTRAL'
+      ? CONFIG.MIN_LONG_SCORE_NEUTRAL
+      : CONFIG.MIN_LONG_SCORE;
+  if (score < minScore) return reject('SCORE_LOW');
 
   return {
     symbol: market.symbol,
@@ -585,6 +610,7 @@ function analyzeLong(market, metrics, hourly, raw15m, raw4h, nowSeconds, marketR
     change24h: num(market.ticker.change_percentage),
     quoteVolume24h: num(market.ticker.volume_24h_quote),
     fundingRate: funding,
+    riskNote: btcBearish ? 'BTC نزولی؛ فقط ستاپ استثنایی، با نصف حجم همیشگی' : null,
     entryLow: price * 0.998,
     entryHigh: price * 1.002,
     entry: { low: price * 0.998, high: price * 1.002, price },
@@ -608,7 +634,6 @@ function analyzeLong(market, metrics, hourly, raw15m, raw4h, nowSeconds, marketR
     _sort: { score, rateMultiple: metrics?.rateMultiple ?? null, buyLast3: metrics?.buyLast3 ?? 0 },
   };
 }
-function intScore(v) { return Math.round(clamp(v, 0, 100)); }
 
 function analyzeMarket(market, trades, rawCandles, rawStats, rawCandles15, rawCandles4h, nowSeconds, marketRegime) {
   const multiplier = num(market.contract.quanto_multiplier);
@@ -684,22 +709,24 @@ function rankCandidates(items) {
 
 /* ---------------- Compact Telegram report ---------------- */
 function reportLine(item, index) {
-  return [
+  const lines = [
     `${index + 1}. ${item.symbol} 🟢 LONG | ${item.score}/100 (${item.grade}) | ${item.setup}`,
     `ورود: ${fmtPrice(item.entryLow)} - ${fmtPrice(item.entryHigh)}`,
     `حد ضرر: ${fmtPrice(item.stopLoss)} (${signedPct(item.price, item.stopLoss)})`,
     `سقف‌ها: ${fmtPrice(item.tp1)} (${signedPct(item.price, item.tp1)}) | ${fmtPrice(item.tp2)} (${signedPct(item.price, item.tp2)}) | ${fmtPrice(item.tp3)} (${signedPct(item.price, item.tp3)})`,
     `RR تا سقف۲: 1:${fmt(item.riskRewardToTp2, 1)} | RSI 15m: ${fmt(item.rsi15, 0)}`,
     `دلیل: ${(item.reasons || []).slice(0, 3).join(' • ')}`,
-  ].join('\n');
+  ];
+  if (item.riskNote) lines.push(`⚠️ ${item.riskNote}`);
+  return lines.join('\n');
 }
 
 function buildReport(output) {
   const btcText = output.marketRegime === 'BULLISH' ? 'صعودی ✅' : output.marketRegime === 'BEARISH' ? 'نزولی 🔴' : 'خنثی ⚠️';
   const lines = [
     '🚀 فرصت‌های لانگ Gate.io | USDT Perp',
-    `BTC 4H: ${btcText} | ${output.scannedAt}`,
-    `بررسی: ${output.stats.liquid} بازار | ورود معتبر: ${output.stats.candidates}`,
+    `BTC 4H: ${btcText} | حالت: ${CONFIG.LONG_MODE} | ${output.scannedAt}`,
+    `بررسی: ${output.stats.scanned ?? output.stats.liquid} بازار از ${output.stats.liquid} بازار نقدشونده | ورود معتبر: ${output.stats.candidates}`,
     '━━━━━━━━━━━━━━━━━━',
   ];
   if (!output.candidates.length) {
@@ -782,10 +809,19 @@ async function scanOneMarket(market, nowSeconds, marketRegime) {
 export async function scanGateMarkets() {
   const started = Date.now();
   const nowSeconds = Date.now() / 1000;
+  currentRejectStats = {};
+
   console.log('\n🚀 GATE.IO LONG ONLY ENTRY RADAR');
-  const { active, markets } = await getMarkets();
+  const { active, markets: liquidMarkets } = await getMarkets();
   const marketRegime = await getBtcRegime();
-  console.log(`Active contracts: ${active.length} | Liquid markets: ${markets.length} | BTC regime: ${marketRegime}`);
+
+  const strictBearishSkip = marketRegime === 'BEARISH' && CONFIG.LONG_MODE === 'STRICT';
+  const scanLimit = positive(CONFIG.SCAN_LIMIT) ? CONFIG.SCAN_LIMIT : liquidMarkets.length;
+  const markets = strictBearishSkip ? [] : liquidMarkets.slice(0, scanLimit);
+  if (strictBearishSkip) currentRejectStats.BTC_BEARISH_STRICT_SKIPPED = liquidMarkets.length;
+
+  console.log(`Active contracts: ${active.length} | Liquid markets: ${liquidMarkets.length} | Scanning: ${markets.length} | BTC regime: ${marketRegime} | Mode: ${CONFIG.LONG_MODE}`);
+  if (strictBearishSkip) console.log('[MODE] BTC BEARISH + STRICT mode => scan skipped to avoid API calls.');
 
   let completed = 0, success = 0, failed = 0;
   const results = await mapPool(markets, CONFIG.CONCURRENCY, async market => {
@@ -812,8 +848,13 @@ export async function scanGateMarkets() {
     success: true, exchange: 'GATE.IO', market: 'USDT PERPETUAL',
     strategy: 'LONG ONLY: BTC FILTER + 4H TREND + 15M PULLBACK/BREAKOUT TRIGGER',
     marketRegime,
+    longMode: CONFIG.LONG_MODE,
     scannedAt: new Date().toISOString(),
-    stats: { active: active.length, liquid: markets.length, success, failed, candidates: candidates.length, durationMs: Date.now() - started },
+    stats: {
+      active: active.length, liquid: liquidMarkets.length, scanned: markets.length,
+      success, failed, candidates: candidates.length, durationMs: Date.now() - started,
+    },
+    filterStats: { ...currentRejectStats },
     candidates: ranked, rankedCandidates: ranked,
   };
 
@@ -825,6 +866,8 @@ export async function scanGateMarkets() {
   } catch (error) {
     console.error('[STORAGE] Snapshot save failed; scan result is still available:', error?.stack || error?.message || error);
   }
+
+  console.log('[FILTER STATS]', JSON.stringify(currentRejectStats));
 
   const report = buildReport(output);
   console.log(report);
@@ -851,12 +894,13 @@ export async function scanGateMarkets() {
 try {
   const result = await scanGateMarkets();
   console.log('[SCANNER RESULT]', JSON.stringify({
-    success: result.success, active: result.stats.active, liquid: result.stats.liquid,
+    success: result.success, active: result.stats.active, liquid: result.stats.liquid, scanned: result.stats.scanned,
     successful: result.stats.success, failed: result.stats.failed,
     candidates: result.stats.candidates, durationMs: result.stats.durationMs,
+    filterStats: result.filterStats,
     telegramSent: result.telegram?.sent ?? false,
   }, null, 2));
 } catch (error) {
   console.error('[SCANNER FATAL ERROR]', error?.stack || error);
   process.exitCode = 1;
-    }
+}
