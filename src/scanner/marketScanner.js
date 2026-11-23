@@ -4,22 +4,18 @@
  * File: src/scanner/marketScanner.js
  * Node.js 20+
  *
- * Logic:
- * - BTC 4h regime filter
- * - LONG_MODE=STRICT   : اگر BTC نزولی باشد، هیچ لانگی بررسی نمی‌شود
- * - LONG_MODE=BALANCED : اگر BTC نزولی باشد، فقط ستاپ‌های استثنایی قوی قبول می‌شوند
- * - Coin 4h uptrend filter: close > EMA50 > EMA200
- * - Entry only on 15m Pullback to support/Fibonacci OR Breakout
- * - Mandatory 15m trigger: MACD cross / RSI bounce / Engulfing / Hammer / Divergence
- * - Live taker buy pressure + candle volume used only as confirmation
- * - Entry zone, structural Stop Loss and real resistance ceilings TP1/TP2/TP3
- * - Telegram sends a compact list: max 5 signals only
- * - Filter statistics are logged as [FILTER STATS]
+ * All scanner settings are HARD-CODED in CONFIG below.
+ * No .env file is required for strategy settings.
  *
- * Kept:
- * - Gate request queue / retries / rate spacing
- * - marketStorage snapshot saving
- * - Telegram delivery behaviour: telegram errors do not fail the scan
+ * Logic:
+ * - LONG_MODE=BALANCED
+ * - BTC 4h regime filter
+ * - Coin 4h uptrend filter: close > EMA50 > EMA200
+ * - Entry only on 15m Pullback / Breakout
+ * - Mandatory 15m trigger
+ * - Entry zone, Stop Loss, TP1/TP2/TP3 from real resistances
+ * - Telegram: max 5 compact signals, no empty spam
+ * - Logs: [FILTER STATS] and [NEAR MISSES]
  *
  * No order execution.
  */
@@ -29,35 +25,39 @@ import { saveMarketSnapshot } from '../storage/marketStorage.js';
 const CONFIG = {
   API_BASE: 'https://api.gateio.ws/api/v4',
   SETTLE: 'usdt',
-  MIN_QUOTE_VOLUME_24H: Number(process.env.MIN_QUOTE_VOLUME_24H ?? 1000000),
+
+  // ===== HARD-CODED SETTINGS (NO .env NEEDED) =====
+  MIN_QUOTE_VOLUME_24H: 1000000,
+  LONG_MODE: 'BALANCED', // STRICT | BALANCED
+  MIN_LONG_SCORE: 70,
+  MIN_LONG_SCORE_NEUTRAL: 75,
+  MIN_LONG_SCORE_BEARISH: 82,
+  SCAN_LIMIT: 0, // 0 = scan ALL liquid markets
+  TOP_COUNT: 5,
+  TELEGRAM_SEND_EMPTY: false,
+
+  // ===== Other fixed settings =====
   TRADE_LIMIT: 1000,
   HISTORY_HOURS: 24,
   HISTORY_REPORT_HOURS: 6,
-  TOP_COUNT: Number(process.env.TOP_COUNT ?? 5),
   CONCURRENCY: 5,
   REQUEST_SPACING_MS: 120,
   REQUEST_TIMEOUT_MS: 15000,
   RETRIES: 3,
   TELEGRAM_MAX_LENGTH: 3800,
-  TELEGRAM_SEND_EMPTY: process.env.TELEGRAM_SEND_EMPTY === 'true',
 
-  MIN_RECENT_BUY_NOTIONAL: Number(process.env.MIN_RECENT_BUY_NOTIONAL ?? 1500),
-  MIN_PREVIOUS_BUY_BASELINE: Number(process.env.MIN_PREVIOUS_BUY_BASELINE ?? 300),
+  MIN_RECENT_BUY_NOTIONAL: 1500,
+  MIN_PREVIOUS_BUY_BASELINE: 300,
   MIN_HISTORY_CANDLES: 4,
 
-  // ---- LONG ONLY logic ----
   CANDLES_15M_LIMIT: 300,
   CANDLES_4H_LIMIT: 300,
-  LONG_MODE: String(process.env.LONG_MODE ?? 'BALANCED').toUpperCase(), // STRICT | BALANCED
-  MIN_LONG_SCORE: Number(process.env.MIN_LONG_SCORE ?? 70),
-  MIN_LONG_SCORE_NEUTRAL: Number(process.env.MIN_LONG_SCORE_NEUTRAL ?? 75),
-  MIN_LONG_SCORE_BEARISH: Number(process.env.MIN_LONG_SCORE_BEARISH ?? 82),
-  SCAN_LIMIT: Number(process.env.SCAN_LIMIT ?? 80),
-  MIN_RR_TP1: Number(process.env.MIN_RR_TP1 ?? 1.0),
-  MIN_RR_TP2: Number(process.env.MIN_RR_TP2 ?? 1.8),
-  MAX_RSI_ENTRY: Number(process.env.MAX_RSI_ENTRY ?? 70),
-  MAX_RSI_4H: Number(process.env.MAX_RSI_4H ?? 75),
-  MAX_FUNDING_RATE: Number(process.env.MAX_FUNDING_RATE ?? 0.001), // 0.10%
+
+  MIN_RR_TP1: 1.0,
+  MIN_RR_TP2: 1.8,
+  MAX_RSI_ENTRY: 70,
+  MAX_RSI_4H: 75,
+  MAX_FUNDING_RATE: 0.001, // 0.10%
 };
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -90,6 +90,7 @@ let lastRequestAt = 0;
 let requestQueue = Promise.resolve();
 
 let currentRejectStats = {};
+let currentNearMisses = [];
 const reject = reason => {
   currentRejectStats[reason] = (currentRejectStats[reason] ?? 0) + 1;
   return null;
@@ -498,7 +499,6 @@ function analyzeLong(market, metrics, hourly, raw15m, raw4h, nowSeconds, marketR
 
   const funding = num(market.contract?.funding_rate) ?? num(market.ticker?.funding_rate) ?? 0;
 
-  // Hard filters — no long outside an uptrend / at overbought / crowded funding
   if (!(l4.close > l4.ema50 && l4.ema50 > l4.ema200)) return reject('COIN_4H_TREND');
   if (l.rsi > CONFIG.MAX_RSI_ENTRY || l4.rsi > CONFIG.MAX_RSI_4H) return reject('RSI_OVERBOUGHT');
   if ((price - l.ema20) / l.ema20 * 100 > 4) return reject('PRICE_CHASING');
@@ -571,7 +571,7 @@ function analyzeLong(market, metrics, hourly, raw15m, raw4h, nowSeconds, marketR
   if (!positive(risk) || risk < atr * 0.8) { stopLoss = price - atr * 1.5; risk = price - stopLoss; }
   if (!positive(risk) || risk > atr * 5) return reject('BAD_RISK');
 
-  // Ceilings from real swing resistances; fallback to RR levels, always increasing
+  // Ceilings from real swing resistances; fallback to RR levels
   const resistances = findResistanceLevels(candles15, candles4h, price).filter(x => x > price + risk);
   const tp1 = resistances[0] ?? price + risk * 1.5;
   const tp2 = resistances[1] ?? Math.max(price + risk * 2.5, tp1 + risk * 0.8);
@@ -594,7 +594,20 @@ function analyzeLong(market, metrics, hourly, raw15m, raw4h, nowSeconds, marketR
     : marketRegime === 'NEUTRAL'
       ? CONFIG.MIN_LONG_SCORE_NEUTRAL
       : CONFIG.MIN_LONG_SCORE;
-  if (score < minScore) return reject('SCORE_LOW');
+
+  if (score < minScore) {
+    currentNearMisses.push({
+      symbol: market.symbol,
+      score,
+      required: minScore,
+      setup,
+      price,
+      rsi15: round(l.rsi, 1),
+      rr2: round(rr2, 2),
+      reasons: reasons.slice(0, 4),
+    });
+    return reject('SCORE_LOW');
+  }
 
   return {
     symbol: market.symbol,
@@ -810,6 +823,7 @@ export async function scanGateMarkets() {
   const started = Date.now();
   const nowSeconds = Date.now() / 1000;
   currentRejectStats = {};
+  currentNearMisses = {};
 
   console.log('\n🚀 GATE.IO LONG ONLY ENTRY RADAR');
   const { active, markets: liquidMarkets } = await getMarkets();
@@ -844,6 +858,10 @@ export async function scanGateMarkets() {
     return clean;
   });
 
+  const nearMissesTop = [...currentNearMisses]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5);
+
   const output = {
     success: true, exchange: 'GATE.IO', market: 'USDT PERPETUAL',
     strategy: 'LONG ONLY: BTC FILTER + 4H TREND + 15M PULLBACK/BREAKOUT TRIGGER',
@@ -855,6 +873,7 @@ export async function scanGateMarkets() {
       success, failed, candidates: candidates.length, durationMs: Date.now() - started,
     },
     filterStats: { ...currentRejectStats },
+    nearMisses: nearMissesTop,
     candidates: ranked, rankedCandidates: ranked,
   };
 
@@ -868,12 +887,17 @@ export async function scanGateMarkets() {
   }
 
   console.log('[FILTER STATS]', JSON.stringify(currentRejectStats));
+  if (nearMissesTop.length) {
+    console.log('[NEAR MISSES]', JSON.stringify(nearMissesTop, null, 2));
+  } else {
+    console.log('[NEAR MISSES] []');
+  }
 
   const report = buildReport(output);
   console.log(report);
   console.log(`\nFinished in ${(output.stats.durationMs / 1000).toFixed(1)}s | scanned ${markets.length} | success ${success} | failed ${failed}`);
 
-  // Telegram is kept, but an empty list is not spammed unless TELEGRAM_SEND_EMPTY=true
+  // Telegram is kept, but an empty list is not spammed because TELEGRAM_SEND_EMPTY=false is hard-coded
   try {
     if (!ranked.length && !CONFIG.TELEGRAM_SEND_EMPTY) {
       output.telegram = { sent: false, reason: 'NO_LONG_CANDIDATES_SKIPPED' };
@@ -898,9 +922,10 @@ try {
     successful: result.stats.success, failed: result.stats.failed,
     candidates: result.stats.candidates, durationMs: result.stats.durationMs,
     filterStats: result.filterStats,
+    nearMisses: result.nearMisses,
     telegramSent: result.telegram?.sent ?? false,
   }, null, 2));
 } catch (error) {
   console.error('[SCANNER FATAL ERROR]', error?.stack || error);
   process.exitCode = 1;
-}
+        }
