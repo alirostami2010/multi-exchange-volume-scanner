@@ -47,7 +47,7 @@ const CONFIG = {
   MOTOR2: {
     // 1H is deliberately dominant. Higher timeframes can influence ranking,
     // but none of them can filter out a Motor 1 candidate.
-    WEIGHTS: { h1: 0.60, h4: 0.13, d1: 0.08, w1: 0.05, btcRelative: 0.07, upsideRoom: 0.03, growthCapacity: 0.04 },
+    WEIGHTS: { h1: 0.54, earlyBasePattern: 0.11, h4: 0.12, d1: 0.08, w1: 0.05, btcRelative: 0.07, upsideRoom: 0.03 },
     HISTORY: {
       '4h': { seconds: 4 * 3600, candles: 360, min: 24 },
       '1d': { seconds: 24 * 3600, candles: 180, min: 20 },
@@ -277,19 +277,197 @@ function returnOverCandles(candles, count) {
   return earlier > 0 ? pct(latest, earlier) : null;
 }
 
+/**
+ * Relative-strength analysis built from exact, fully closed hourly timestamps.
+ * The ratio (asset close / BTC close) is the primary series: a rising ratio
+ * means the asset is gaining strength against BTC, regardless of both prices
+ * moving up or down in USD terms.
+ */
 function relativeStrengthWindows(assetCandles, btcCandles) {
-  const windows = [168, 720, 2160]; // 7d, 30d, 90d of closed hourly candles
-  const labels = ['7d', '30d', '90d'];
-  const out = {};
-  for (let i = 0; i < windows.length; i++) {
-    const n = windows[i];
-    const assetReturn = returnOverCandles(assetCandles, n);
-    const btcReturn = returnOverCandles(btcCandles, n);
-    out[labels[i]] = assetReturn === null || btcReturn === null
-      ? null
-      : { assetReturnPct: assetReturn, btcReturnPct: btcReturn, excessPct: assetReturn - btcReturn };
+  if (!Array.isArray(assetCandles) || !Array.isArray(btcCandles) ||
+      assetCandles.length < 24 || btcCandles.length < 24) {
+    return { available: false, excessPct: null, trend: 'UNAVAILABLE', trendLabel: 'داده ناکافی', momentum: 'UNKNOWN', score: 50 };
   }
-  return out;
+
+  const btcByTime = new Map(btcCandles.map((c) => [c.time, c]));
+  const aligned = assetCandles
+    .filter((c) => btcByTime.has(c.time))
+    .map((asset) => {
+      const btc = btcByTime.get(asset.time);
+      return {
+        time: asset.time,
+        assetClose: asset.close,
+        btcClose: btc.close,
+        ratio: asset.close / btc.close,
+        logRatio: Math.log(asset.close / btc.close),
+      };
+    })
+    .filter((p) => Number.isFinite(p.ratio) && p.ratio > 0)
+    .sort((a, b) => a.time - b.time);
+
+  if (aligned.length < 48) {
+    return { available: false, excessPct: null, trend: 'UNAVAILABLE', trendLabel: 'داده هم‌زمان ناکافی', momentum: 'UNKNOWN', score: 50, alignedCandles: aligned.length };
+  }
+
+  const latestTime = aligned.at(-1).time;
+  const slopePctPer24h = (points) => {
+    if (!points || points.length < 12) return null;
+    const origin = points[0].time;
+    const xs = points.map((p) => (p.time - origin) / 3600);
+    const ys = points.map((p) => p.logRatio);
+    const xMean = mean(xs);
+    const yMean = mean(ys);
+    let numerator = 0;
+    let denominator = 0;
+    for (let i = 0; i < xs.length; i++) {
+      numerator += (xs[i] - xMean) * (ys[i] - yMean);
+      denominator += (xs[i] - xMean) ** 2;
+    }
+    if (!denominator) return null;
+    return (numerator / denominator) * 24 * 100;
+  };
+  const windowPoints = (hours, offsetHours = 0) => aligned.filter((p) =>
+    p.time <= latestTime - offsetHours * 3600 &&
+    p.time >= latestTime - (offsetHours + hours) * 3600
+  );
+
+  const slope24 = slopePctPer24h(windowPoints(24));
+  const slope72 = slopePctPer24h(windowPoints(72));
+  const slope168 = slopePctPer24h(windowPoints(168));
+  const prior24 = slopePctPer24h(windowPoints(24, 24));
+  const acceleration = slope24 === null || prior24 === null ? null : slope24 - prior24;
+
+  const ratioReturn = (hours) => {
+    const points = windowPoints(hours);
+    if (points.length < Math.min(12, hours / 2)) return null;
+    return pct(points.at(-1).ratio, points[0].ratio);
+  };
+  const rs7d = ratioReturn(168);
+  const rs30d = ratioReturn(720);
+  const rs90d = ratioReturn(2160);
+  const excessValues = [
+    { value: rs7d, weight: 0.50 },
+    { value: rs30d, weight: 0.30 },
+    { value: rs90d, weight: 0.20 },
+  ].filter((x) => Number.isFinite(x.value));
+  const excessWeight = excessValues.reduce((sum, x) => sum + x.weight, 0);
+  const excessPct = excessWeight
+    ? excessValues.reduce((sum, x) => sum + x.value * x.weight, 0) / excessWeight
+    : null;
+
+  // Conditional behavior is measured only on consecutive aligned 1H bars.
+  const conditional = { up: [], down: [] };
+  const pairedReturns = [];
+  for (let i = 1; i < aligned.length; i++) {
+    const previous = aligned[i - 1];
+    const current = aligned[i];
+    if (current.time - previous.time !== 3600) continue;
+    const assetReturn = pct(current.assetClose, previous.assetClose);
+    const btcReturn = pct(current.btcClose, previous.btcClose);
+    const excess = assetReturn - btcReturn;
+    pairedReturns.push({ assetReturn, btcReturn, excess });
+    if (btcReturn > 0.10) conditional.up.push(excess);
+    else if (btcReturn < -0.10) conditional.down.push(excess);
+  }
+  const summarize = (values) => values.length ? {
+    samples: values.length,
+    avgExcessPctPerHour: mean(values),
+    outperformRatePct: (values.filter((v) => v > 0).length / values.length) * 100,
+  } : { samples: 0, avgExcessPctPerHour: null, outperformRatePct: null };
+  const upBehavior = summarize(conditional.up);
+  const downBehavior = summarize(conditional.down);
+
+  // Correlation and beta help distinguish a genuinely changing ratio from an
+  // asset that mostly mirrors BTC. They are descriptive, not a standalone buy signal.
+  const recentReturns = pairedReturns.slice(-Math.min(168, pairedReturns.length));
+  const x = recentReturns.map((p) => p.btcReturn);
+  const y = recentReturns.map((p) => p.assetReturn);
+  let correlation = null;
+  let beta = null;
+  if (recentReturns.length >= 24) {
+    const xMean = mean(x);
+    const yMean = mean(y);
+    let covariance = 0;
+    let varianceX = 0;
+    let varianceY = 0;
+    for (let i = 0; i < x.length; i++) {
+      covariance += (x[i] - xMean) * (y[i] - yMean);
+      varianceX += (x[i] - xMean) ** 2;
+      varianceY += (y[i] - yMean) ** 2;
+    }
+    if (varianceX > 0 && varianceY > 0) correlation = covariance / Math.sqrt(varianceX * varianceY);
+    if (varianceX > 0) beta = covariance / varianceX;
+  }
+
+  const s24 = slope24 ?? 0;
+  const s72 = slope72 ?? 0;
+  const isFollower = correlation !== null && beta !== null && correlation >= 0.75 &&
+    beta >= 0.70 && beta <= 1.30 && Math.abs(s24) <= 0.15 && Math.abs(s72) <= 0.15;
+  let trend = 'MIXED';
+  let trendLabel = 'رفتار ترکیبی';
+  if (isFollower) {
+    trend = 'FOLLOWING_BTC';
+    trendLabel = 'تبعیت نزدیک از BTC';
+  } else if (s24 >= 0.20 && s72 >= 0.05) {
+    trend = 'INCREASING';
+    trendLabel = 'قدرت نسبی افزایشی';
+  } else if (s24 >= 0.20 && s72 < 0.05) {
+    trend = 'TURNING_UP';
+    trendLabel = 'چرخش تازه به سمت قدرت‌گیری';
+  } else if (s24 <= -0.20 && s72 <= -0.05) {
+    trend = 'DECREASING';
+    trendLabel = 'قدرت نسبی کاهشی';
+  } else if (s24 <= -0.20 && s72 > -0.05) {
+    trend = 'TURNING_DOWN';
+    trendLabel = 'شروع تضعیف قدرت نسبی';
+  }
+
+  let momentum = 'STABLE';
+  let momentumLabel = 'شتاب نسبتاً ثابت';
+  if (acceleration !== null && acceleration >= 0.20) {
+    momentum = 'ACCELERATING';
+    momentumLabel = 'شتاب قدرت‌گیری بیشتر';
+  } else if (acceleration !== null && acceleration <= -0.20) {
+    momentum = 'DECELERATING';
+    momentumLabel = 'شتاب قدرت‌گیری کمتر';
+  }
+
+  // Score emphasizes the recent ratio trend and its change. Conditional BTC-up
+  // and BTC-down behavior is included only when enough real samples exist.
+  const components = [
+    { value: 50 + 28 * Math.tanh(((slope24 ?? 0) * 0.65 + (slope72 ?? 0) * 0.35) / 1.8), weight: 0.50 },
+  ];
+  if (acceleration !== null) {
+    components.push({ value: 50 + 15 * Math.tanh(acceleration / 1.2), weight: 0.20 });
+  }
+  const conditionalParts = [];
+  if (downBehavior.samples >= 8) conditionalParts.push({ value: downBehavior.avgExcessPctPerHour, weight: 0.60 });
+  if (upBehavior.samples >= 8) conditionalParts.push({ value: upBehavior.avgExcessPctPerHour, weight: 0.40 });
+  if (conditionalParts.length) {
+    const total = conditionalParts.reduce((sum, x) => sum + x.weight, 0);
+    const conditionalExcess = conditionalParts.reduce((sum, x) => sum + x.value * x.weight, 0) / total;
+    components.push({ value: 50 + 20 * Math.tanh(conditionalExcess / 0.75), weight: 0.30 });
+  }
+  const totalWeight = components.reduce((sum, x) => sum + x.weight, 0);
+  const score = Math.round(clamp(components.reduce((sum, x) => sum + x.value * x.weight, 0) / totalWeight, 0, 100));
+
+  return {
+    available: true,
+    score,
+    trend,
+    trendLabel,
+    momentum,
+    momentumLabel,
+    excessPct,
+    ratioChangePct: { '7d': rs7d, '30d': rs30d, '90d': rs90d },
+    slopePctPer24h: { '24h': slope24, '72h': slope72, '7d': slope168, previous24h: prior24 },
+    accelerationPctPer24h: acceleration,
+    btcBehavior: { duringBtcRise: upBehavior, duringBtcFall: downBehavior },
+    correlation,
+    beta,
+    alignedCandles: aligned.length,
+    pairedHourlyReturns: pairedReturns.length,
+  };
 }
 
 function errorSummary(error) {
@@ -420,11 +598,117 @@ function selectRecent(candles, hours) {
   return candles.slice(-Math.min(hours, candles.length));
 }
 
+/**
+ * Detects an early base/coil in which the lower Bollinger Band stops falling
+ * and begins to curl upward while price is still consolidating. This is an
+ * additive Motor 2 discovery path; it does not alter Motor 1's original score
+ * or candidate rules. All inputs are fully closed 1H candles.
+ */
+function analyzeEarlyBaseBollingerTurn(candles) {
+  const unavailable = {
+    available: false, candidate: false, score: 50,
+    label: 'داده ناکافی', lowerBandTurningUp: false,
+    consolidation: false, baseStable: false, buyerEvidence: false,
+    lowerBandChangePct: null, bandWidthPct: null,
+  };
+  if (!Array.isArray(candles) || candles.length < 40) return unavailable;
+
+  const bands = [];
+  for (let i = 19; i < candles.length; i++) {
+    const closes = candles.slice(i - 19, i + 1).map((c) => c.close);
+    const mid = mean(closes);
+    const variance = mean(closes.map((value) => (value - mid) ** 2));
+    const deviation = Math.sqrt(Math.max(0, variance));
+    const upper = mid + 2 * deviation;
+    const lower = mid - 2 * deviation;
+    if (mid > 0 && lower > 0) {
+      bands.push({ index: i, mid, upper, lower, widthPct: ((upper - lower) / mid) * 100 });
+    }
+  }
+  if (bands.length < 12) return unavailable;
+
+  const latestBand = bands.at(-1);
+  const bandAt = (barsAgo) => bands.find((b) => b.index === candles.length - 1 - barsAgo);
+  const band6 = bandAt(6);
+  const band12 = bandAt(12);
+  const band18 = bandAt(18);
+  if (!band6 || !band12 || !band18) return unavailable;
+
+  const lowerBandChangePct = pct(latestBand.lower, band6.lower);
+  const priorLowerChangePct = pct(band6.lower, band12.lower);
+  const lowerBandTurningUp = lowerBandChangePct >= 0.12 &&
+    lowerBandChangePct > priorLowerChangePct + 0.05 &&
+    priorLowerChangePct <= 0.40;
+
+  const recent12 = candles.slice(-12);
+  const rangeHigh = Math.max(...recent12.map((c) => c.high));
+  const rangeLow = Math.min(...recent12.map((c) => c.low));
+  const averageClose = mean(recent12.map((c) => c.close));
+  const rangePct = averageClose > 0 ? ((rangeHigh - rangeLow) / averageClose) * 100 : 100;
+  const recentWidths = bands.slice(-6).map((b) => b.widthPct);
+  const priorWidths = bands.slice(-12, -6).map((b) => b.widthPct);
+  const widthContracting = priorWidths.length >= 4 && mean(recentWidths) <= mean(priorWidths) * 1.08;
+  const consolidation = rangePct <= 8.5 && latestBand.widthPct <= 13.5 &&
+    (widthContracting || latestBand.widthPct <= 6.5);
+
+  const last4Low = Math.min(...candles.slice(-4).map((c) => c.low));
+  const previous4Low = Math.min(...candles.slice(-8, -4).map((c) => c.low));
+  const baseStable = previous4Low > 0 && last4Low >= previous4Low * 0.995;
+
+  const recent5 = candles.slice(-5);
+  const previous5 = candles.slice(-10, -5);
+  const recentPressure = directionalPressure(recent5);
+  const previousPressure = directionalPressure(previous5);
+  const bullishRecentBars = recent5.filter((c) => c.close > c.open).length;
+  const averageClosePosition = mean(recent5.map((c) => candleFacts(c).closePosition));
+  const buyerEvidence = recentPressure > previousPressure + 0.025 ||
+    bullishRecentBars >= 3 || averageClosePosition >= 0.56;
+
+  // The pattern is intended before a clear range breakout, not after a large extension.
+  const extensionFromRangePct = pct(candles.at(-1).close, rangeHigh);
+  const preBreakout = extensionFromRangePct <= 1.5;
+
+  let score = 0;
+  score += lowerBandTurningUp ? 35 : clamp(18 + lowerBandChangePct * 18, 0, 30);
+  score += consolidation ? 20 : clamp(20 - Math.max(0, rangePct - 5) * 2.5, 0, 20);
+  score += baseStable ? 20 : 5;
+  score += buyerEvidence ? 15 : 4;
+  score += preBreakout ? 10 : 0;
+  score = Math.round(clamp(score, 0, 100));
+  if (!lowerBandTurningUp || !consolidation) score = Math.min(score, 59);
+  else if (!baseStable || !buyerEvidence || !preBreakout) score = Math.min(score, 67);
+
+  const candidate = lowerBandTurningUp && consolidation && baseStable &&
+    buyerEvidence && preBreakout && score >= 68;
+  let label = 'الگوی پایه صعودی دیده نشد';
+  if (candidate) label = 'چرخش باند پایینی در تراکم؛ آمادگی اولیه صعود';
+  else if (lowerBandTurningUp && consolidation) label = 'چرخش اولیه باند پایینی؛ نیازمند تأیید';
+  else if (consolidation) label = 'تراکم بدون چرخش معتبر باند پایینی';
+
+  return {
+    available: true,
+    candidate,
+    score,
+    label,
+    lowerBandTurningUp,
+    consolidation,
+    baseStable,
+    buyerEvidence,
+    lowerBandChangePct,
+    priorLowerChangePct,
+    bandWidthPct: latestBand.widthPct,
+    rangePct,
+    widthContracting,
+    preBreakout,
+  };
+}
+
 function analyzeTrend(symbol, candles, quoteVolume24h, pageCount, btcHourlyCandles = []) {
   if (!Array.isArray(candles) || candles.length < CONFIG.MIN_CANDLES) return null;
 
   const latest = candles.at(-1);
   const first = candles[0];
+  const earlyBasePattern = analyzeEarlyBaseBollingerTurn(candles);
   const allPivots = findPivots(candles);
   const fullSlope = linearRegressionSlope(candles.map((c) => c.close));
   const fullReturn = pct(latest.close, first.close);
@@ -533,6 +817,7 @@ function analyzeTrend(symbol, candles, quoteVolume24h, pageCount, btcHourlyCandl
   return {
     symbol,
     bullishCandidate,
+    isEarlyBasePatternCandidate: earlyBasePattern.candidate,
     bullishScore,
     futureBias,
     pastTrend,
@@ -563,6 +848,7 @@ function analyzeTrend(symbol, candles, quoteVolume24h, pageCount, btcHourlyCandl
       averageTurnover,
       quoteVolume24h,
       btcRelativeStrength: relativeStrengthWindows(candles, btcHourlyCandles),
+      earlyBasePattern,
     },
     scoreBreakdown: {
       structure: Math.round(structureScore),
@@ -626,46 +912,30 @@ function calculateUpsideRoom(currentPrice, timeframeCandles) {
   return { roomPct, score, nextResistance: nearest };
 }
 
-function calculateGrowthCapacity(currentPrice, dailyCandles, weeklyCandles) {
-  const highs = [...(dailyCandles || []), ...(weeklyCandles || [])]
-    .map((c) => c.high)
-    .filter((value) => Number.isFinite(value) && value > 0);
-  if (!highs.length || !(currentPrice > 0)) {
-    return { score: 50, historicalHighRoomPct: null, canReachDoubleBeforeObservedHigh: null };
+function calculateBtcRelativeScore(metrics) {
+  const rs = metrics.btcRelativeStrength || {};
+  if (!rs.available) {
+    return { score: 50, excessPct: null, available: false, trend: 'UNAVAILABLE', trendLabel: 'داده ناکافی', momentum: 'UNKNOWN', momentumLabel: 'نامشخص' };
   }
-  const historicalHigh = Math.max(...highs);
-  const historicalHighRoomPct = historicalHigh > currentPrice
-    ? pct(historicalHigh, currentPrice)
-    : 0;
-  let score;
-  if (historicalHighRoomPct >= 100) score = 95;
-  else if (historicalHighRoomPct >= 75) score = 88;
-  else if (historicalHighRoomPct >= 50) score = 78;
-  else if (historicalHighRoomPct >= 25) score = 65;
-  else if (historicalHighRoomPct >= 10) score = 50;
-  else score = 35;
   return {
-    score,
-    historicalHighRoomPct,
-    canReachDoubleBeforeObservedHigh: historicalHighRoomPct >= 100,
+    score: Number.isFinite(rs.score) ? rs.score : 50,
+    excessPct: Number.isFinite(rs.excessPct) ? rs.excessPct : null,
+    available: true,
+    trend: rs.trend,
+    trendLabel: rs.trendLabel,
+    momentum: rs.momentum,
+    momentumLabel: rs.momentumLabel,
+    slopePctPer24h: rs.slopePctPer24h,
+    accelerationPctPer24h: rs.accelerationPctPer24h,
+    btcBehavior: rs.btcBehavior,
+    correlation: rs.correlation,
+    beta: rs.beta,
+    alignedCandles: rs.alignedCandles,
   };
 }
 
-function calculateBtcRelativeScore(metrics) {
-  const rs = metrics.btcRelativeStrength || {};
-  const values = [
-    { value: rs['7d']?.excessPct, weight: 0.40 },
-    { value: rs['30d']?.excessPct, weight: 0.35 },
-    { value: rs['90d']?.excessPct, weight: 0.25 },
-  ].filter((x) => Number.isFinite(x.value));
-  if (!values.length) return { score: 50, excessPct: null, available: false };
-  const weightTotal = values.reduce((sum, x) => sum + x.weight, 0);
-  const excessPct = values.reduce((sum, x) => sum + x.value * x.weight, 0) / weightTotal;
-  const score = Math.round(clamp(50 + 50 * Math.tanh(excessPct / 25), 0, 100));
-  return { score, excessPct, available: true };
-}
-
 function opportunityType(item) {
+  if (item.metrics?.earlyBasePattern?.candidate) return 'EARLY_BOLLINGER_BASE_TURN';
   if (item.currentPhase === 'BULLISH_TRANSITION') return 'EARLY_BULLISH_TRANSITION';
   if (item.currentPhase === 'UPTREND_PAUSE_OR_PULLBACK') return 'UPTREND_RESUMPTION_WATCH';
   if (item.currentPhase === 'UPWARD_TREND_CONTINUATION') return 'ACTIVE_BULLISH_MOMENTUM';
@@ -695,16 +965,16 @@ async function rankWithMotorTwo(candidates) {
     const btcRelative = calculateBtcRelativeScore(item.metrics);
     const latestPrice = item._latestPrice;
     const upside = calculateUpsideRoom(latestPrice, [tfData['1d'], tfData['7d']]);
-    const growthCapacity = calculateGrowthCapacity(latestPrice, tfData['1d'], tfData['7d']);
+    const earlyBasePattern = item.metrics?.earlyBasePattern || { available: false, candidate: false, score: 50, label: 'داده ناکافی' };
     const w = CONFIG.MOTOR2.WEIGHTS;
     const rankScore = Math.round(clamp(
       item.bullishScore * w.h1 +
+      earlyBasePattern.score * w.earlyBasePattern +
       h4.score * w.h4 +
       d1.score * w.d1 +
       w1.score * w.w1 +
       btcRelative.score * w.btcRelative +
-      upside.score * w.upsideRoom +
-      growthCapacity.score * w.growthCapacity,
+      upside.score * w.upsideRoom,
       0, 100
     ));
 
@@ -716,7 +986,7 @@ async function rankWithMotorTwo(candidates) {
         timeframe: { h1: item.bullishScore, h4, d1, w1 },
         btcRelative,
         upsideRoom: upside,
-        growthCapacity,
+        earlyBasePattern,
         higherTimeframeErrors: errors,
       },
     };
@@ -725,7 +995,9 @@ async function rankWithMotorTwo(candidates) {
       return {
         ...item,
         motor2: {
-          rankScore: Math.round(item.bullishScore * 0.60 + 50 * 0.40),
+          rankScore: Math.round(item.bullishScore * CONFIG.MOTOR2.WEIGHTS.h1 +
+            (item.metrics?.earlyBasePattern?.score ?? 50) * CONFIG.MOTOR2.WEIGHTS.earlyBasePattern +
+            50 * (1 - CONFIG.MOTOR2.WEIGHTS.h1 - CONFIG.MOTOR2.WEIGHTS.earlyBasePattern)),
           opportunityType: opportunityType(item),
           timeframe: {
             h1: item.bullishScore,
@@ -733,9 +1005,9 @@ async function rankWithMotorTwo(candidates) {
             d1: { available: false, score: 50, trend: 'UNAVAILABLE', returnPct: null },
             w1: { available: false, score: 50, trend: 'UNAVAILABLE', returnPct: null },
           },
-          btcRelative: { score: 50, excessPct: null, available: false },
+          btcRelative: { score: 50, excessPct: null, available: false, trend: 'UNAVAILABLE', trendLabel: 'داده ناکافی', momentum: 'UNKNOWN', momentumLabel: 'نامشخص' },
           upsideRoom: { roomPct: null, score: 50, nextResistance: null },
-          growthCapacity: { score: 50, historicalHighRoomPct: null, canReachDoubleBeforeObservedHigh: null },
+          earlyBasePattern: item.metrics?.earlyBasePattern || { available: false, candidate: false, score: 50, label: 'داده ناکافی' },
           higherTimeframeErrors: [`motor2:${errorSummary(error)}`],
         },
       };
@@ -755,16 +1027,20 @@ async function rankWithMotorTwo(candidates) {
 function formatTelegramCandidate(item, index) {
   const name = item.symbol.replace(/_USDT$/, '');
   const typeLabels = {
+    EARLY_BOLLINGER_BASE_TURN: 'چرخش باند پایینی در تراکم',
     EARLY_BULLISH_TRANSITION: 'شروع/گذار صعودی',
     UPTREND_RESUMPTION_WATCH: 'آمادگی ادامه صعود',
     ACTIVE_BULLISH_MOMENTUM: 'شتاب صعودی فعال',
     EARLY_REVERSAL_WATCH: 'مراقبت از برگشت زودهنگام',
     OTHER_BULLISH_CANDIDATE: 'نامزد صعودی',
   };
-  const rs = item.motor2.btcRelative.excessPct;
+  const rs = item.motor2.btcRelative;
   const room = item.motor2.upsideRoom.roomPct;
-  const historicalRoom = item.motor2.growthCapacity.historicalHighRoomPct;
-  return `${index + 1} — ${name} | رتبه موتور۲: ${item.motor2.rankScore}/100 | 1H: ${item.bullishScore} | قدرت نسبت به BTC: ${rs === null ? 'نامشخص' : `${rs >= 0 ? '+' : ''}${rs.toFixed(1)}%`} | مقاومت نزدیک: ${room === null ? 'نامشخص' : `${room.toFixed(1)}%`} | فاصله تا سقف تاریخیِ بازه: ${historicalRoom === null ? 'نامشخص' : `${historicalRoom.toFixed(1)}%`} | ${typeLabels[item.motor2.opportunityType] || item.motor2.opportunityType}`;
+  const pattern = item.motor2.earlyBasePattern || { score: 50, label: 'نامشخص' };
+  const rsText = rs.available
+    ? `${rs.trendLabel}، ${rs.momentumLabel}، امتیاز ${rs.score}/100`
+    : 'داده ناکافی';
+  return `${index + 1} — ${name} | رتبه موتور۲: ${item.motor2.rankScore}/100 | 1H: ${item.bullishScore} | الگوی چرخش بولینگر: ${pattern.score}/100 (${pattern.label}) | قدرت نسبی BTC: ${rsText} | تغییر نسبت ۷روزه: ${rs.ratioChangePct?.['7d'] == null ? 'نامشخص' : `${rs.ratioChangePct['7d'] >= 0 ? '+' : ''}${rs.ratioChangePct['7d'].toFixed(1)}%`} | مقاومت نزدیک: ${room === null ? 'نامشخص' : `${room.toFixed(1)}%`} | ${typeLabels[item.motor2.opportunityType] || item.motor2.opportunityType}`;
 }
 
 async function sendTelegram(lines) {
@@ -810,7 +1086,7 @@ async function main() {
     .filter((m) => m.quoteVolume >= CONFIG.MIN_QUOTE_VOLUME_24H)
     .sort((a, b) => b.quoteVolume - a.quoteVolume);
 
-  console.log('Motor 2: enabled | all Motor 1 candidates retained | 1H primary ranking weight: 60%');
+  console.log('Motor 2: enabled | all Motor 1 candidates retained + additive early Bollinger-base radar | 1H-related ranking share: 65%');
   let btcHourlyCandles = [];
   try {
     btcHourlyCandles = await getRecentClosedCandles('BTC_USDT', '1h', 3600, CONFIG.MOTOR2.BTC_HOURLY_CANDLES);
@@ -848,9 +1124,14 @@ async function main() {
   }
 
   const analyzed = results.filter((r) => r && !r.error);
-  const candidates = analyzed
+  const motorOneCandidates = analyzed
     .filter((r) => r.bullishCandidate)
     .sort((a, b) => b.bullishScore - a.bullishScore || a.symbol.localeCompare(b.symbol));
+  const motorOneSymbols = new Set(motorOneCandidates.map((item) => item.symbol));
+  const earlyBaseCandidates = analyzed.filter((item) =>
+    item.isEarlyBasePatternCandidate && !motorOneSymbols.has(item.symbol)
+  );
+  const candidates = [...motorOneCandidates, ...earlyBaseCandidates];
   const motorTwoRanking = await rankWithMotorTwo(candidates);
   const selected = motorTwoRanking.slice(0, CONFIG.MAX_RESULTS);
   const telegramLines = selected.map(formatTelegramCandidate);
@@ -874,8 +1155,9 @@ async function main() {
   }
   console.log(`Historical candles processed: ${totalCandles}`);
   console.log(`Historical API pages processed: ${totalPages}`);
-  console.log(`Motor 1 bullish-potential candidates passed to Motor 2: ${candidates.length}`);
-  console.log(`Motor 2 candidates retained after ranking: ${motorTwoRanking.length}`);
+  console.log(`Motor 1 bullish-potential candidates passed to Motor 2: ${motorOneCandidates.length}`);
+  console.log(`Additional early Bollinger-base candidates: ${earlyBaseCandidates.length}`);
+  console.log(`Combined candidates retained by Motor 2: ${motorTwoRanking.length}`);
   console.log(`Motor 2 selected symbols for Telegram: ${selected.length}`);
   console.log('Current phase counts:', JSON.stringify(phaseCounts));
 
@@ -890,9 +1172,10 @@ async function main() {
         `4h=${mt.timeframe.h4.available ? mt.timeframe.h4.score : 'NA'} | ` +
         `1d=${mt.timeframe.d1.available ? mt.timeframe.d1.score : 'NA'} | ` +
         `1w=${mt.timeframe.w1.available ? mt.timeframe.w1.score : 'NA'} | ` +
+        `BTC_RS=${mt.btcRelative.trend || 'NA'}/${mt.btcRelative.momentum || 'NA'}:${mt.btcRelative.score} | ` +
         `BTCexcess=${mt.btcRelative.excessPct === null ? 'NA' : mt.btcRelative.excessPct.toFixed(2) + '%'} | ` +
         `resistanceRoom=${mt.upsideRoom.roomPct === null ? 'NA' : mt.upsideRoom.roomPct.toFixed(2) + '%'} | ` +
-        `historicalHighRoom=${mt.growthCapacity.historicalHighRoomPct === null ? 'NA' : mt.growthCapacity.historicalHighRoomPct.toFixed(2) + '%'} | ` +
+        `earlyBase=${mt.earlyBasePattern?.score ?? 50}/${mt.earlyBasePattern?.candidate ? 'YES' : 'NO'} | ` +
         `type=${mt.opportunityType} | phase=${item.currentPhase} | ` +
         `1hReturn=${m.currentReturnPct.toFixed(2)}% | ` +
         `higherTFErrors=${mt.higherTimeframeErrors.length}`
@@ -903,7 +1186,7 @@ async function main() {
   if (telegramLines.length) {
     await sendTelegram([
       'GATE.IO | HIGH-POTENTIAL MOTOR 2 RANKING',
-      'رتبه‌بندی مجدد همه نامزدهای موتور اول | اولویت 1H: ۶۰٪ | تکمیلی: 4H، 1D، 1W، قدرت نسبی BTC و ظرفیت تاریخی رشد',
+      'رتبه‌بندی نامزدهای موتور اول + الگوهای پایه زودهنگام | سهم تحلیل 1H و چرخش باند بولینگر: ۶۵٪ | قدرت نسبی BTC بر اساس روند نسبت قیمت، شتاب و رفتار در صعود/اصلاح BTC',
       'رتبه امتیاز تحلیلی است، نه درصد احتمال یا تضمین رشد ۱۰۰٪؛ هیچ نامزدی در موتور دوم حذف نشده است.',
       '━━━━━━━━━━━━━━━━━━',
       ...telegramLines,
