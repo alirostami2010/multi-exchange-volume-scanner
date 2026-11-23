@@ -4,10 +4,9 @@
  * ONE ENGINE ONLY. No Motor 2.
  * - Downloads the available closed 1h history for each eligible contract by paging
  *   backwards until Gate.io has no older candles to return.
- * - Uses the complete available history to describe the long-term/past structure.
- * - Uses adaptive recent context to describe the current market regime.
- * - Evaluates observable evidence that the next directional phase may be bullish.
- * - Volume is diagnostic only; BTC relative strength is not used as a gate or score.
+ * - Reads recent significant trend phases, not a fixed candle-count lookback.
+ * - Finds mature rests/ranges after a prior trend and early, structured bullish readiness.
+ * - Uses candle price structure only: no volume data and no BTC comparison.
  * - Fully closed hourly candles only. No entry, trade signal, or price target.
  * Node.js 20+
  */
@@ -24,7 +23,6 @@ const CONFIG = {
   // hourly points. Use a small safety margin to avoid boundary rejections.
   MAX_RECENT_CANDLES: 9900,
   MIN_CANDLES: 48,
-  MIN_QUOTE_VOLUME_24H: 100000,
   ALLOWED_CRYPTO_CONTRACT_TYPES: new Set(['crypto', 'cryptocurrency']),
   // Conservative request pacing prevents transient Gate.io throttling.
   CONCURRENCY: 3,
@@ -35,13 +33,15 @@ const CONFIG = {
   MAX_RETRY_DELAY_MS: 60000,
   MAX_RESULTS: 10,
   PAGE_PAUSE_MS: 180,
-  // These are analysis horizons, NOT history download limits.
-  CURRENT_CONTEXT_HOURS: 72,
-  SHORT_CONTEXT_HOURS: 24,
-  PRESSURE_CONTEXT_HOURS: 12,
+  // Swing detection is structural. A mature rest must last at least 18 closed hours
+  // and contain several meaningful price turns; this rejects 1-2 hour pauses.
   PIVOT_LEFT: 2,
   PIVOT_RIGHT: 2,
-  MIN_BULLISH_SCORE: 58,
+  MIN_BASE_HOURS: 18,
+  MIN_BASE_TURNS: 3,
+  MIN_BULLISH_SCORE: 62,
+  MAX_BASE_RANGE_PCT: 9,
+  MAX_POST_BASE_ADVANCE_PCT: 18,
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -114,9 +114,6 @@ async function getContracts() {
   return fetchJSON(`${CONFIG.API_BASE}/futures/usdt/contracts`);
 }
 
-async function getTickers() {
-  return fetchJSON(`${CONFIG.API_BASE}/futures/usdt/tickers`);
-}
 
 function isSupportedCryptoContract(contract) {
   const name = String(contract?.name ?? '').trim().toUpperCase();
@@ -137,8 +134,6 @@ function normalizeCandle(item) {
     high: num(item.h),
     low: num(item.l),
     close: num(item.c),
-    volume: num(item.v),
-    turnover: num(item.sum),
   };
 }
 
@@ -199,6 +194,13 @@ async function getClosedHourlyCandles(contract) {
     // Continue even after a short page: sparse markets can have gaps while
     // still containing older candles in the preceding time window.
     if (pageEnd < oldestAllowed) break;
+    // Stop once the recent history already contains enough meaningful swing
+    // phases to contextualize the current mature base. Do not analyze remote history.
+    const accumulated = [...byTime.values()].sort((a, b) => a.time - b.time);
+    const meaningfulPhases = getSignificantRecentPhases(accumulated);
+    const matureBase = findMatureBase(accumulated);
+    if (meaningfulPhases.length >= 6 && (matureBase?.priorPhase || meaningfulPhases.length >= 8)) break;
+
     await sleep(CONFIG.PAGE_PAUSE_MS);
   }
 
@@ -346,164 +348,248 @@ function describeTrend(code) {
   })[code] || 'ساختار نامشخص';
 }
 
-function selectRecent(candles, hours) {
-  return candles.slice(-Math.min(hours, candles.length));
+function median(values) {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
-function analyzeTrend(symbol, candles, quoteVolume24h, pageCount) {
-  if (!Array.isArray(candles) || candles.length < CONFIG.MIN_CANDLES) return null;
+function rangePct(candles) {
+  if (!candles.length) return 0;
+  const high = Math.max(...candles.map((c) => c.high));
+  const low = Math.min(...candles.map((c) => c.low));
+  const reference = mean(candles.map((c) => c.close));
+  return reference > 0 ? ((high - low) / reference) * 100 : 0;
+}
 
+function summarizeCandleBehavior(candles) {
+  if (!candles.length) return null;
+  const facts = candles.map(candleFacts);
+  const closes = candles.map((c) => c.close);
+  const pivots = findPivots(candles);
+  const structure = structuralDirection(pivots);
+  const slope = linearRegressionSlope(closes);
+  const bullish = facts.filter((f) => f.bullish).length;
+  const bearish = facts.filter((f) => f.bearish).length;
+  const closePosition = mean(facts.map((f) => f.closePosition));
+  const lowerWick = mean(facts.map((f) => f.lowerWick));
+  const upperWick = mean(facts.map((f) => f.upperWick));
+  const low = Math.min(...candles.map((c) => c.low));
+  const high = Math.max(...candles.map((c) => c.high));
+  return {
+    slope, structure, pivots, bullish, bearish, closePosition,
+    lowerWick, upperWick, low, high,
+    returnPct: pct(candles.at(-1).close, candles[0].open),
+    rangePct: rangePct(candles),
+    closeFromLowPct: pct(candles.at(-1).close, low),
+    rangePosition: clamp(safeDiv(candles.at(-1).close - low, high - low, 0.5), 0, 1),
+  };
+}
+
+function getSignificantRecentPhases(candles) {
+  const pivots = findPivots(candles);
+  const events = [
+    ...pivots.highs.map((p) => ({ ...p, type: 'H' })),
+    ...pivots.lows.map((p) => ({ ...p, type: 'L' })),
+  ].sort((a, b) => a.index - b.index);
+
+  // Collapse adjacent same-side pivots, retaining the more extreme point.
+  const swings = [];
+  for (const point of events) {
+    const last = swings.at(-1);
+    if (!last || last.type !== point.type) swings.push(point);
+    else if ((point.type === 'H' && point.price > last.price) ||
+             (point.type === 'L' && point.price < last.price)) swings[swings.length - 1] = point;
+  }
+
+  const phases = [];
+  for (let i = 1; i < swings.length; i++) {
+    const a = swings[i - 1];
+    const b = swings[i];
+    const movePct = pct(b.price, a.price);
+    const duration = b.index - a.index;
+    if (duration < 3 || Math.abs(movePct) < 1.2) continue;
+    phases.push({
+      direction: movePct > 0 ? 'UP' : 'DOWN',
+      startIndex: a.index,
+      endIndex: b.index,
+      duration,
+      movePct,
+      from: a.price,
+      to: b.price,
+    });
+  }
+  return phases.slice(-8);
+}
+
+function findMatureBase(candles) {
+  const n = candles.length;
+  if (n < CONFIG.MIN_BASE_HOURS + 8) return null;
+  const recentPhases = getSignificantRecentPhases(candles);
+  const recentPhase = recentPhases.at(-1) || null;
+  const candleRanges = candles.slice(-Math.min(n, 240)).map(candleRangePct).filter((v) => v > 0);
+  const typicalHourlyRange = median(candleRanges) || 0.35;
+  const adaptiveRangeLimit = Math.min(
+    CONFIG.MAX_BASE_RANGE_PCT,
+    Math.max(3.2, typicalHourlyRange * 14),
+  );
+
+  // Search backward from the latest closed candle. The base boundary is where
+  // price first expands beyond the adaptive range envelope, not a fixed lookback.
+  let best = null;
+  for (let start = n - CONFIG.MIN_BASE_HOURS; start >= 0; start--) {
+    const segment = candles.slice(start);
+    if (segment.length < CONFIG.MIN_BASE_HOURS) continue;
+    const stats = summarizeCandleBehavior(segment);
+    if (!stats || stats.rangePct > adaptiveRangeLimit) continue;
+    if (Math.abs(stats.slope) > Math.max(0.035, typicalHourlyRange * 0.10)) continue;
+
+    const turns = stats.pivots.highs.length + stats.pivots.lows.length;
+    if (turns < CONFIG.MIN_BASE_TURNS) continue;
+    const highTouches = stats.pivots.highs.filter((p) => p.price >= stats.high * 0.985).length;
+    const lowTouches = stats.pivots.lows.filter((p) => p.price <= stats.low * 1.015).length;
+    if (highTouches < 1 || lowTouches < 1) continue;
+
+    // Reject a base that is merely the first pause in an active decline.
+    const latter = segment.slice(Math.floor(segment.length * 0.55));
+    const latterStats = summarizeCandleBehavior(latter);
+    if (!latterStats || latterStats.slope < -0.025) continue;
+
+    best = { startIndex: start, endIndex: n - 1, candles: segment, stats, turns, highTouches, lowTouches, recentPhases };
+    break; // nearest valid mature base is the relevant current structure
+  }
+  if (!best) return null;
+
+  // A mature base needs actual time and repeated reactions, not just a short pause.
+  best.durationHours = best.candles.length;
+  best.rangeLimitPct = adaptiveRangeLimit;
+  best.priorPhase = [...recentPhases].reverse().find((phase) => phase.endIndex <= best.startIndex && phase.duration >= 6) || null;
+  return best;
+}
+
+function assessBullishReadiness(candles, base) {
+  const baseCandles = base.candles;
   const latest = candles.at(-1);
-  const first = candles[0];
-  const allPivots = findPivots(candles);
-  const fullSlope = linearRegressionSlope(candles.map((c) => c.close));
-  const fullReturn = pct(latest.close, first.close);
-  const pastStructure = structuralDirection(allPivots);
-  const pastTrend = classifyTrend(fullSlope, pastStructure, fullReturn);
+  const tailLength = Math.max(6, Math.ceil(baseCandles.length * 0.28));
+  const tail = baseCandles.slice(-tailLength);
+  const tailStats = summarizeCandleBehavior(tail);
+  const baseStats = base.stats;
+  const lows = baseStats.pivots.lows.slice(-5);
+  const highs = baseStats.pivots.highs.slice(-5);
+  const higherLowSteps = lows.length >= 2
+    ? lows.slice(1).filter((p, i) => p.price > lows[i].price).length : 0;
+  const lowerLowSteps = lows.length >= 2
+    ? lows.slice(1).filter((p, i) => p.price < lows[i].price).length : 0;
+  const higherHighSteps = highs.length >= 2
+    ? highs.slice(1).filter((p, i) => p.price > highs[i].price).length : 0;
+  const lowerHighSteps = highs.length >= 2
+    ? highs.slice(1).filter((p, i) => p.price < highs[i].price).length : 0;
+  const baseLow = Math.min(...baseCandles.map((c) => c.low));
+  const baseHigh = Math.max(...baseCandles.map((c) => c.high));
+  const advanceFromBaseLow = pct(latest.close, baseLow);
+  const advanceFromBaseStart = pct(latest.close, baseCandles[0].open);
+  const rangePosition = clamp(safeDiv(latest.close - baseLow, baseHigh - baseLow, 0.5), 0, 1);
+  const lastFacts = baseCandles.slice(-Math.min(12, baseCandles.length)).map(candleFacts);
+  const lastClosePosition = mean(lastFacts.map((f) => f.closePosition));
+  const lastBullish = lastFacts.filter((f) => f.bullish).length;
+  const lastBearish = lastFacts.filter((f) => f.bearish).length;
+  const lowerWick = mean(lastFacts.map((f) => f.lowerWick));
+  const upperWick = mean(lastFacts.map((f) => f.upperWick));
 
-  const current = selectRecent(candles, CONFIG.CURRENT_CONTEXT_HOURS);
-  const short = selectRecent(candles, CONFIG.SHORT_CONTEXT_HOURS);
-  const pressureNow = selectRecent(candles, CONFIG.PRESSURE_CONTEXT_HOURS);
-  const pressureBefore = candles.slice(
-    Math.max(0, candles.length - CONFIG.PRESSURE_CONTEXT_HOURS * 2),
-    Math.max(0, candles.length - CONFIG.PRESSURE_CONTEXT_HOURS)
+  const buyersImproving =
+    (higherLowSteps >= 1 && tailStats.slope > 0.015) ||
+    (lastClosePosition >= 0.60 && lastBullish > lastBearish) ||
+    (lowerWick > upperWick + 0.07 && rangePosition > 0.48);
+  const structureTurning = higherLowSteps >= 1 || higherHighSteps >= 1 ||
+    (tailStats.slope > 0.025 && tailStats.returnPct > 0.35);
+  const stillEarly = advanceFromBaseLow <= CONFIG.MAX_POST_BASE_ADVANCE_PCT &&
+    advanceFromBaseStart <= CONFIG.MAX_POST_BASE_ADVANCE_PCT && rangePosition < 0.94;
+  const notFreshDowntrendBounce = base.durationHours >= CONFIG.MIN_BASE_HOURS &&
+    lowerLowSteps <= 1 && Math.abs(baseStats.slope) <= 0.055;
+
+  // Pattern classification is descriptive; all candidates must pass mature-base
+  // and buyer-readiness gates, so an unconfirmed first bounce is not selected.
+  let pattern = 'MATURE_RANGE_PREPARING';
+  const prior = base.priorPhase;
+  if (prior?.direction === 'UP') pattern = 'UPTREND_REST_OR_CORRECTION';
+  else if (prior?.direction === 'DOWN') pattern = 'DOWNTREND_BASED_RECOVERY';
+  if (higherLowSteps >= 2 && tailStats.slope > 0.02) pattern = 'ASCENDING_RANGE';
+  if (tailStats.slope > 0.035 && tailStats.returnPct > 0.8 && advanceFromBaseLow < 12) pattern = 'GRADUAL_EARLY_RISE';
+  if (lowerWick > upperWick + 0.12 && higherLowSteps >= 1) pattern = 'ROUNDED_BULLISH_RECOVERY';
+
+  const baseQuality = clamp(
+    25 + Math.min(base.durationHours / 3, 20) + base.turns * 2 +
+    higherLowSteps * 7 - lowerLowSteps * 8 - baseStats.rangePct * 1.2,
+    0, 45,
   );
-  const currentPivots = findPivots(current);
-  const currentStructure = structuralDirection(currentPivots);
-  const currentSlope = linearRegressionSlope(current.map((c) => c.close));
-  const shortSlope = linearRegressionSlope(short.map((c) => c.close));
-  const currentReturn = pct(current.at(-1).close, current[0].open);
-  const shortReturn = pct(short.at(-1).close, short[0].open);
-  const currentTrend = classifyTrend(currentSlope, currentStructure, currentReturn);
-
-  const currentFacts = current.map(candleFacts);
-  const pressureRecent = directionalPressure(pressureNow);
-  const pressurePrevious = pressureBefore.length >= 4 ? directionalPressure(pressureBefore) : pressureRecent;
-  const pressureChange = pressureRecent - pressurePrevious;
-  const averageClosePosition = mean(currentFacts.map((f) => f.closePosition));
-  const bullishBars = currentFacts.filter((f) => f.bullish).length;
-  const bearishBars = currentFacts.filter((f) => f.bearish).length;
-  const lowerWickAverage = mean(currentFacts.map((f) => f.lowerWick));
-  const upperWickAverage = mean(currentFacts.map((f) => f.upperWick));
-
-  const currentLow = Math.min(...current.map((c) => c.low));
-  const currentHigh = Math.max(...current.map((c) => c.high));
-  const shortLow = Math.min(...short.map((c) => c.low));
-  const shortHigh = Math.max(...short.map((c) => c.high));
-  const closeFromCurrentLow = pct(latest.close, currentLow);
-  const closeFromShortLow = pct(latest.close, shortLow);
-  const locationInCurrentRange = safeDiv(latest.close - currentLow, currentHigh - currentLow, 0.5);
-
-  // A recency-weighted pressure trend: every candle participates, while newer
-  // observations naturally have greater influence. This is not a hard lookback.
-  let weightedPressure = 0;
-  let totalWeight = 0;
-  for (let i = 0; i < candles.length; i++) {
-    const age = candles.length - 1 - i;
-    const weight = Math.exp(-age / 36);
-    weightedPressure += directionalPressure([candles[i]]) * weight;
-    totalWeight += weight;
-  }
-  weightedPressure = safeDiv(weightedPressure, totalWeight, 0);
-
-  // Score evidence, not certainty. No previous-growth penalty, breakout rule,
-  // volume spike requirement, or BTC-relative-strength condition is applied.
-  const structureScore = clamp(
-    (currentStructure.lowUp * 8) + (currentStructure.highUp * 5) -
-    (currentStructure.lowDown * 7) - (currentStructure.highDown * 4) + 12,
-    0, 30
+  const buyerScore = clamp(
+    15 + higherLowSteps * 9 + higherHighSteps * 5 +
+    (lastClosePosition - 0.5) * 25 +
+    ((lastBullish - lastBearish) / Math.max(lastFacts.length, 1)) * 15 +
+    (lowerWick - upperWick) * 12 + tailStats.slope * 100,
+    0, 35,
   );
-  const slopeScore = clamp(10 + (currentSlope * 100) + (shortSlope * 65), 0, 20);
-  const pressureScore = clamp(10 + (pressureChange * 30) + (weightedPressure * 7), 0, 20);
-  const candleQualityScore = clamp(
-    (averageClosePosition - 0.35) * 25 +
-    ((bullishBars - bearishBars) / Math.max(current.length, 1)) * 12 +
-    (lowerWickAverage - upperWickAverage) * 5 + 8,
-    0, 15
+  const timingScore = clamp(
+    20 + (stillEarly ? 10 : -15) + (rangePosition > 0.55 && rangePosition < 0.88 ? 8 : 0) -
+    Math.max(0, advanceFromBaseLow - 10) * 1.5,
+    0, 30,
   );
-  const recoveryScore = clamp(
-    (closeFromCurrentLow * 1.1) + (closeFromShortLow * 0.6) +
-    (locationInCurrentRange * 8) - 4,
-    0, 15
-  );
-  const bullishScore = Math.round(clamp(
-    structureScore + slopeScore + pressureScore + candleQualityScore + recoveryScore,
-    0, 100
-  ));
+  const score = Math.round(baseQuality + buyerScore + timingScore);
+  const qualifies = buyersImproving && structureTurning && stillEarly &&
+    notFreshDowntrendBounce && score >= CONFIG.MIN_BULLISH_SCORE;
 
-  const hasBullishStructure = currentStructure.lowUp >= 1 || currentStructure.highUp >= 2;
-  const hasBuyerEvidence = pressureChange > 0.025 ||
-    (averageClosePosition >= 0.57 && bullishBars > bearishBars) ||
-    (lowerWickAverage > upperWickAverage + 0.08 && closeFromCurrentLow > 1.0);
-  const hasPriceProgress = currentSlope > 0.005 || shortSlope > 0.01 ||
-    (closeFromCurrentLow > 2.0 && locationInCurrentRange > 0.62);
-  const bullishCandidate = bullishScore >= CONFIG.MIN_BULLISH_SCORE &&
-    hasBuyerEvidence && hasPriceProgress;
+  return {
+    qualifies, score, pattern,
+    metrics: {
+      baseHours: base.durationHours,
+      baseRangePct: baseStats.rangePct,
+      baseRangeLimitPct: base.rangeLimitPct,
+      baseTurns: base.turns,
+      higherLowSteps, lowerLowSteps, higherHighSteps, lowerHighSteps,
+      advanceFromBaseLowPct: advanceFromBaseLow,
+      advanceFromBaseStartPct: advanceFromBaseStart,
+      rangePosition,
+      baseSlope: baseStats.slope,
+      recentSlope: tailStats.slope,
+      priorTrend: prior?.direction || 'UNCONFIRMED',
+      priorTrendMovePct: prior?.movePct ?? 0,
+      buyersImproving,
+      structureTurning,
+      stillEarly,
+    },
+  };
+}
 
-  let currentPhase;
-  if (currentTrend === 'UPTREND' || currentTrend === 'RISING') {
-    currentPhase = currentStructure.lowUp >= 1 && shortReturn < currentReturn
-      ? 'UPTREND_PAUSE_OR_PULLBACK'
-      : 'UPWARD_TREND_CONTINUATION';
-  } else if (currentTrend === 'DOWNTREND' || currentTrend === 'FALLING') {
-    currentPhase = hasBuyerEvidence ? 'POSSIBLE_DOWNTREND_EXHAUSTION' : 'ACTIVE_DOWNTREND';
-  } else if (hasBuyerEvidence && hasPriceProgress) {
-    currentPhase = 'BULLISH_TRANSITION';
-  } else if (Math.abs(currentSlope) <= 0.025) {
-    currentPhase = 'SIDEWAYS_OR_CONSOLIDATING';
-  } else {
-    currentPhase = 'MIXED_TRANSITION';
-  }
-
-  let futureBias = 'NEUTRAL_OR_UNCLEAR';
-  if (bullishCandidate) futureBias = 'BULLISH_POTENTIAL';
-  else if (bullishScore <= 38 && currentTrend.includes('DOWN')) futureBias = 'BEARISH_RISK';
-
-  const averageTurnover = mean(current.map((c) => c.turnover > 0 ? c.turnover : c.volume));
+function analyzeTrend(symbol, candles, pageCount) {
+  if (!Array.isArray(candles) || candles.length < CONFIG.MIN_BASE_HOURS + 10) return null;
+  const base = findMatureBase(candles);
+  if (!base) return {
+    symbol, bullishCandidate: false, bullishScore: 0,
+    currentPhase: 'NO_MATURE_BASE', pattern: 'NONE',
+    metrics: { candlesAvailable: candles.length, historyPages: pageCount },
+  };
+  const assessment = assessBullishReadiness(candles, base);
+  const priorTrend = assessment.metrics.priorTrend;
+  const phaseLabels = {
+    UPTREND_REST_OR_CORRECTION: 'استراحت یا اصلاح پس از روند صعودی',
+    DOWNTREND_BASED_RECOVERY: 'پایان روند نزولی و تشکیل پایه',
+    MATURE_RANGE_PREPARING: 'رنج معتبر و آماده‌سازی صعود',
+    ASCENDING_RANGE: 'رنج صعودی با کف‌های بالاتر',
+    GRADUAL_EARLY_RISE: 'شروع صعود آرام و تدریجی',
+    ROUNDED_BULLISH_RECOVERY: 'برگشت قوسی و تدریجی',
+  };
   return {
     symbol,
-    bullishCandidate,
-    bullishScore,
-    futureBias,
-    pastTrend,
-    pastTrendLabel: describeTrend(pastTrend),
-    currentTrend,
-    currentTrendLabel: describeTrend(currentTrend),
-    currentPhase,
+    bullishCandidate: assessment.qualifies,
+    bullishScore: assessment.score,
+    currentPhase: assessment.pattern,
+    currentPhaseLabel: phaseLabels[assessment.pattern] || assessment.pattern,
+    priorTrend,
     metrics: {
       candlesAvailable: candles.length,
       historyPages: pageCount,
-      historyReturnPct: fullReturn,
-      currentReturnPct: currentReturn,
-      shortReturnPct: shortReturn,
-      fullSlope: fullSlope,
-      currentSlope,
-      shortSlope,
-      pressureChange,
-      weightedPressure,
-      averageClosePosition,
-      bullishBars,
-      bearishBars,
-      higherLowSteps: currentStructure.lowUp,
-      higherHighSteps: currentStructure.highUp,
-      lowerLowSteps: currentStructure.lowDown,
-      lowerHighSteps: currentStructure.highDown,
-      closeFromCurrentLowPct: closeFromCurrentLow,
-      locationInCurrentRange,
-      averageTurnover,
-      quoteVolume24h,
-    },
-    scoreBreakdown: {
-      structure: Math.round(structureScore),
-      trendSlope: Math.round(slopeScore),
-      buyerPressure: Math.round(pressureScore),
-      candleQuality: Math.round(candleQualityScore),
-      recovery: Math.round(recoveryScore),
-    },
-    evidence: {
-      hasBullishStructure,
-      hasBuyerEvidence,
-      hasPriceProgress,
+      ...assessment.metrics,
     },
   };
 }
@@ -530,40 +616,28 @@ async function sendTelegram(lines) {
 
 function formatTelegramCandidate(item, index) {
   const name = item.symbol.replace(/_USDT$/, '');
-  const phaseLabels = {
-    UPTREND_PAUSE_OR_PULLBACK: 'استراحت/اصلاح در روند صعودی',
-    UPWARD_TREND_CONTINUATION: 'ادامه روند رو به بالا',
-    POSSIBLE_DOWNTREND_EXHAUSTION: 'احتمال تضعیف روند نزولی',
-    BULLISH_TRANSITION: 'تغییر رفتار به نفع خریداران',
-    SIDEWAYS_OR_CONSOLIDATING: 'رنج/تراکم',
-    MIXED_TRANSITION: 'گذار نامشخص',
-    ACTIVE_DOWNTREND: 'روند نزولی فعال',
-  };
-  return `${index + 1} — ${name} | امتیاز شواهد صعودی: ${item.bullishScore}/100 | ${phaseLabels[item.currentPhase] || item.currentPhase}`;
+  const m = item.metrics;
+  return [
+    `${index + 1} — ${name} | امتیاز ساختاری: ${item.bullishScore}/100`,
+    `الگو: ${item.currentPhaseLabel}`,
+    `روند قبلی: ${m.priorTrend === 'UP' ? 'صعودی' : m.priorTrend === 'DOWN' ? 'نزولی' : 'نامشخص'}`,
+    `استراحت: ${m.baseHours} ساعت | دامنه رنج: ${m.baseRangePct.toFixed(2)}% | کف بالاتر: ${m.higherLowSteps}`,
+    `پیشروی از کف پایه: ${m.advanceFromBaseLowPct.toFixed(2)}%`,
+  ].join('\n');
 }
 
 async function main() {
-  console.log('\nGATE.IO HOURLY TREND SCANNER');
-  console.log(`Mode: one engine | latest ${CONFIG.MAX_RECENT_CANDLES} Gate.io-accessible closed 1h candles per market | paginated API retrieval | past + current trend + bullish-potential assessment | max 10`);
+  console.log('\nGATE.IO | ONE-HOUR PRICE-STRUCTURE ENGINE 1');
+  console.log('Closed 1h candles only | price structure only | no volume | no BTC comparison');
 
-  const [contracts, tickers] = await Promise.all([getContracts(), getTickers()]);
-  if (!Array.isArray(contracts) || !Array.isArray(tickers)) {
-    throw new Error('داده قراردادها یا تیکرهای Gate.io معتبر نیست.');
-  }
+  const contracts = await getContracts();
+  if (!Array.isArray(contracts)) throw new Error('داده قراردادهای Gate.io معتبر نیست.');
 
-  const tickerMap = new Map(tickers.map((ticker) => [ticker.contract, ticker]));
   const namedContracts = contracts.filter((c) => c?.name);
   const cryptoContracts = namedContracts.filter(isSupportedCryptoContract);
-  const rejectedNonCryptoOrInactive = namedContracts.length - cryptoContracts.length;
-  const rejectedMissingTicker = cryptoContracts.filter((c) => !tickerMap.has(c.name)).length;
   const markets = cryptoContracts
-    .filter((c) => c.name !== 'BTC_USDT' && tickerMap.has(c.name))
-    .map((c) => ({
-      symbol: c.name,
-      quoteVolume: num(tickerMap.get(c.name).volume_24h_quote),
-    }))
-    .filter((m) => m.quoteVolume >= CONFIG.MIN_QUOTE_VOLUME_24H)
-    .sort((a, b) => b.quoteVolume - a.quoteVolume);
+    .map((c) => c.name)
+    .sort();
 
   let checked = 0;
   let failed = 0;
@@ -571,89 +645,68 @@ async function main() {
   let totalCandles = 0;
   let totalPages = 0;
 
-  const results = await mapLimit(markets, CONFIG.CONCURRENCY, async (market) => {
-    const history = await getClosedHourlyCandlesWithRetry(market.symbol);
-    if (history.candles.length < CONFIG.MIN_CANDLES) {
+  const results = await mapLimit(markets, CONFIG.CONCURRENCY, async (symbol) => {
+    const history = await getClosedHourlyCandlesWithRetry(symbol);
+    if (history.candles.length < CONFIG.MIN_BASE_HOURS + 10) {
       insufficient++;
       return null;
     }
     checked++;
     totalCandles += history.candles.length;
     totalPages += history.pages;
-    return analyzeTrend(market.symbol, history.candles, market.quoteVolume, history.pages);
+    return analyzeTrend(symbol, history.candles, history.pages);
   });
 
   const failedMarkets = [];
   for (let i = 0; i < results.length; i++) {
-    const result = results[i];
-    if (result?.error) {
+    if (results[i]?.error) {
       failed++;
-      failedMarkets.push({ symbol: markets[i].symbol, reason: errorSummary(result.error) });
+      failedMarkets.push({ symbol: markets[i], reason: errorSummary(results[i].error) });
     }
   }
 
   const analyzed = results.filter((r) => r && !r.error);
   const candidates = analyzed
     .filter((r) => r.bullishCandidate)
-    .sort((a, b) =>
-      b.bullishScore - a.bullishScore ||
-      b.metrics.pressureChange - a.metrics.pressureChange ||
+    .sort((a, b) => b.bullishScore - a.bullishScore ||
       b.metrics.higherLowSteps - a.metrics.higherLowSteps ||
-      a.symbol.localeCompare(b.symbol)
-    );
+      b.metrics.baseHours - a.metrics.baseHours || a.symbol.localeCompare(b.symbol));
   const selected = candidates.slice(0, CONFIG.MAX_RESULTS);
   const telegramLines = selected.map(formatTelegramCandidate);
 
-  const phaseCounts = analyzed.reduce((acc, item) => {
-    acc[item.currentPhase] = (acc[item.currentPhase] || 0) + 1;
-    return acc;
-  }, {});
-
   console.log(`Gate.io contracts: ${contracts.length}`);
-  console.log(`Active crypto contracts: ${cryptoContracts.length}`);
-  console.log(`Rejected non-crypto/inactive/unknown: ${rejectedNonCryptoOrInactive}`);
-  console.log(`Crypto contracts missing ticker: ${rejectedMissingTicker}`);
-  console.log(`Markets eligible by minimum 24h liquidity: ${markets.length}`);
-  console.log(`Markets analyzed with available closed ${CONFIG.TIMEFRAME} history inside Gate.io recent-history window: ${checked}`);
-  console.log(`Markets with insufficient history: ${insufficient}`);
-  console.log(`Markets with data errors after retries: ${failed}`);
+  console.log(`Active crypto perpetuals: ${cryptoContracts.length}`);
+  console.log(`Markets scanned (without volume/liquidity filtering): ${markets.length}`);
+  console.log(`Markets analyzed: ${checked} | insufficient history: ${insufficient} | data errors: ${failed}`);
   if (failedMarkets.length) {
     console.log('Failed market details:');
     for (const item of failedMarkets) console.log(`DATA_ERROR ${item.symbol} | ${item.reason}`);
   }
-  console.log(`Historical candles processed: ${totalCandles}`);
-  console.log(`Historical API pages processed: ${totalPages}`);
-  console.log(`Bullish-potential candidates: ${candidates.length}`);
-  console.log(`Selected symbols: ${selected.length}`);
-  console.log('Current phase counts:', JSON.stringify(phaseCounts));
+  console.log(`Closed 1h candles processed: ${totalCandles} | API pages: ${totalPages}`);
+  console.log(`Mature-base bullish candidates: ${candidates.length} | selected: ${selected.length}`);
 
-  if (candidates.length) {
-    console.log('Bullish-potential ranking:');
-    for (const item of candidates) {
-      const m = item.metrics;
-      console.log(
-        `${item.symbol} | score=${item.bullishScore} | past=${item.pastTrend} | ` +
-        `current=${item.currentTrend} | phase=${item.currentPhase} | ` +
-        `history=${m.candlesAvailable} candles | ` +
-        `return=${m.currentReturnPct.toFixed(2)}% | ` +
-        `pressureChange=${m.pressureChange.toFixed(3)} | ` +
-        `higherLows=${m.higherLowSteps} | ` +
-        `evidence=${JSON.stringify(item.scoreBreakdown)}`
-      );
-    }
+  const patternCounts = analyzed.reduce((acc, item) => {
+    acc[item.currentPhase] = (acc[item.currentPhase] || 0) + 1;
+    return acc;
+  }, {});
+  console.log('Pattern counts:', JSON.stringify(patternCounts));
+  for (const item of candidates) {
+    const m = item.metrics;
+    console.log(`${item.symbol} | score=${item.bullishScore} | pattern=${item.currentPhase} | prior=${m.priorTrend} | base=${m.baseHours}h | range=${m.baseRangePct.toFixed(2)}% | rise=${m.advanceFromBaseLowPct.toFixed(2)}% | higherLows=${m.higherLowSteps}`);
   }
 
   if (telegramLines.length) {
     await sendTelegram([
-      'GATE.IO | HOURLY BULLISH-POTENTIAL RADAR',
-      `تحلیل آخرین تاریخچه قابل‌دسترسی کندل‌های بسته‌شده یک‌ساعته (حداکثر ${CONFIG.MAX_RECENT_CANDLES} کندل)`,
-      'این فهرست ارزیابی احتمال صعود است، نه سیگنال ورود یا تضمین حرکت.',
+      'GATE.IO | ENGINE 1 — EARLY BULLISH STRUCTURE RADAR',
+      'فقط کندل‌های بسته‌شده یک‌ساعته | فقط ساختار قیمت',
+      'بدون استفاده از حجم معاملات و بدون مقایسه با بیت‌کوین',
+      'تمرکز: پایان روند نزولی/اصلاح، رنج معتبر و آمادگی پیش از جهش',
       '━━━━━━━━━━━━━━━━━━',
       ...telegramLines,
     ]);
     console.log('Telegram message sent.');
   } else {
-    console.log('No symbol met the bullish-potential evidence threshold; no Telegram message sent.');
+    console.log('No market met the mature-base + bullish-readiness requirements; no Telegram message sent.');
   }
 }
 
