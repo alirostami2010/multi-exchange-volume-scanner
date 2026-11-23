@@ -6,6 +6,7 @@
  *
  * All scanner settings are HARD-CODED in CONFIG below.
  * No .env file is required for strategy settings.
+ * FIXED: currentNearMisses is now correctly initialized as an array [].
  *
  * Logic:
  * - LONG_MODE=BALANCED
@@ -823,7 +824,7 @@ export async function scanGateMarkets() {
   const started = Date.now();
   const nowSeconds = Date.now() / 1000;
   currentRejectStats = {};
-  currentNearMisses = {};
+  currentNearMisses = []; // FIXED: was {} which caused "is not iterable"
 
   console.log('\n🚀 GATE.IO LONG ONLY ENTRY RADAR');
   const { active, markets: liquidMarkets } = await getMarkets();
@@ -928,4 +929,4 @@ try {
 } catch (error) {
   console.error('[SCANNER FATAL ERROR]', error?.stack || error);
   process.exitCode = 1;
-        }
+}
