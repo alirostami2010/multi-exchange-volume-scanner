@@ -1,4 +1,4 @@
-```javascript
+
 /**
  * src/scanner/marketScanner.js
  * Node.js 20+ / ESM
@@ -2168,4 +2168,4 @@ try {
   console.error('[SCANNER FATAL ERROR]', error?.stack || error);
   process.exitCode = 1;
 }
-```
+
