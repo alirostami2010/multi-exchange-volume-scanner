@@ -3,8 +3,6 @@ name: Gate Scanner and Paper Performance
 on:
   workflow_dispatch:
   workflow_call:
-  schedule:
-    - cron: "*/5 * * * *"
 
 permissions:
   contents: write
@@ -58,6 +56,7 @@ jobs:
           fi
 
           mkdir -p data
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
@@ -71,15 +70,15 @@ jobs:
 
           git commit -m "Update scanner and paper evaluation data"
 
-          # Installation may update package-lock locally; do not include
-          # unrelated dependency changes in a data-only commit.
           git restore --worktree -- package.json
+
           if git ls-files --error-unmatch package-lock.json >/dev/null 2>&1; then
             git restore --worktree -- package-lock.json
           fi
 
           for attempt in 1 2 3; do
             if git push origin HEAD:main; then
+              echo "Tracking data saved successfully."
               exit 0
             fi
 
