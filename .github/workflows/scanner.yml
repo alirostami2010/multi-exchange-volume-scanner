@@ -1,14 +1,10 @@
-
-name: Gate.io Early Bullish Radar
+name: Gate Scanner and Paper Performance
 
 on:
   workflow_dispatch:
+  workflow_call:
   schedule:
-    - cron: "7 */4 * * *"
-
-concurrency:
-  group: accumulation-radar
-  cancel-in-progress: false
+    - cron: "*/5 * * * *"
 
 permissions:
   contents: write
@@ -16,35 +12,87 @@ permissions:
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 25
+
+    concurrency:
+      group: gate-scanner-shared-state
+      cancel-in-progress: false
 
     steps:
-      - name: Checkout
+      - name: Checkout main
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref }}
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 24
 
-      - name: Run Early Bullish Scanner
+      - name: Install dependencies
+        run: npm install --no-fund
+
+      - name: Check syntax
+        run: npm run check
+
+      - name: Run evaluator tests
+        run: npm test
+
+      - name: Scan and update paper performance
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: node src/scanner/marketScanner.js
+        run: npm start
 
-      - name: Save Market Data
+      - name: Save scanner and tracking data
+        if: always()
+        shell: bash
         run: |
+          set -euo pipefail
+
+          if [ ! -d .git ]; then
+            echo "Repository not available."
+            exit 0
+          fi
+
+          mkdir -p data
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add data/market-state.json
+          find data -maxdepth 1 -type f -name '*.json' \
+            -exec git add -- {} +
 
-          if ! git diff --cached --quiet; then
-            git commit -m "Update market scanner data"
-            git push
-          else
-            echo "No market data changes to save."
+          if git diff --cached --quiet; then
+            echo "No data changes."
+            exit 0
           fi
+
+          git commit -m "Update scanner and paper evaluation data"
+
+          # Installation may update package-lock locally; do not include
+          # unrelated dependency changes in a data-only commit.
+          git restore --worktree -- package.json
+          if git ls-files --error-unmatch package-lock.json >/dev/null 2>&1; then
+            git restore --worktree -- package-lock.json
+          fi
+
+          for attempt in 1 2 3; do
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+
+            git fetch origin main
+
+            if ! git rebase origin/main; then
+              git rebase --abort || true
+              echo "Data conflict: refusing to overwrite remote state."
+              exit 1
+            fi
+
+            sleep 2
+          done
+
+          echo "Unable to persist tracking data."
+          exit 1
