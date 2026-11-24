@@ -1,12 +1,13 @@
 
 {
   "name": "multi-exchange-volume-scanner",
-  "version": "1.0.0",
-  "description": "Free multi-exchange futures volume scanner",
+  "version": "2.0.0",
+  "description": "Gate futures scanner with prospective paper signal evaluation",
   "type": "module",
   "scripts": {
     "start": "node src/index.js",
-    "test": "node --test"
+    "test": "node --test",
+    "check": "node --check src/index.js && node --check src/scanner/marketScanner.js && node --check src/storage/marketStorage.js && node --check src/services/gate.js && node --check src/services/telegram.js && node --check src/tracking/signalTracker.js"
   },
   "engines": {
     "node": ">=20"
