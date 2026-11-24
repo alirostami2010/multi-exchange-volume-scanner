@@ -1,932 +1,2171 @@
+```javascript
 /**
- * GATE.IO USDT PERPETUAL — LONG ONLY ENTRY RADAR
- * --------------------------------------------------------------------
- * File: src/scanner/marketScanner.js
- * Node.js 20+
+ * src/scanner/marketScanner.js
+ * Node.js 20+ / ESM
  *
- * All scanner settings are HARD-CODED in CONFIG below.
- * No .env file is required for strategy settings.
- * FIXED: currentNearMisses is now correctly initialized as an array [].
- *
- * Logic:
- * - LONG_MODE=BALANCED
- * - BTC 4h regime filter
- * - Coin 4h uptrend filter: close > EMA50 > EMA200
- * - Entry only on 15m Pullback / Breakout
- * - Mandatory 15m trigger
- * - Entry zone, Stop Loss, TP1/TP2/TP3 from real resistances
- * - Telegram: max 5 compact signals, no empty spam
- * - Logs: [FILTER STATS] and [NEAR MISSES]
- *
- * No order execution.
+ * Gate.io USDT perpetual — LONG + SHORT
+ * Fixed strategy settings; Telegram credentials from process.env.
+ * Historical targets only. No order execution.
+ * Scores are heuristic, not success probabilities.
+ * No persistent cross-run Telegram deduplication.
  */
+
 import 'dotenv/config';
 import { saveMarketSnapshot } from '../storage/marketStorage.js';
 
-const CONFIG = {
+const CONFIG = Object.freeze({
   API_BASE: 'https://api.gateio.ws/api/v4',
   SETTLE: 'usdt',
 
-  // ===== HARD-CODED SETTINGS (NO .env NEEDED) =====
-  MIN_QUOTE_VOLUME_24H: 1000000,
-  LONG_MODE: 'BALANCED', // STRICT | BALANCED
-  MIN_LONG_SCORE: 70,
-  MIN_LONG_SCORE_NEUTRAL: 75,
-  MIN_LONG_SCORE_BEARISH: 82,
-  SCAN_LIMIT: 0, // 0 = scan ALL liquid markets
+  MODE: 'BALANCED',
+  ENABLE_LONG: true,
+  ENABLE_SHORT: true,
+
+  MIN_QUOTE_VOLUME_24H: 1_000_000,
+  SCAN_LIMIT: 0,
   TOP_COUNT: 5,
   TELEGRAM_SEND_EMPTY: false,
 
-  // ===== Other fixed settings =====
-  TRADE_LIMIT: 1000,
-  HISTORY_HOURS: 24,
-  HISTORY_REPORT_HOURS: 6,
+  MIN_LONG_SCORE: 70,
+  MIN_LONG_SCORE_NEUTRAL: 75,
+  MIN_LONG_SCORE_BEARISH: 82,
+  MIN_SHORT_SCORE: 70,
+  MIN_SHORT_SCORE_NEUTRAL: 75,
+  MIN_SHORT_SCORE_BULLISH: 82,
+
   CONCURRENCY: 5,
   REQUEST_SPACING_MS: 120,
-  REQUEST_TIMEOUT_MS: 15000,
+  REQUEST_TIMEOUT_MS: 15_000,
   RETRIES: 3,
   TELEGRAM_MAX_LENGTH: 3800,
 
-  MIN_RECENT_BUY_NOTIONAL: 1500,
-  MIN_PREVIOUS_BUY_BASELINE: 300,
-  MIN_HISTORY_CANDLES: 4,
-
   CANDLES_15M_LIMIT: 300,
   CANDLES_4H_LIMIT: 300,
+  MIN_CANDLES_15M: 220,
+  MIN_CANDLES_4H: 250,
+
+  HISTORY_HOURS: 24,
+  HISTORY_REPORT_HOURS: 6,
+  TRADE_LIMIT: 1000,
+
+  MIN_RECENT_BUY_NOTIONAL: 1500,
+  MIN_RECENT_SELL_NOTIONAL: 1500,
+  MIN_PREVIOUS_FLOW_BASELINE: 300,
+
+  MAX_RSI_LONG_ENTRY: 70,
+  MAX_RSI_LONG_4H: 75,
+  MIN_RSI_SHORT_ENTRY: 30,
+  MIN_RSI_SHORT_4H: 25,
+
+  MAX_FUNDING_RATE_LONG: 0.001,
+  MIN_FUNDING_RATE_SHORT: -0.001,
 
   MIN_RR_TP1: 1.0,
   MIN_RR_TP2: 1.8,
-  MAX_RSI_ENTRY: 70,
-  MAX_RSI_4H: 75,
-  MAX_FUNDING_RATE: 0.001, // 0.10%
-};
+  MIN_SINGLE_TARGET_RR: 1.8,
+  MIN_COUNTER_BTC_RR: 2.2,
+
+  STOP_ATR_BUFFER: 0.5,
+  MIN_STOP_ATR: 0.8,
+  MAX_STOP_ATR: 5,
+  MAX_STOP_PCT: 6,
+
+  MAX_DISTANCE_EMA_ATR: 2,
+  MAX_TRIGGER_DRIFT_ATR: 0.75,
+  MAX_TRIGGER_DRIFT_PCT: 2.5,
+
+  ENTRY_ZONE_ATR: 0.15,
+  MAX_ENTRY_ZONE_PCT: 0.2,
+  ENTRY_VALID_MINUTES: 15,
+
+  FEE_RATE_PER_SIDE: 0.0006,
+  SLIPPAGE_RATE_PER_SIDE: 0.0003,
+
+  MAX_SCAN_AGE_SECONDS: 240,
+  MAX_QUOTE_AGE_SECONDS: 60,
+  LEVEL_CLUSTER_ATR: 0.25,
+});
+
+// ==================== Utilities ====================
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-const num = value => {
-  const x = Number(value);
-  return Number.isFinite(x) ? x : null;
-};
-const positive = value => Number.isFinite(value) && value > 0;
-const clamp = (value, min = 0, max = 100) => Math.max(min, Math.min(max, value));
-const round = (value, digits = 2) => Number.isFinite(value) ? Number(value.toFixed(digits)) : null;
-const fmt = (value, digits = 2) => Number.isFinite(value) ? value.toFixed(digits) : '—';
-const pctChange = (current, previous) => positive(previous) ? ((current - previous) / previous) * 100 : 0;
 
-const fmtPrice = value => {
-  if (!Number.isFinite(value)) return '—';
-  const abs = Math.abs(value);
-  if (abs >= 100) return value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  if (abs >= 1) return value.toFixed(4);
-  if (abs >= 0.01) return value.toFixed(5);
-  return value.toFixed(8);
+const num = value => {
+  if (value == null || value === '') return null;
+  const result = Number(value);
+  return Number.isFinite(result) ? result : null;
 };
-const pctFrom = (price, target) => positive(price) ? ((target - price) / price) * 100 : 0;
-const signedPct = (price, target) => {
-  const p = pctFrom(price, target);
-  return `${p >= 0 ? '+' : ''}${p.toFixed(1)}%`;
-};
-const intScore = v => Math.round(clamp(v, 0, 100));
+
+const positive = value => Number.isFinite(value) && value > 0;
+
+const clamp = (value, min = 0, max = 100) =>
+  Math.max(min, Math.min(max, value));
+
+const round = (value, digits = 2) =>
+  Number.isFinite(value) ? Number(value.toFixed(digits)) : null;
+
+const fmt = (value, digits = 2) =>
+  Number.isFinite(value) ? value.toFixed(digits) : '—';
+
+const average = values =>
+  values.length
+    ? values.reduce((sum, value) => sum + value, 0) / values.length
+    : null;
+
+const pctChange = (current, previous) =>
+  Number.isFinite(current) && positive(previous)
+    ? ((current - previous) / previous) * 100
+    : null;
+
+function fmtPrice(value) {
+  if (!positive(value)) return '—';
+  if (value < 0.00000001) return value.toPrecision(6);
+
+  return Number(value.toPrecision(8)).toLocaleString('en-US', {
+    maximumFractionDigits: 12,
+    useGrouping: false,
+  });
+}
+
+function directionalPct(side, entry, exit) {
+  if (!positive(entry) || !positive(exit)) return null;
+
+  return side === 'SHORT'
+    ? ((entry - exit) / entry) * 100
+    : ((exit - entry) / entry) * 100;
+}
+
+function directionalPctText(side, entry, exit) {
+  const value = directionalPct(side, entry, exit);
+
+  return value == null
+    ? '—'
+    : `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
+}
+
+function requireArray(value, label) {
+  if (!Array.isArray(value)) {
+    throw new Error(`${label}: expected array response`);
+  }
+  return value;
+}
+
+function reject(context, reason, side = null) {
+  const bucket = side
+    ? context.rejectStats[side]
+    : context.rejectStats.GLOBAL;
+
+  bucket[reason] = (bucket[reason] ?? 0) + 1;
+  return null;
+}
+
+// ==================== Requests ====================
 
 let lastRequestAt = 0;
 let requestQueue = Promise.resolve();
+let runningScan = null;
 
-let currentRejectStats = {};
-let currentNearMisses = [];
-const reject = reason => {
-  currentRejectStats[reason] = (currentRejectStats[reason] ?? 0) + 1;
-  return null;
-};
-
-async function requestGate(path, params = {}) {
-  const url = new URL(`${CONFIG.API_BASE}${path}`);
-  for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined && value !== null) url.searchParams.set(key, String(value));
-  }
-
+async function reserveRequestSlot() {
   const slot = requestQueue.then(async () => {
     const wait = CONFIG.REQUEST_SPACING_MS - (Date.now() - lastRequestAt);
     if (wait > 0) await sleep(wait);
     lastRequestAt = Date.now();
   });
+
   requestQueue = slot.catch(() => {});
   await slot;
+}
+
+async function requestGate(path, params = {}) {
+  const url = new URL(`${CONFIG.API_BASE}${path}`);
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value != null) url.searchParams.set(key, String(value));
+  }
 
   let lastError;
+
   for (let attempt = 0; attempt <= CONFIG.RETRIES; attempt++) {
+    await reserveRequestSlot();
+
     try {
       const response = await fetch(url, {
         headers: { Accept: 'application/json' },
         signal: AbortSignal.timeout(CONFIG.REQUEST_TIMEOUT_MS),
       });
+
       if (response.ok) return await response.json();
 
       const body = await response.text().catch(() => '');
-      const error = new Error(`Gate HTTP ${response.status} ${path}: ${body.slice(0, 180)}`);
+      const error = new Error(
+        `Gate HTTP ${response.status} ${path}: ${body.slice(0, 180)}`
+      );
+
       error.status = response.status;
-      error.retryAfter = Number(response.headers.get('retry-after') || 0);
-      if (![408, 425, 429, 500, 502, 503, 504].includes(response.status)) throw error;
-      lastError = error;
+
+      const retryHeader = response.headers.get('retry-after');
+      const retrySeconds = Number(retryHeader);
+
+      error.retryAfterMs =
+        retryHeader && Number.isFinite(retrySeconds)
+          ? retrySeconds * 1000
+          : retryHeader
+            ? Math.max(0, Date.parse(retryHeader) - Date.now()) || 0
+            : 0;
+
+      throw error;
     } catch (error) {
       lastError = error;
-      const permanentClientError =
-        error.status >= 400 && error.status < 500 && ![408, 425, 429].includes(error.status);
-      if (attempt === CONFIG.RETRIES || permanentClientError) break;
+
+      const retryable = [
+        408, 425, 429, 500, 502, 503, 504,
+      ].includes(error.status);
+
+      if (
+        attempt === CONFIG.RETRIES ||
+        (error.status != null && !retryable)
+      ) {
+        break;
+      }
+
+      const delay = error.retryAfterMs > 0
+        ? Math.min(error.retryAfterMs, 30_000)
+        : Math.min(500 * (2 ** attempt), 8000);
+
+      await sleep(delay);
     }
-    const delay = lastError?.status === 429 && lastError.retryAfter > 0
-      ? Math.min(lastError.retryAfter * 1000, 30000)
-      : Math.min(500 * (2 ** attempt), 8000);
-    await sleep(delay);
   }
+
   throw lastError || new Error(`Gate request failed: ${path}`);
+}
+
+async function optionalArrayRequest(path, params, label) {
+  try {
+    return requireArray(await requestGate(path, params), label);
+  } catch (error) {
+    console.warn(`[OPTIONAL DATA] ${label}: ${error.message}`);
+    return null;
+  }
 }
 
 async function mapPool(items, concurrency, worker) {
   const output = new Array(items.length);
   let cursor = 0;
-  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, async () => {
-    while (true) {
-      const index = cursor++;
-      if (index >= items.length) return;
-      try {
-        output[index] = await worker(items[index], index);
-      } catch (error) {
-        output[index] = { __error: error?.message || String(error), symbol: items[index]?.symbol };
+
+  await Promise.all(
+    Array.from(
+      { length: Math.min(concurrency, items.length) },
+      async () => {
+        while (true) {
+          const index = cursor++;
+          if (index >= items.length) return;
+
+          try {
+            output[index] = await worker(items[index], index);
+          } catch (error) {
+            console.error(
+              `[MARKET ERROR] ${items[index]?.symbol}: ${error.message}`
+            );
+
+            output[index] = {
+              __error: error.message,
+              symbol: items[index]?.symbol,
+            };
+          }
+        }
       }
-    }
-  }));
+    )
+  );
+
   return output;
 }
 
-function normalizeTradeTime(trade) {
-  const milliseconds = num(trade?.create_time_ms);
-  if (milliseconds != null && milliseconds > 0) return milliseconds / 1000;
-  const seconds = num(trade?.create_time);
-  return seconds != null && seconds > 0 ? seconds : null;
-}
-
-function tradeNotional(trade, multiplier) {
-  const signedSize = num(trade?.size);
-  const price = num(trade?.price);
-  if (signedSize == null || price == null || !positive(price)) return null;
-  const time = normalizeTradeTime(trade);
-  if (time == null) return null;
-  const contractMultiplier = positive(multiplier) ? multiplier : 1;
-  return { signedSize, notional: Math.abs(signedSize) * contractMultiplier * price, time };
-}
-
-function aggregateCurrentTrades(trades, multiplier, hourStart, nowSeconds) {
-  const minuteBuckets = new Map();
-  let buyHour = 0, sellHour = 0, validTrades = 0, oldestTime = Infinity;
-
-  for (const trade of trades || []) {
-    const item = tradeNotional(trade, multiplier);
-    if (!item) continue;
-    if (item.time < hourStart || item.time > nowSeconds + 2) continue;
-    validTrades++;
-    oldestTime = Math.min(oldestTime, item.time);
-    const minute = Math.floor(item.time / 60) * 60;
-    const bucket = minuteBuckets.get(minute) || { buy: 0, sell: 0, count: 0 };
-    if (item.signedSize > 0) { buyHour += item.notional; bucket.buy += item.notional; }
-    else if (item.signedSize < 0) { sellHour += item.notional; bucket.sell += item.notional; }
-    bucket.count++;
-    minuteBuckets.set(minute, bucket);
-  }
-
-  const currentMinute = Math.floor(nowSeconds / 60) * 60;
-  const bucketAt = minute => minuteBuckets.get(minute) || { buy: 0, sell: 0, count: 0 };
-  const sumWindow = (start, end, key) => {
-    let total = 0;
-    for (let time = start; time < end; time += 60) total += bucketAt(time)[key];
-    return total;
-  };
-
-  const last3Start = currentMinute - 2 * 60;
-  const previous3Start = currentMinute - 5 * 60;
-  const prior3Start = currentMinute - 8 * 60;
-
-  const buyLast3 = sumWindow(last3Start, currentMinute + 60, 'buy');
-  const sellLast3 = sumWindow(last3Start, currentMinute + 60, 'sell');
-  const buyPrevious3 = sumWindow(previous3Start, last3Start, 'buy');
-  const sellPrevious3 = sumWindow(previous3Start, last3Start, 'sell');
-  const buyPrior3 = sumWindow(prior3Start, previous3Start, 'buy');
-
-  const buyRateLast = buyLast3 / 3;
-  const buyRatePrevious = buyPrevious3 / 3;
-  const buyRatePrior = buyPrior3 / 3;
-
-  const validBaseline = buyPrevious3 >= CONFIG.MIN_PREVIOUS_BUY_BASELINE;
-  const rateMultiple = validBaseline ? buyRateLast / Math.max(buyRatePrevious, 1) : null;
-  const acceleration = rateMultiple != null && buyPrior3 >= CONFIG.MIN_PREVIOUS_BUY_BASELINE
-    ? rateMultiple - (buyRatePrevious / Math.max(buyRatePrior, 1))
-    : null;
-
-  const totalHour = buyHour + sellHour;
-  const recentTotal = buyLast3 + sellLast3;
-  const buyShareHour = totalHour > 0 ? (buyHour / totalHour) * 100 : 0;
-  const buyShareRecent = recentTotal > 0 ? (buyLast3 / recentTotal) * 100 : 0;
-
-  const recentMinuteBuckets = [];
-  for (let time = last3Start; time <= currentMinute; time += 60) {
-    const bucket = bucketAt(time);
-    recentMinuteBuckets.push({ buy: bucket.buy, sell: bucket.sell, total: bucket.buy + bucket.sell });
-  }
-  const positiveBuyMinutes = recentMinuteBuckets.filter(item => item.buy > 0).length;
-  const persistence = recentMinuteBuckets.length > 0 ? (positiveBuyMinutes / recentMinuteBuckets.length) * 100 : 0;
-
-  const truncated = (trades || []).length >= CONFIG.TRADE_LIMIT;
-  const elapsedSeconds = Math.max(1, nowSeconds - hourStart);
-  const coveragePct = truncated && Number.isFinite(oldestTime)
-    ? Math.min(100, ((nowSeconds - oldestTime) / elapsedSeconds) * 100)
-    : truncated ? 0 : 100;
-
-  return {
-    buyHour, sellHour, totalHour, buyShareHour, deltaHour: buyHour - sellHour,
-    buyLast3, sellLast3, recentTotal, buyShareRecent, deltaRecent: buyLast3 - sellLast3,
-    buyPrevious3, sellPrevious3, buyPrior3, buyRateLast, buyRatePrevious, buyRatePrior,
-    rateMultiple, acceleration, validBaseline, persistence, positiveBuyMinutes,
-    validTrades, oldestTime, truncated, coveragePct: round(coveragePct, 0),
-  };
-}
+// ==================== Candles ====================
 
 function normalizeCandle(raw) {
-  const time = num(raw?.t), open = num(raw?.o), high = num(raw?.h);
-  const low = num(raw?.l), close = num(raw?.c);
-  const volumeContracts = num(raw?.v), quoteTurnover = num(raw?.sum);
-  if (time == null || !positive(open) || !positive(high) || !positive(low) || !positive(close)) return null;
-  return { time, open, high, low, close, volumeContracts: volumeContracts ?? 0, quoteTurnover: quoteTurnover ?? 0 };
-}
+  const time = num(raw?.t);
+  const open = num(raw?.o);
+  const high = num(raw?.h);
+  const low = num(raw?.l);
+  const close = num(raw?.c);
 
-function toClosedCandles(rawCandles, timeframeSeconds, nowSeconds) {
-  return (rawCandles || []).map(normalizeCandle).filter(Boolean)
-    .filter(candle => candle.time + timeframeSeconds <= nowSeconds)
-    .sort((a, b) => a.time - b.time);
-}
+  if (
+    !positive(time) ||
+    ![open, high, low, close].every(positive) ||
+    high < Math.max(open, close) ||
+    low > Math.min(open, close) ||
+    high < low
+  ) {
+    return null;
+  }
 
-function normalizeContractStat(raw) {
-  const time = num(raw?.time);
-  if (time == null) return null;
   return {
     time,
-    longTakerContracts: num(raw?.long_taker_size),
-    shortTakerContracts: num(raw?.short_taker_size),
-    markPrice: num(raw?.mark_price),
-    takerLongShortRatio: num(raw?.lsr_taker),
+    open,
+    high,
+    low,
+    close,
+    volumeContracts: num(raw?.v),
+    quoteTurnover: num(raw?.sum),
   };
 }
 
-function buildHourlyHistory(rawCandles, rawStats, multiplier, nowSeconds) {
-  const currentHourStart = Math.floor(nowSeconds / 3600) * 3600;
-  const candles = (rawCandles || []).map(normalizeCandle).filter(Boolean)
-    .filter(candle => candle.time < currentHourStart).sort((a, b) => a.time - b.time);
+function toClosedCandles(raw, intervalSeconds, asOf) {
+  const unique = new Map();
 
-  const statsByHour = new Map();
-  for (const raw of rawStats || []) {
-    const stat = normalizeContractStat(raw);
-    if (!stat) continue;
-    const bucket = Math.floor(stat.time / 3600) * 3600;
-    if (bucket >= currentHourStart) continue;
-    statsByHour.set(bucket, stat);
+  for (const row of requireArray(raw, 'candles')) {
+    const candle = normalizeCandle(row);
+
+    if (candle && candle.time + intervalSeconds <= asOf) {
+      unique.set(candle.time, candle);
+    }
   }
 
-  return candles.map(candle => {
-    const stat = statsByHour.get(candle.time) || null;
-    const referencePrice = positive(candle.close) ? candle.close : stat?.markPrice;
-    const longTakerQuote = stat?.longTakerContracts != null && positive(multiplier) && positive(referencePrice)
-      ? Math.abs(stat.longTakerContracts) * multiplier * referencePrice : null;
-    const shortTakerQuote = stat?.shortTakerContracts != null && positive(multiplier) && positive(referencePrice)
-      ? Math.abs(stat.shortTakerContracts) * multiplier * referencePrice : null;
-    const hasDirectionalStats = longTakerQuote != null && shortTakerQuote != null;
-    const directionalTotal = hasDirectionalStats ? longTakerQuote + shortTakerQuote : null;
+  return [...unique.values()].sort((a, b) => a.time - b.time);
+}
+
+function validCandleSeries(candles, seconds, minimum, asOf) {
+  if (candles.length < minimum) return false;
+
+  const expectedLastStart =
+    Math.floor(asOf / seconds) * seconds - seconds;
+
+  if (candles.at(-1).time !== expectedLastStart) return false;
+
+  const recent = candles.slice(-minimum);
+
+  for (let i = 1; i < recent.length; i++) {
+    if (recent[i].time - recent[i - 1].time !== seconds) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+// ==================== Indicators ====================
+
+function emaSeries(values, period) {
+  const alpha = 2 / (period + 1);
+  let previous = values[0];
+
+  return values.map((value, index) => {
+    previous = index === 0
+      ? value
+      : alpha * value + (1 - alpha) * previous;
+
+    return previous;
+  });
+}
+
+function wilderSeries(values, period = 14) {
+  const output = new Array(values.length).fill(null);
+  if (values.length < period) return output;
+
+  let previous = average(values.slice(0, period));
+  output[period - 1] = previous;
+
+  for (let i = period; i < values.length; i++) {
+    previous = (previous * (period - 1) + values[i]) / period;
+    output[i] = previous;
+  }
+
+  return output;
+}
+
+function rsiSeries(closes, period = 14) {
+  const output = new Array(closes.length).fill(null);
+  if (closes.length <= period) return output;
+
+  let gain = 0;
+  let loss = 0;
+
+  for (let i = 1; i <= period; i++) {
+    const delta = closes[i] - closes[i - 1];
+    gain += Math.max(delta, 0);
+    loss += Math.max(-delta, 0);
+  }
+
+  gain /= period;
+  loss /= period;
+
+  const rsiValue = () =>
+    gain === 0 && loss === 0
+      ? 50
+      : loss === 0
+        ? 100
+        : 100 - 100 / (1 + gain / loss);
+
+  output[period] = rsiValue();
+
+  for (let i = period + 1; i < closes.length; i++) {
+    const delta = closes[i] - closes[i - 1];
+
+    gain = (gain * (period - 1) + Math.max(delta, 0)) / period;
+    loss = (loss * (period - 1) + Math.max(-delta, 0)) / period;
+
+    output[i] = rsiValue();
+  }
+
+  return output;
+}
+
+function addIndicators(candles) {
+  if (!candles.length) return [];
+
+  const closes = candles.map(c => c.close);
+  const ema9 = emaSeries(closes, 9);
+  const ema20 = emaSeries(closes, 20);
+  const ema50 = emaSeries(closes, 50);
+  const ema200 = emaSeries(closes, 200);
+  const ema12 = emaSeries(closes, 12);
+  const ema26 = emaSeries(closes, 26);
+
+  const macd = closes.map((_, i) => ema12[i] - ema26[i]);
+  const macdSignal = emaSeries(macd, 9);
+  const rsi = rsiSeries(closes);
+
+  const trueRanges = [];
+  const plusDM = [];
+  const minusDM = [];
+
+  candles.forEach((c, i) => {
+    const previous = candles[i - 1];
+
+    trueRanges.push(
+      previous
+        ? Math.max(
+            c.high - c.low,
+            Math.abs(c.high - previous.close),
+            Math.abs(c.low - previous.close)
+          )
+        : c.high - c.low
+    );
+
+    const up = previous ? c.high - previous.high : 0;
+    const down = previous ? previous.low - c.low : 0;
+
+    plusDM.push(up > down && up > 0 ? up : 0);
+    minusDM.push(down > up && down > 0 ? down : 0);
+  });
+
+  const atr = wilderSeries(trueRanges);
+  const plus = wilderSeries(plusDM);
+  const minus = wilderSeries(minusDM);
+
+  const plusDI = atr.map((value, i) =>
+    positive(value) ? 100 * plus[i] / value : null
+  );
+
+  const minusDI = atr.map((value, i) =>
+    positive(value) ? 100 * minus[i] / value : null
+  );
+
+  const dx = atr.map((value, i) => {
+    if (value == null) return null;
+    const total = (plusDI[i] ?? 0) + (minusDI[i] ?? 0);
+
+    return total > 0
+      ? 100 * Math.abs(plusDI[i] - minusDI[i]) / total
+      : 0;
+  });
+
+  const adx = new Array(candles.length).fill(null);
+  const dxStart = dx.findIndex(value => value != null);
+
+  if (dxStart >= 0) {
+    wilderSeries(dx.slice(dxStart)).forEach((value, i) => {
+      adx[dxStart + i] = value;
+    });
+  }
+
+  return candles.map((c, i) => {
+    const prior = candles.slice(Math.max(0, i - 20), i);
+
+    const quoteAvailable =
+      c.quoteTurnover != null &&
+      c.quoteTurnover >= 0 &&
+      prior.every(x =>
+        x.quoteTurnover != null && x.quoteTurnover >= 0
+      );
+
+    const volume = quoteAvailable
+      ? c.quoteTurnover
+      : c.volumeContracts;
+
+    const previousVolumes = prior.map(x =>
+      quoteAvailable ? x.quoteTurnover : x.volumeContracts
+    );
+
+    const volMa20 =
+      prior.length === 20 &&
+      previousVolumes.every(x => x != null && x >= 0)
+        ? average(previousVolumes)
+        : null;
+
     return {
-      time: candle.time, open: candle.open, high: candle.high, low: candle.low, close: candle.close,
-      totalQuoteVolume: candle.quoteTurnover, buyQuoteVolume: longTakerQuote, sellQuoteVolume: shortTakerQuote,
-      buySharePct: hasDirectionalStats && directionalTotal > 0 ? (longTakerQuote / directionalTotal) * 100 : null,
-      deltaQuote: hasDirectionalStats ? longTakerQuote - shortTakerQuote : null,
-      hasDirectionalStats, priceChangePct: pctChange(candle.close, candle.open),
+      ...c,
+      ema9: ema9[i],
+      ema20: ema20[i],
+      ema50: ema50[i],
+      ema200: ema200[i],
+      rsi: rsi[i],
+      macdHist: macd[i] - macdSignal[i],
+      atr: atr[i],
+      adx: adx[i],
+      plusDI: plusDI[i],
+      minusDI: minusDI[i],
+      volumeRatio:
+        positive(volMa20) && volume != null
+          ? volume / volMa20
+          : null,
     };
   });
 }
 
-function analyzeHourlyHistory(history) {
-  const recent = history.slice(-CONFIG.HISTORY_REPORT_HOURS);
-  if (recent.length < CONFIG.MIN_HISTORY_CANDLES) {
-    return { available: false, candles: recent, priceTrend: 'INSUFFICIENT_HISTORY', volumeTrend: 'INSUFFICIENT_HISTORY', sellerPressure: 'UNKNOWN', directionalCoverage: 0, priceDown: false, volumeFalling: false, sellerPressureFalling: false, buyShareImproving: false };
-  }
-  const first = recent[0], last = recent.at(-1);
-  const recent3 = recent.slice(-3), previous3 = history.slice(-6, -3);
-  const recentVolumeAvg = recent3.reduce((s, c) => s + c.totalQuoteVolume, 0) / Math.max(1, recent3.length);
-  const previousVolumeAvg = previous3.length > 0 ? previous3.reduce((s, c) => s + c.totalQuoteVolume, 0) / previous3.length : null;
-  const priceDown = last.close < first.close;
-  const volumeFalling = previousVolumeAvg != null && previousVolumeAvg > 0 && recentVolumeAvg < previousVolumeAvg * 0.9;
+// ==================== Patterns ====================
 
-  const directionalCandles = recent.filter(c => c.hasDirectionalStats);
-  const directionalCoverage = recent.length > 0 ? (directionalCandles.length / recent.length) * 100 : 0;
-  let sellerPressureFalling = false, buyShareImproving = false;
-  const recentDirectional = recent3.filter(c => c.hasDirectionalStats);
-  const previousDirectional = previous3.filter(c => c.hasDirectionalStats);
+function engulfingPattern(candles, side) {
+  const last = candles.at(-1);
+  const previous = candles.at(-2);
 
-  if (recentDirectional.length >= 2 && previousDirectional.length >= 2) {
-    const recentSellAvg = recentDirectional.reduce((s, c) => s + c.sellQuoteVolume, 0) / recentDirectional.length;
-    const previousSellAvg = previousDirectional.reduce((s, c) => s + c.sellQuoteVolume, 0) / previousDirectional.length;
-    sellerPressureFalling = previousSellAvg > 0 && recentSellAvg < previousSellAvg * 0.9;
-    const recentBuyShare = recentDirectional.reduce((s, c) => s + c.buySharePct, 0) / recentDirectional.length;
-    const previousBuyShare = previousDirectional.reduce((s, c) => s + c.buySharePct, 0) / previousDirectional.length;
-    buyShareImproving = recentBuyShare > previousBuyShare + 3;
+  if (side === 'LONG') {
+    return last.close > last.open &&
+      previous.close < previous.open &&
+      last.close >= previous.open &&
+      last.open <= previous.close;
   }
 
-  return {
-    available: true, candles: recent, priceChangePct: pctChange(last.close, first.close),
-    recentVolumeAvg, previousVolumeAvg,
-    priceTrend: priceDown ? 'DOWN' : last.close > first.close ? 'UP' : 'FLAT',
-    volumeTrend: previousVolumeAvg == null ? 'NO_BASELINE' : volumeFalling ? 'FALLING' : recentVolumeAvg > previousVolumeAvg * 1.1 ? 'RISING' : 'STABLE',
-    sellerPressure: directionalCoverage < 60 ? 'INSUFFICIENT_DIRECTIONAL_DATA' : sellerPressureFalling ? 'FALLING' : 'NOT_FALLING',
-    directionalCoverage: round(directionalCoverage, 0),
-    priceDown, volumeFalling, sellerPressureFalling, buyShareImproving,
-  };
+  return last.close < last.open &&
+    previous.close > previous.open &&
+    last.open >= previous.close &&
+    last.close <= previous.open;
 }
 
-/* ---------------- Indicators ---------------- */
-function emaSeries(values, period) {
-  const k = 2 / (period + 1);
-  const out = new Array(values.length).fill(null);
-  let prev = null;
-  values.forEach((value, i) => {
-    if (!Number.isFinite(value)) { out[i] = prev; return; }
-    prev = prev == null ? value : value * k + prev * (1 - k);
-    out[i] = prev;
-  });
-  return out;
-}
-function smoothSeries(values, period = 14) {
-  const alpha = 1 / period;
-  const out = new Array(values.length).fill(null);
-  let prev = null;
-  values.forEach((value, i) => {
-    const v = Number.isFinite(value) ? value : 0;
-    prev = prev == null ? v : v * alpha + prev * (1 - alpha);
-    out[i] = prev;
-  });
-  return out;
-}
-function smaSeries(values, period) {
-  const out = new Array(values.length).fill(null);
-  let sum = 0;
-  values.forEach((value, i) => {
-    sum += Number.isFinite(value) ? value : 0;
-    if (i >= period) {
-      const old = values[i - period];
-      sum -= Number.isFinite(old) ? old : 0;
-    }
-    out[i] = sum / Math.min(period, i + 1);
-  });
-  return out;
-}
-function rsiSeries(closes, period = 14) {
-  const out = new Array(closes.length).fill(50);
-  let avgGain = null, avgLoss = null;
-  for (let i = 1; i < closes.length; i++) {
-    const delta = closes[i] - closes[i - 1];
-    const gain = Math.max(delta, 0), loss = Math.max(-delta, 0);
-    if (avgGain == null) { avgGain = gain; avgLoss = loss; }
-    else { avgGain = (avgGain * (period - 1) + gain) / period; avgLoss = (avgLoss * (period - 1) + loss) / period; }
-    out[i] = i < period ? 50 : avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss));
-  }
-  return out;
-}
-function addIndicators(candles) {
-  const closes = candles.map(c => c.close), highs = candles.map(c => c.high), lows = candles.map(c => c.low);
-  const ema9 = emaSeries(closes, 9), ema20 = emaSeries(closes, 20), ema50 = emaSeries(closes, 50), ema200 = emaSeries(closes, 200);
-  const ema12 = emaSeries(closes, 12), ema26 = emaSeries(closes, 26);
-  const macd = closes.map((_, i) => ema12[i] - ema26[i]);
-  const macdSignal = emaSeries(macd, 9);
-  const macdHist = macd.map((v, i) => v - macdSignal[i]);
-  const rsi = rsiSeries(closes, 14);
-  const bbMid = smaSeries(closes, 20);
-  const bbUpper = new Array(closes.length).fill(null), bbLower = new Array(closes.length).fill(null);
-  for (let i = 19; i < closes.length; i++) {
-    const window = closes.slice(i - 19, i + 1);
-    const mean = bbMid[i];
-    const variance = window.reduce((s, v) => s + (v - mean) ** 2, 0) / 19;
-    const std = Math.sqrt(variance);
-    bbUpper[i] = mean + std * 2; bbLower[i] = mean - std * 2;
-  }
-  const tr = [], plusDM = [], minusDM = [];
-  for (let i = 0; i < candles.length; i++) {
-    if (i === 0) { tr.push(highs[i] - lows[i]); plusDM.push(0); minusDM.push(0); continue; }
-    tr.push(Math.max(highs[i] - lows[i], Math.abs(highs[i] - closes[i - 1]), Math.abs(lows[i] - closes[i - 1])));
-    const upMove = highs[i] - highs[i - 1], downMove = lows[i - 1] - lows[i];
-    plusDM.push(upMove > downMove && upMove > 0 ? upMove : 0);
-    minusDM.push(downMove > upMove && downMove > 0 ? downMove : 0);
-  }
-  const atr = smoothSeries(tr, 14);
-  const trS = smoothSeries(tr, 14), plusS = smoothSeries(plusDM, 14), minusS = smoothSeries(minusDM, 14);
-  const dx = trS.map((v, i) => {
-    const plusDI = v > 0 ? 100 * plusS[i] / v : 0, minusDI = v > 0 ? 100 * minusS[i] / v : 0;
-    return plusDI + minusDI > 0 ? 100 * Math.abs(plusDI - minusDI) / (plusDI + minusDI) : 0;
-  });
-  const adx = smoothSeries(dx, 14);
-  const volumes = candles.map(c => positive(c.quoteTurnover) ? c.quoteTurnover : c.volumeContracts);
-  const volMa20 = smaSeries(volumes, 20);
+function rejectionCandle(candles, side) {
+  const last = candles.at(-1);
+  const body = Math.abs(last.close - last.open);
+  const range = last.high - last.low;
 
-  return candles.map((c, i) => ({
-    ...c, ema9: ema9[i], ema20: ema20[i], ema50: ema50[i], ema200: ema200[i],
-    rsi: rsi[i], macd: macd[i], macdSignal: macdSignal[i], macdHist: macdHist[i],
-    bbMid: bbMid[i], bbUpper: bbUpper[i], bbLower: bbLower[i], atr: atr[i], adx: adx[i], volMa20: volMa20[i],
-  }));
+  if (!positive(body) || !positive(range)) return false;
+
+  const lower = Math.min(last.open, last.close) - last.low;
+  const upper = last.high - Math.max(last.open, last.close);
+
+  if (side === 'LONG') {
+    return last.close > last.open &&
+      lower >= body * 2 &&
+      upper <= body &&
+      (last.close - last.low) / range >= 0.65;
+  }
+
+  return last.close < last.open &&
+    upper >= body * 2 &&
+    lower <= body &&
+    (last.close - last.low) / range <= 0.35;
 }
-function isBullishEngulfing(candles) {
-  if (candles.length < 2) return false;
-  const l = candles.at(-1), p = candles.at(-2);
-  return l.close > l.open && p.close < p.open && l.close > p.open && l.open < p.close;
-}
-function isHammer(candles) {
-  const l = candles.at(-1); if (!l) return false;
-  const body = Math.abs(l.close - l.open); if (body === 0) return false;
-  return (Math.min(l.open, l.close) - l.low > body * 2) && (l.high - Math.max(l.open, l.close) < body);
-}
-function hasBullishDivergence(candles) {
-  if (candles.length < 30) return false;
-  const w = candles.slice(-30), a = w.slice(0, 15), b = w.slice(15);
-  const minIdx = arr => arr.reduce((best, c, i) => c.low < arr[best].low ? i : best, 0);
-  const i1 = minIdx(a), i2 = minIdx(b);
-  return b[i2].low < a[i1].low && b[i2].rsi > a[i1].rsi;
-}
-function findResistanceLevels(candles15, candles4h, price) {
-  const levels = [];
-  for (const candles of [candles15, candles4h]) {
+
+// ==================== Historical targets ====================
+
+function findTargetZones(candles15, candles4, entry, atr, side) {
+  const isLong = side === 'LONG';
+  const points = [];
+
+  for (const [timeframe, candles] of [
+    ['15m', candles15],
+    ['4h', candles4],
+  ]) {
     for (let i = 2; i < candles.length - 2; i++) {
-      const h = candles[i].high;
-      if (h > candles[i - 1].high && h > candles[i - 2].high && h >= candles[i + 1].high && h >= candles[i + 2].high) levels.push(h);
-    }
-  }
-  const clustered = [];
-  for (const lvl of levels.filter(x => x > price * 1.003 && x < price * 1.30).sort((a, b) => a - b)) {
-    const last = clustered.at(-1);
-    if (last && Math.abs(lvl - last) / last < 0.007) clustered[clustered.length - 1] = Math.max(last, lvl);
-    else clustered.push(lvl);
-  }
-  return clustered.slice(0, 5);
-}
+      const price = isLong ? candles[i].high : candles[i].low;
 
-async function getBtcRegime() {
-  try {
-    const raw = await requestGate(`/futures/${CONFIG.SETTLE}/candlesticks`, { contract: 'BTC_USDT', interval: '4h', limit: CONFIG.CANDLES_4H_LIMIT });
-    const candles = addIndicators(toClosedCandles(raw, 4 * 3600, Date.now() / 1000));
-    if (candles.length < 210) return 'NEUTRAL';
-    const l = candles.at(-1);
-    if (l.close < l.ema50 && l.ema50 < l.ema200) return 'BEARISH';
-    if (l.close > l.ema50 && l.ema50 > l.ema200) return 'BULLISH';
-    return 'NEUTRAL';
-  } catch (error) {
-    console.warn('[BTC REGIME] Failed, assuming NEUTRAL:', error?.message || error);
-    return 'NEUTRAL';
-  }
-}
+      const confirmed = isLong
+        ? (
+            price > candles[i - 1].high &&
+            price > candles[i - 2].high &&
+            price >= candles[i + 1].high &&
+            price >= candles[i + 2].high
+          )
+        : (
+            price < candles[i - 1].low &&
+            price < candles[i - 2].low &&
+            price <= candles[i + 1].low &&
+            price <= candles[i + 2].low
+          );
 
-/* ---------------- LONG ONLY ANALYZER ---------------- */
-function analyzeLong(market, metrics, hourly, raw15m, raw4h, nowSeconds, marketRegime) {
-  const btcBearish = marketRegime === 'BEARISH';
-  if (btcBearish && CONFIG.LONG_MODE === 'STRICT') return reject('BTC_BEARISH_STRICT');
-
-  const candles4h = addIndicators(toClosedCandles(raw4h, 4 * 3600, nowSeconds));
-  const candles15 = addIndicators(toClosedCandles(raw15m, 15 * 60, nowSeconds));
-  if (candles4h.length < 210 || candles15.length < 60) return reject('INSUFFICIENT_CANDLES');
-
-  const l4 = candles4h.at(-1), l = candles15.at(-1), p = candles15.at(-2);
-  const tickerPrice = num(market.ticker?.last);
-  const price = positive(tickerPrice) ? tickerPrice : l.close;
-  if (!positive(price) || !positive(l.atr) || !positive(l.ema20)) return reject('BAD_PRICE_OR_INDICATOR');
-  if (Math.abs(price - l.close) / l.close > 0.025) return reject('PRICE_MOVED_AWAY_FROM_TRIGGER');
-
-  const funding = num(market.contract?.funding_rate) ?? num(market.ticker?.funding_rate) ?? 0;
-
-  if (!(l4.close > l4.ema50 && l4.ema50 > l4.ema200)) return reject('COIN_4H_TREND');
-  if (l.rsi > CONFIG.MAX_RSI_ENTRY || l4.rsi > CONFIG.MAX_RSI_4H) return reject('RSI_OVERBOUGHT');
-  if ((price - l.ema20) / l.ema20 * 100 > 4) return reject('PRICE_CHASING');
-  if (funding > CONFIG.MAX_FUNDING_RATE) return reject('FUNDING_CROWDED');
-
-  const prevWindow = candles15.slice(-41, -1);
-  if (prevWindow.length < 20) return reject('INSUFFICIENT_15M_WINDOW');
-  const support = Math.min(...prevWindow.map(c => c.low));
-  const prevResistance = Math.max(...prevWindow.map(c => c.high));
-  const recentSwingLow = Math.min(...candles15.slice(-21, -1).map(c => c.low));
-  const atr = l.atr;
-
-  const reasons = [];
-  let setup = 'Pullback';
-
-  // 1) Trend — 30
-  let trendScore = 0;
-  if (l4.close > l4.ema50) { trendScore += 10; reasons.push('روند 4H صعودی'); }
-  if (l4.ema20 > l4.ema50 && l4.ema50 > l4.ema200) { trendScore += 10; reasons.push('چیدمان صعودی EMAها در 4H'); }
-  if (l4.adx > 20) { trendScore += 10; reasons.push(`روند قوی ADX=${fmt(l4.adx, 0)}`); }
-
-  // 2) Pullback / Breakout quality — 25
-  let setupScore = 0;
-  if ((price - support) / price * 100 < 2.5) { setupScore += 10; reasons.push('قیمت روی حمایت 15m'); }
-  const sub = candles4h.slice(-90);
-  let hiIdx = 0;
-  sub.forEach((c, i) => { if (c.high > sub[hiIdx].high) hiIdx = i; });
-  if (hiIdx > 5) {
-    const swingHigh = sub[hiIdx].high;
-    const swingLow = Math.min(...sub.slice(0, hiIdx + 1).map(c => c.low));
-    if (swingHigh > swingLow) {
-      const diff = swingHigh - swingLow;
-      if (price <= swingHigh - diff * 0.382 && price >= swingHigh - diff * 0.618) {
-        setupScore += 10; reasons.push('پولبک در ناحیه طلایی فیبوناچی 0.382-0.618');
+      if (confirmed) {
+        points.push({
+          price,
+          timeframe,
+          time: candles[i].time,
+        });
       }
     }
   }
-  if (l.bbLower != null && price <= l.bbMid && price >= l.bbLower) { setupScore += 5; reasons.push('اصلاح سالم تا میانه Bollinger'); }
-  if (p.close <= prevResistance && l.close > prevResistance) {
-    if ((l.close - prevResistance) / prevResistance * 100 > 2) return reject('LATE_BREAKOUT_CHASE');
-    setupScore += 12; setup = 'Breakout'; reasons.push('شکست و تثبیت بالای مقاومت 15m');
+
+  points.sort((a, b) => a.price - b.price);
+
+  const zones = [];
+
+  for (const point of points) {
+    const previous = zones.at(-1);
+
+    const tolerance = Math.min(
+      atr * CONFIG.LEVEL_CLUSTER_ATR,
+      point.price * 0.003
+    );
+
+    if (previous && point.price - previous.low <= tolerance) {
+      previous.high = Math.max(previous.high, point.price);
+      previous.touches++;
+      previous.timeframes = [
+        ...new Set([...previous.timeframes, point.timeframe]),
+      ];
+    } else {
+      zones.push({
+        low: point.price,
+        high: point.price,
+        touches: 1,
+        timeframes: [point.timeframe],
+      });
+    }
   }
-  setupScore = clamp(setupScore, 0, 25);
 
-  // 3) Entry trigger — 25 — mandatory
-  let triggerScore = 0, hasTrigger = false;
-  if (p.macdHist < 0 && l.macdHist > 0) { triggerScore += 10; hasTrigger = true; reasons.push('کراس صعودی MACD در 15m'); }
-  if (l.rsi >= 35 && l.rsi <= 55 && l.rsi > p.rsi) { triggerScore += 8; hasTrigger = true; reasons.push(`برگشت RSI از ${fmt(l.rsi, 0)}`); }
-  if (isBullishEngulfing(candles15)) { triggerScore += 7; hasTrigger = true; reasons.push('کندل Engulfing صعودی'); }
-  if (isHammer(candles15)) { triggerScore += 5; hasTrigger = true; reasons.push('کندل Hammer برگشتی'); }
-  if (hasBullishDivergence(candles15)) { triggerScore += 8; hasTrigger = true; reasons.push('واگرایی مثبت RSI در 15m'); }
-  if (!hasTrigger) return reject('NO_15M_TRIGGER');
-  triggerScore = clamp(triggerScore, 0, 25);
+  return isLong
+    ? zones
+        .filter(zone => zone.high >= entry)
+        .sort((a, b) => a.low - b.low)
+    : zones
+        .filter(zone => zone.low <= entry)
+        .sort((a, b) => b.high - a.high);
+}
 
-  // 4) Volume / live buy pressure — 15
-  let volumeScore = 0;
-  const lastVolume = positive(l.quoteTurnover) ? l.quoteTurnover : l.volumeContracts;
-  const volRatio = positive(l.volMa20) ? lastVolume / l.volMa20 : null;
-  if (volRatio != null && volRatio >= 1.5) { volumeScore += 8; reasons.push(`حجم کندل ${fmt(volRatio, 1)}x میانگین`); }
-  else if (volRatio != null && volRatio >= 1) { volumeScore += 4; reasons.push('حجم بالاتر از میانگین'); }
-  if (metrics?.recentTotal > 0 && metrics.buyShareRecent >= 56 && metrics.deltaRecent > 0) { volumeScore += 5; reasons.push(`فشار خرید زنده ${fmt(metrics.buyShareRecent, 1)}٪ در ۳ دقیقه اخیر`); }
-  else if (metrics?.recentTotal > 0 && metrics.buyShareRecent >= 53 && metrics.deltaRecent > 0) { volumeScore += 3; }
-  if (hourly?.sellerPressureFalling) { volumeScore += 2; reasons.push('کاهش فشار فروش در کندل‌های 1H'); }
-  if (funding < 0) { volumeScore += 2; reasons.push('فاندینگ منفی؛ پتانسیل Short Squeeze'); }
-  volumeScore = clamp(volumeScore, 0, 15);
+function netRR(side, entry, stop, target) {
+  const costRate =
+    CONFIG.FEE_RATE_PER_SIDE + CONFIG.SLIPPAGE_RATE_PER_SIDE;
 
-  // Stop Loss from structure + ATR
-  let stopLoss = Math.min(support, recentSwingLow) - atr * 0.5;
-  let risk = price - stopLoss;
-  if (!positive(risk) || risk < atr * 0.8) { stopLoss = price - atr * 1.5; risk = price - stopLoss; }
-  if (!positive(risk) || risk > atr * 5) return reject('BAD_RISK');
+  const priceRisk = side === 'LONG' ? entry - stop : stop - entry;
+  const priceReward = side === 'LONG' ? target - entry : entry - target;
 
-  // Ceilings from real swing resistances; fallback to RR levels
-  const resistances = findResistanceLevels(candles15, candles4h, price).filter(x => x > price + risk);
-  const tp1 = resistances[0] ?? price + risk * 1.5;
-  const tp2 = resistances[1] ?? Math.max(price + risk * 2.5, tp1 + risk * 0.8);
-  const tp3 = resistances[2] ?? Math.max(price + risk * 4, tp2 + risk);
-  if (!(price < tp1 && tp1 < tp2 && tp2 < tp3)) return reject('BAD_TP_ORDER');
+  const risk = priceRisk + (entry + stop) * costRate;
+  const reward = priceReward - (entry + target) * costRate;
 
-  const rr1 = (tp1 - price) / risk, rr2 = (tp2 - price) / risk;
-  if (rr1 < CONFIG.MIN_RR_TP1 || rr2 < CONFIG.MIN_RR_TP2) return reject('LOW_RR');
+  return positive(risk) ? reward / risk : null;
+}
 
-  // در BTC نزولی فقط ستاپ واقعاً قوی قبول است
-  if (btcBearish && (l4.adx < 25 || rr2 < 2.2)) return reject('BTC_BEARISH_WEAK_SETUP');
+// ==================== Trade samples ====================
 
-  let score = trendScore + setupScore + triggerScore + volumeScore;
-  if (rr2 >= 2.5) { score += 5; reasons.push(`سود به ضرر عالی تا سقف۲: 1:${fmt(rr2, 1)}`); }
-  else if (rr2 >= 2) score += 3;
-  score = intScore(score);
+function tradeTime(trade) {
+  const milliseconds = num(trade?.create_time_ms);
 
-  const minScore = btcBearish
-    ? CONFIG.MIN_LONG_SCORE_BEARISH
-    : marketRegime === 'NEUTRAL'
-      ? CONFIG.MIN_LONG_SCORE_NEUTRAL
-      : CONFIG.MIN_LONG_SCORE;
+  return positive(milliseconds)
+    ? milliseconds / 1000
+    : num(trade?.create_time);
+}
 
-  if (score < minScore) {
-    currentNearMisses.push({
-      symbol: market.symbol,
-      score,
-      required: minScore,
-      setup,
-      price,
-      rsi15: round(l.rsi, 1),
-      rr2: round(rr2, 2),
-      reasons: reasons.slice(0, 4),
+function aggregateTrades(rawTrades, multiplier, requestedFrom, asOf) {
+  const available = Array.isArray(rawTrades);
+  const rows = available ? rawTrades : [];
+
+  let invalid = 0;
+  const seen = new Set();
+  const normalized = [];
+
+  for (const trade of rows) {
+    const time = tradeTime(trade);
+    const size = num(trade?.size);
+    const price = num(trade?.price);
+
+    if (
+      !positive(time) ||
+      size == null ||
+      !positive(price) ||
+      !positive(multiplier)
+    ) {
+      invalid++;
+      continue;
+    }
+
+    if (trade.id != null) {
+      const id = String(trade.id);
+      if (seen.has(id)) continue;
+      seen.add(id);
+    }
+
+    if (time < requestedFrom || time > asOf) continue;
+
+    normalized.push({
+      time,
+      buy: size > 0 ? size * multiplier * price : 0,
+      sell: size < 0 ? Math.abs(size) * multiplier * price : 0,
     });
-    return reject('SCORE_LOW');
   }
+
+  const oldest = normalized.length
+    ? Math.min(...normalized.map(x => x.time))
+    : null;
+
+  const truncated = rows.length >= CONFIG.TRADE_LIMIT;
+  const coveredFrom = truncated ? oldest : requestedFrom;
+
+  const covered = start =>
+    available &&
+    invalid === 0 &&
+    coveredFrom != null &&
+    coveredFrom <= start;
+
+  const sumWindow = (start, end) => {
+    const trades = normalized.filter(x =>
+      x.time >= start && x.time < end
+    );
+
+    const buy = trades.reduce((sum, x) => sum + x.buy, 0);
+    const sell = trades.reduce((sum, x) => sum + x.sell, 0);
+
+    return {
+      buy,
+      sell,
+      total: buy + sell,
+      delta: buy - sell,
+      buyShare: buy + sell > 0 ? 100 * buy / (buy + sell) : null,
+      count: trades.length,
+    };
+  };
+
+  const end = Math.floor(asOf / 60) * 60;
+  const recent = sumWindow(end - 180, end);
+  const previous = sumWindow(end - 360, end - 180);
+  const prior = sumWindow(end - 540, end - 360);
+  const recentComplete = covered(end - 180);
+
+  const buyBaselineValid =
+    covered(end - 360) &&
+    previous.buy >= CONFIG.MIN_PREVIOUS_FLOW_BASELINE;
+
+  const sellBaselineValid =
+    covered(end - 360) &&
+    previous.sell >= CONFIG.MIN_PREVIOUS_FLOW_BASELINE;
+
+  const buyRateMultiple = buyBaselineValid
+    ? recent.buy / previous.buy
+    : null;
+
+  const sellRateMultiple = sellBaselineValid
+    ? recent.sell / previous.sell
+    : null;
+
+  const buyAcceleration =
+    buyRateMultiple != null &&
+    covered(end - 540) &&
+    prior.buy >= CONFIG.MIN_PREVIOUS_FLOW_BASELINE
+      ? buyRateMultiple - previous.buy / prior.buy
+      : null;
+
+  const sellAcceleration =
+    sellRateMultiple != null &&
+    covered(end - 540) &&
+    prior.sell >= CONFIG.MIN_PREVIOUS_FLOW_BASELINE
+      ? sellRateMultiple - previous.sell / prior.sell
+      : null;
+
+  let activeBuyMinutes = 0;
+  let activeSellMinutes = 0;
+
+  for (let start = end - 180; start < end; start += 60) {
+    const bucket = sumWindow(start, start + 60);
+    if (bucket.buy > 0) activeBuyMinutes++;
+    if (bucket.sell > 0) activeSellMinutes++;
+  }
+
+  const hourStart = Math.floor(asOf / 3600) * 3600;
+  const hour = sumWindow(hourStart, asOf + 0.001);
+
+  const coveragePct = !available
+    ? null
+    : !truncated
+      ? 100
+      : oldest == null
+        ? 0
+        : clamp(
+            100 * (asOf - Math.max(hourStart, oldest)) /
+            Math.max(1, asOf - hourStart)
+          );
+
+  return {
+    available,
+    recentComplete,
+    validTrades: normalized.length,
+
+    currentHour: {
+      buyNotionalSample: round(hour.buy),
+      sellNotionalSample: round(hour.sell),
+      buySharePct: round(hour.buyShare, 1),
+      netDeltaSample: round(hour.delta),
+      sampleCoveragePct: round(coveragePct, 0),
+      sampleTruncated: truncated,
+      sampleTrades: hour.count,
+    },
+
+    recent3m: {
+      buyNotional: round(recent.buy),
+      sellNotional: round(recent.sell),
+      buySharePct: round(recent.buyShare, 1),
+      sellSharePct: recent.buyShare == null
+        ? null
+        : round(100 - recent.buyShare, 1),
+      netDelta: round(recent.delta),
+      buyNotionalPerMinute: round(recent.buy / 3),
+      sellNotionalPerMinute: round(recent.sell / 3),
+      previousBuyNotionalPerMinute: round(previous.buy / 3),
+      previousSellNotionalPerMinute: round(previous.sell / 3),
+      buyRateMultiple: round(buyRateMultiple),
+      sellRateMultiple: round(sellRateMultiple),
+      buyAcceleration: round(buyAcceleration),
+      sellAcceleration: round(sellAcceleration),
+      baselineValid: buyBaselineValid,
+      sellBaselineValid,
+      sampleComplete: recentComplete,
+      persistencePct: round(activeBuyMinutes / 3 * 100, 0),
+      sellPersistencePct: round(activeSellMinutes / 3 * 100, 0),
+      activeBuyMinutes,
+      activeSellMinutes,
+      windowEnd: new Date(end * 1000).toISOString(),
+    },
+  };
+}
+
+// ==================== Hourly storage context ====================
+
+function buildHourlyContext(rawCandles, rawStats, multiplier, asOf) {
+  const candles = Array.isArray(rawCandles)
+    ? toClosedCandles(rawCandles, 3600, asOf)
+    : [];
+
+  const statsByHour = new Map();
+
+  for (const row of rawStats || []) {
+    const time = num(row?.time);
+    if (!positive(time)) continue;
+
+    const bucket = Math.floor(time / 3600) * 3600;
+    if (bucket + 3600 <= asOf) statsByHour.set(bucket, row);
+  }
+
+  const history = candles.map(candle => {
+    const stat = statsByHour.get(candle.time);
+    const long = num(stat?.long_taker_size);
+    const short = num(stat?.short_taker_size);
+    const directionalDataAvailable = long != null && short != null;
+
+    const buy = directionalDataAvailable
+      ? Math.abs(long) * multiplier * candle.close
+      : null;
+
+    const sell = directionalDataAvailable
+      ? Math.abs(short) * multiplier * candle.close
+      : null;
+
+    return {
+      time: new Date(candle.time * 1000).toISOString(),
+      open: candle.open,
+      close: candle.close,
+      priceChangePct: round(pctChange(candle.close, candle.open)),
+      totalVolumeUSDT: round(candle.quoteTurnover),
+      buyVolumeUSDT: round(buy),
+      sellVolumeUSDT: round(sell),
+      buySharePct: directionalDataAvailable && buy + sell > 0
+        ? round(100 * buy / (buy + sell), 1)
+        : null,
+      deltaUSDT: directionalDataAvailable ? round(buy - sell) : null,
+      directionalDataAvailable,
+    };
+  }).slice(-CONFIG.HISTORY_REPORT_HOURS);
+
+  const previous = history.slice(0, 3);
+  const recent = history.slice(-3);
+  const enough = history.length === 6;
+
+  const fieldAverage = (group, field) =>
+    group.length === 3 && group.every(x => x[field] != null)
+      ? average(group.map(x => x[field]))
+      : null;
+
+  const previousSell = fieldAverage(previous, 'sellVolumeUSDT');
+  const recentSell = fieldAverage(recent, 'sellVolumeUSDT');
+  const previousShare = fieldAverage(previous, 'buySharePct');
+  const recentShare = fieldAverage(recent, 'buySharePct');
+  const previousVolume = fieldAverage(previous, 'totalVolumeUSDT');
+  const recentVolume = fieldAverage(recent, 'totalVolumeUSDT');
+
+  const sellerPressureFalling =
+    enough &&
+    positive(previousSell) &&
+    recentSell != null &&
+    recentSell < previousSell * 0.9;
+
+  const buyShareImproving =
+    enough &&
+    previousShare != null &&
+    recentShare != null &&
+    recentShare > previousShare + 3;
+
+  const directionalCoveragePct = history.length
+    ? round(
+        100 * history.filter(x => x.directionalDataAvailable).length /
+        history.length,
+        0
+      )
+    : 0;
+
+  const change = history.length >= 2
+    ? pctChange(history.at(-1).close, history[0].close)
+    : null;
+
+  return {
+    available: history.length >= 4,
+    priceTrend: change == null
+      ? 'UNKNOWN'
+      : change > 0 ? 'UP' : change < 0 ? 'DOWN' : 'FLAT',
+    priceChangePct: round(change),
+
+    volumeTrend:
+      !enough || !positive(previousVolume) || recentVolume == null
+        ? 'UNKNOWN'
+        : recentVolume < previousVolume * 0.9
+          ? 'FALLING'
+          : recentVolume > previousVolume * 1.1
+            ? 'RISING'
+            : 'STABLE',
+
+    sellerPressure:
+      !enough || previousSell == null || recentSell == null
+        ? 'INSUFFICIENT_DIRECTIONAL_DATA'
+        : sellerPressureFalling ? 'FALLING' : 'NOT_FALLING',
+
+    sellerPressureFalling,
+    buyShareImproving,
+    directionalCoveragePct,
+    candles: history,
+  };
+}
+
+// ==================== Markets / BTC ====================
+
+async function getMarkets() {
+  const [rawContracts, rawTickers] = await Promise.all([
+    requestGate(`/futures/${CONFIG.SETTLE}/contracts`),
+    requestGate(`/futures/${CONFIG.SETTLE}/tickers`),
+  ]);
+
+  const contracts = requireArray(rawContracts, 'contracts');
+  const tickers = requireArray(rawTickers, 'tickers');
+  const tickerMap = new Map(
+    tickers.map(ticker => [ticker.contract, ticker])
+  );
+
+  const active = contracts.filter(contract =>
+    typeof contract.name === 'string' &&
+    contract.name.endsWith('_USDT') &&
+    contract.status === 'trading' &&
+    contract.in_delisting === false &&
+    positive(num(contract.quanto_multiplier))
+  );
+
+  const markets = active.map(contract => {
+    const ticker = tickerMap.get(contract.name);
+    const quoteVolume = num(ticker?.volume_24h_quote);
+
+    if (
+      !positive(num(ticker?.last)) ||
+      quoteVolume == null ||
+      quoteVolume < CONFIG.MIN_QUOTE_VOLUME_24H
+    ) {
+      return null;
+    }
+
+    return {
+      symbol: contract.name,
+      contract,
+      ticker,
+      quoteVolume,
+    };
+  })
+    .filter(Boolean)
+    .sort((a, b) => b.quoteVolume - a.quoteVolume);
+
+  return { active, markets };
+}
+
+async function getBtcRegime(asOf) {
+  try {
+    const raw = await requestGate(
+      `/futures/${CONFIG.SETTLE}/candlesticks`,
+      {
+        contract: 'BTC_USDT',
+        interval: '4h',
+        limit: CONFIG.CANDLES_4H_LIMIT,
+      }
+    );
+
+    const candles = toClosedCandles(raw, 14400, asOf);
+
+    if (!validCandleSeries(
+      candles, 14400, CONFIG.MIN_CANDLES_4H, asOf
+    )) {
+      throw new Error('BTC candles insufficient, stale or discontinuous');
+    }
+
+    const last = addIndicators(candles).at(-1);
+
+    if (last.close > last.ema50 && last.ema50 > last.ema200) {
+      return 'BULLISH';
+    }
+
+    if (last.close < last.ema50 && last.ema50 < last.ema200) {
+      return 'BEARISH';
+    }
+
+    return 'NEUTRAL';
+  } catch (error) {
+    console.error('[BTC REGIME]', error.message);
+    return 'UNKNOWN';
+  }
+}
+
+function prepareAnalysis(raw15, raw4, context) {
+  const candles15 = toClosedCandles(raw15, 900, context.asOf);
+  const candles4 = toClosedCandles(raw4, 14400, context.asOf);
+
+  if (
+    candles15.length < CONFIG.MIN_CANDLES_15M ||
+    candles4.length < CONFIG.MIN_CANDLES_4H
+  ) {
+    return { error: 'INSUFFICIENT_CANDLES' };
+  }
+
+  if (
+    !validCandleSeries(
+      candles15, 900, CONFIG.MIN_CANDLES_15M, context.asOf
+    ) ||
+    !validCandleSeries(
+      candles4, 14400, CONFIG.MIN_CANDLES_4H, context.asOf
+    )
+  ) {
+    return { error: 'STALE_OR_GAPPED_CANDLES' };
+  }
+
+  return {
+    c15: addIndicators(candles15),
+    c4: addIndicators(candles4),
+  };
+}
+
+// ==================== LONG / SHORT analyzer ====================
+
+function analyzeDirection(market, prepared, context, side) {
+  const isLong = side === 'LONG';
+  const fail = reason => reject(context, reason, side);
+
+  if (context.regime === 'UNKNOWN') return fail('BTC_DATA_UNKNOWN');
+
+  const counterBTC = isLong
+    ? context.regime === 'BEARISH'
+    : context.regime === 'BULLISH';
+
+  if (CONFIG.MODE === 'STRICT' && counterBTC) {
+    return fail('BTC_OPPOSITE_STRICT');
+  }
+
+  const { c15, c4 } = prepared;
+  const last = c15.at(-1);
+  const previous = c15.at(-2);
+  const trend = c4.at(-1);
+  const price = num(market.ticker.last);
+  const atr = last.atr;
+
+  if (
+    !positive(price) ||
+    !positive(atr) ||
+    ![
+      last.rsi,
+      previous.rsi,
+      trend.rsi,
+      trend.adx,
+      trend.plusDI,
+      trend.minusDI,
+    ].every(Number.isFinite)
+  ) {
+    return fail('BAD_PRICE_OR_INDICATOR');
+  }
+
+  const trendValid = isLong
+    ? trend.close > trend.ema50 && trend.ema50 > trend.ema200
+    : trend.close < trend.ema50 && trend.ema50 < trend.ema200;
+
+  if (!trendValid) return fail('COIN_4H_TREND');
+
+  if (
+    isLong &&
+    (
+      last.rsi > CONFIG.MAX_RSI_LONG_ENTRY ||
+      trend.rsi > CONFIG.MAX_RSI_LONG_4H
+    )
+  ) {
+    return fail('RSI_OVERBOUGHT');
+  }
+
+  if (
+    !isLong &&
+    (
+      last.rsi < CONFIG.MIN_RSI_SHORT_ENTRY ||
+      trend.rsi < CONFIG.MIN_RSI_SHORT_4H
+    )
+  ) {
+    return fail('RSI_OVERSOLD');
+  }
+
+  const drift = Math.abs(price - last.close);
+
+  if (
+    drift > atr * CONFIG.MAX_TRIGGER_DRIFT_ATR ||
+    drift / last.close * 100 > CONFIG.MAX_TRIGGER_DRIFT_PCT
+  ) {
+    return fail('PRICE_MOVED_AWAY_FROM_TRIGGER');
+  }
+
+  const emaDistance = isLong
+    ? price - last.ema20
+    : last.ema20 - price;
+
+  if (emaDistance > atr * CONFIG.MAX_DISTANCE_EMA_ATR) {
+    return fail('PRICE_CHASING');
+  }
+
+  const funding =
+    num(market.contract.funding_rate) ??
+    num(market.ticker.funding_rate);
+
+  if (funding == null) return fail('FUNDING_UNKNOWN');
+
+  if (
+    (isLong && funding > CONFIG.MAX_FUNDING_RATE_LONG) ||
+    (!isLong && funding < CONFIG.MIN_FUNDING_RATE_SHORT)
+  ) {
+    return fail('FUNDING_CROWDED');
+  }
+
+  const priorWindow = c15.slice(-41, -1);
+
+  const structure = isLong
+    ? Math.min(...priorWindow.map(x => x.low))
+    : Math.max(...priorWindow.map(x => x.high));
+
+  const structureBroken = isLong
+    ? price <= structure || last.close <= structure
+    : price >= structure || last.close >= structure;
+
+  if (structureBroken) {
+    return fail(isLong ? 'SUPPORT_BROKEN' : 'RESISTANCE_BROKEN');
+  }
+
+  const nearStructure = isLong
+    ? (
+        Math.abs(last.low - structure) <= atr * 0.6 &&
+        last.close > structure
+      )
+    : (
+        Math.abs(last.high - structure) <= atr * 0.6 &&
+        last.close < structure
+      );
+
+  const touchedEma = isLong
+    ? (
+        last.low <= last.ema20 + atr * 0.25 &&
+        last.high >= last.ema20 - atr * 0.25 &&
+        last.close >= last.ema20
+      )
+    : (
+        last.high >= last.ema20 - atr * 0.25 &&
+        last.low <= last.ema20 + atr * 0.25 &&
+        last.close <= last.ema20
+      );
+
+  const priorCorrection = c15.slice(-5, -1).some(x =>
+    isLong
+      ? x.close < x.ema20 || x.close < x.open
+      : x.close > x.ema20 || x.close > x.open
+  );
+
+  const directionCandle = isLong
+    ? last.close > last.open && last.close > previous.close
+    : last.close < last.open && last.close < previous.close;
+
+  const pullback =
+    priorCorrection &&
+    (nearStructure || touchedEma) &&
+    directionCandle;
+
+  const beforeBreak = c15.slice(-42, -2);
+
+  const breakLevel = isLong
+    ? Math.max(...beforeBreak.map(x => x.high))
+    : Math.min(...beforeBreak.map(x => x.low));
+
+  const breakVolume =
+    previous.volumeRatio != null &&
+    previous.volumeRatio >= 1.3;
+
+  const breakRetest = breakVolume && (
+    isLong
+      ? (
+          previous.close > breakLevel &&
+          previous.close - breakLevel <= atr &&
+          last.low >= breakLevel - atr * 0.5 &&
+          last.low <= breakLevel + atr * 0.35 &&
+          last.close > breakLevel &&
+          last.close > last.open &&
+          price >= breakLevel &&
+          price - breakLevel <= atr
+        )
+      : (
+          previous.close < breakLevel &&
+          breakLevel - previous.close <= atr &&
+          last.high <= breakLevel + atr * 0.5 &&
+          last.high >= breakLevel - atr * 0.35 &&
+          last.close < breakLevel &&
+          last.close < last.open &&
+          price <= breakLevel &&
+          breakLevel - price <= atr
+        )
+  );
+
+  if (!pullback && !breakRetest) return fail('NO_VALID_SETUP');
+
+  const setup = breakRetest
+    ? isLong ? 'BreakoutRetest' : 'BreakdownRetest'
+    : 'Pullback';
+
+  const cross = isLong
+    ? previous.macdHist <= 0 && last.macdHist > 0
+    : previous.macdHist >= 0 && last.macdHist < 0;
+
+  const rsiTurn = isLong
+    ? (
+        last.rsi >= 35 &&
+        last.rsi <= 60 &&
+        last.rsi >= previous.rsi + 2
+      )
+    : (
+        last.rsi >= 40 &&
+        last.rsi <= 65 &&
+        last.rsi <= previous.rsi - 2
+      );
+
+  const engulfing = engulfingPattern(c15, side);
+  const rejection = rejectionCandle(c15, side);
+
+  const emaTrigger = isLong
+    ? (
+        previous.close <= previous.ema9 &&
+        last.close > last.ema9 &&
+        last.close > last.open
+      )
+    : (
+        previous.close >= previous.ema9 &&
+        last.close < last.ema9 &&
+        last.close < last.open
+      );
+
+  if (!(cross || rsiTurn || engulfing || rejection || emaTrigger || breakRetest)) {
+    return fail('NO_15M_TRIGGER');
+  }
+
+  let stopStructure;
+
+  if (breakRetest) {
+    stopStructure = isLong
+      ? Math.min(last.low, breakLevel)
+      : Math.max(last.high, breakLevel);
+  } else if (nearStructure) {
+    stopStructure = isLong
+      ? Math.min(structure, last.low)
+      : Math.max(structure, last.high);
+  } else {
+    stopStructure = isLong
+      ? Math.min(...c15.slice(-5).map(x => x.low))
+      : Math.max(...c15.slice(-5).map(x => x.high));
+  }
+
+  const stopLoss = isLong
+    ? stopStructure - atr * CONFIG.STOP_ATR_BUFFER
+    : stopStructure + atr * CONFIG.STOP_ATR_BUFFER;
+
+  const halfZone = Math.min(
+    atr * CONFIG.ENTRY_ZONE_ATR,
+    price * CONFIG.MAX_ENTRY_ZONE_PCT / 100
+  );
+
+  const entryLow = price - halfZone;
+  const entryHigh = price + halfZone;
+  const referenceEntry = isLong ? entryHigh : entryLow;
+
+  const risk = isLong
+    ? referenceEntry - stopLoss
+    : stopLoss - referenceEntry;
+
+  const invalidStop = isLong
+    ? stopLoss >= entryLow
+    : stopLoss <= entryHigh;
+
+  if (
+    !positive(stopLoss) ||
+    !positive(entryLow) ||
+    invalidStop ||
+    risk < atr * CONFIG.MIN_STOP_ATR ||
+    risk > atr * CONFIG.MAX_STOP_ATR ||
+    risk / referenceEntry * 100 > CONFIG.MAX_STOP_PCT
+  ) {
+    return fail('BAD_RISK');
+  }
+
+  const zones = findTargetZones(
+    c15, c4, referenceEntry, atr, side
+  );
+
+  if (!zones.length) return fail('NO_HISTORICAL_TARGET');
+
+  const entryInsideObstacle = isLong
+    ? zones[0].low <= referenceEntry
+    : zones[0].high >= referenceEntry;
+
+  if (entryInsideObstacle) {
+    return fail(
+      isLong ? 'ENTRY_INSIDE_RESISTANCE' : 'ENTRY_INSIDE_SUPPORT'
+    );
+  }
+
+  const source = isLong
+    ? 'HISTORICAL_PIVOT_RESISTANCE'
+    : 'HISTORICAL_PIVOT_SUPPORT';
+
+  const targets = zones.slice(0, 3).map((zone, index) => {
+    const target = isLong ? zone.low : zone.high;
+
+    return {
+      level: index + 1,
+      price: target,
+      zoneLow: zone.low,
+      zoneHigh: zone.high,
+      source,
+      timeframes: zone.timeframes,
+      touches: zone.touches,
+      pct: round(directionalPct(side, referenceEntry, target)),
+      rrNet: round(netRR(side, referenceEntry, stopLoss, target)),
+    };
+  });
+
+  const rr1 = netRR(
+    side, referenceEntry, stopLoss, targets[0].price
+  );
+
+  const rr2 = targets[1]
+    ? netRR(side, referenceEntry, stopLoss, targets[1].price)
+    : null;
+
+  if (
+    !Number.isFinite(rr1) ||
+    rr1 < CONFIG.MIN_RR_TP1 ||
+    (rr2 != null && rr2 < CONFIG.MIN_RR_TP2) ||
+    (rr2 == null && rr1 < CONFIG.MIN_SINGLE_TARGET_RR)
+  ) {
+    return fail('LOW_RR_AT_NEAREST_LEVEL');
+  }
+
+  const finalRR = rr2 ?? rr1;
+
+  const directionalStrength = isLong
+    ? trend.plusDI > trend.minusDI
+    : trend.minusDI > trend.plusDI;
+
+  if (
+    counterBTC &&
+    (
+      trend.adx < 25 ||
+      !directionalStrength ||
+      finalRR < CONFIG.MIN_COUNTER_BTC_RR
+    )
+  ) {
+    return fail('COUNTER_BTC_WEAK_SETUP');
+  }
+
+  const emaAligned = isLong
+    ? trend.ema20 > trend.ema50
+    : trend.ema20 < trend.ema50;
+
+  const trendScore =
+    10 +
+    (emaAligned ? 10 : 0) +
+    (trend.adx >= 20 && directionalStrength ? 10 : 0);
+
+  const setupScore = breakRetest
+    ? 25
+    : 15 + (nearStructure && touchedEma ? 10 : 0);
+
+  const triggerScore = Math.min(
+    25,
+    (cross ? 10 : 0) +
+    (rsiTurn ? 8 : 0) +
+    (engulfing ? 7 : 0) +
+    (rejection ? 5 : 0) +
+    (emaTrigger ? 5 : 0) +
+    (breakRetest ? 8 : 0)
+  );
+
+  const candleVolumeScore =
+    last.volumeRatio >= 1.5 ? 10 :
+    last.volumeRatio >= 1 ? 5 : 0;
+
+  const rrScore = rr1 >= 2 ? 5 : rr1 >= 1.5 ? 3 : 0;
+
+  const baseScore =
+    trendScore + setupScore + triggerScore + candleVolumeScore + rrScore;
+
+  const required = isLong
+    ? (
+        counterBTC
+          ? CONFIG.MIN_LONG_SCORE_BEARISH
+          : context.regime === 'NEUTRAL'
+            ? CONFIG.MIN_LONG_SCORE_NEUTRAL
+            : CONFIG.MIN_LONG_SCORE
+      )
+    : (
+        counterBTC
+          ? CONFIG.MIN_SHORT_SCORE_BULLISH
+          : context.regime === 'NEUTRAL'
+            ? CONFIG.MIN_SHORT_SCORE_NEUTRAL
+            : CONFIG.MIN_SHORT_SCORE
+      );
+
+  const directionText = isLong ? 'صعودی' : 'نزولی';
+
+  const triggerReasons = [
+    cross ? `کراس ${directionText} MACD` : null,
+    rsiTurn ? `چرخش ${directionText} RSI` : null,
+    engulfing ? `پوشای ${directionText}` : null,
+    rejection ? (isLong ? 'چکش صعودی' : 'ستاره ثاقب نزولی') : null,
+    emaTrigger ? (isLong ? 'بازپس‌گیری EMA9' : 'از دست رفتن EMA9') : null,
+  ].filter(Boolean);
+
+  const setupReason = breakRetest
+    ? isLong
+      ? 'شکست مقاومت و بازآزمایی'
+      : 'شکست حمایت و بازآزمایی از پایین'
+    : isLong
+      ? 'پولبک و برگشت از حمایت'
+      : 'پولبک و برگشت نزولی از مقاومت';
+
+  const reasons = [
+    setupReason,
+    triggerReasons.slice(0, 2).join(' + ') || 'کندل تأیید بازآزمایی',
+    last.volumeRatio >= 1
+      ? `حجم ${fmt(last.volumeRatio, 1)} برابر میانگین قبلی`
+      : `روند 4H مطابق فیلتر ${directionText}`,
+  ];
+
+  const tp1 = targets[0]?.price ?? null;
+  const tp2 = targets[1]?.price ?? null;
+  const tp3 = targets[2]?.price ?? null;
 
   return {
     symbol: market.symbol,
     contract: market.symbol,
-    side: 'LONG',
+    side,
     setup,
-    score,
-    rankScore: score,
-    grade: score >= 85 ? 'A+' : score >= 75 ? 'A' : 'B',
-    status: 'LONG_ENTRY',
-    statusLabel: setup === 'Breakout' ? 'لانگ روی شکست مقاومت' : 'لانگ روی پولبک به حمایت',
+    status: `${side}_ENTRY`,
+    statusLabel: `${isLong ? 'لانگ' : 'شورت'}؛ ${setupReason}`,
+
     price,
+    entryLow,
+    entryHigh,
+    referenceEntry,
+    entry: { low: entryLow, high: entryHigh, price },
+
+    stopLoss,
+    stopLossPct: round(directionalPct(side, referenceEntry, stopLoss)),
+
+    tp1,
+    tp2,
+    tp3,
+    tp1Pct: round(directionalPct(side, referenceEntry, tp1)),
+    tp2Pct: round(directionalPct(side, referenceEntry, tp2)),
+    tp3Pct: round(directionalPct(side, referenceEntry, tp3)),
+    takeProfits: targets,
+    targetCount: targets.length,
+
+    riskRewardToTp1: round(rr1),
+    riskRewardToTp2: round(rr2),
+    rr: round(finalRR),
+
+    rsi15: round(last.rsi, 1),
+    rsi4h: round(trend.rsi, 1),
+    fundingRate: funding,
     change24h: num(market.ticker.change_percentage),
     quoteVolume24h: num(market.ticker.volume_24h_quote),
-    fundingRate: funding,
-    riskNote: btcBearish ? 'BTC نزولی؛ فقط ستاپ استثنایی، با نصف حجم همیشگی' : null,
-    entryLow: price * 0.998,
-    entryHigh: price * 1.002,
-    entry: { low: price * 0.998, high: price * 1.002, price },
-    stopLoss,
-    stopLossPct: round(pctFrom(price, stopLoss), 2),
-    tp1, tp2, tp3,
-    tp1Pct: round(pctFrom(price, tp1), 2),
-    tp2Pct: round(pctFrom(price, tp2), 2),
-    tp3Pct: round(pctFrom(price, tp3), 2),
-    takeProfits: [
-      { level: 1, price: tp1, pct: round(pctFrom(price, tp1), 2) },
-      { level: 2, price: tp2, pct: round(pctFrom(price, tp2), 2) },
-      { level: 3, price: tp3, pct: round(pctFrom(price, tp3), 2) },
-    ],
-    riskRewardToTp1: round(rr1, 2),
-    riskRewardToTp2: round(rr2, 2),
-    rr: round(rr2, 2),
-    rsi15: round(l.rsi, 1),
-    rsi4h: round(l4.rsi, 1),
+
+    triggerCandleTime: new Date(last.time * 1000).toISOString(),
+    analyzedAt: new Date(context.asOf * 1000).toISOString(),
+
+    validUntil: new Date(
+      (last.time + 900 + CONFIG.ENTRY_VALID_MINUTES * 60) * 1000
+    ).toISOString(),
+
+    riskNote: counterBTC
+      ? isLong
+        ? 'BTC نزولی؛ لانگ خلاف جهت بازار و پرریسک‌تر است.'
+        : 'BTC صعودی؛ شورت خلاف جهت بازار و پرریسک‌تر است.'
+      : null,
+
     reasons,
-    _sort: { score, rateMultiple: metrics?.rateMultiple ?? null, buyLast3: metrics?.buyLast3 ?? 0 },
+    score: Math.round(baseScore),
+    rankScore: Math.round(baseScore),
+
+    scoreBreakdown: {
+      trend: trendScore,
+      setup: setupScore,
+      trigger: triggerScore,
+      candleVolume: candleVolumeScore,
+      liveFlow: 0,
+      firstTargetRR: rrScore,
+    },
+
+    costAssumptions: {
+      feeRatePerSide: CONFIG.FEE_RATE_PER_SIDE,
+      slippageRatePerSide: CONFIG.SLIPPAGE_RATE_PER_SIDE,
+      fundingIncludedInRR: false,
+    },
+
+    _required: required,
   };
 }
 
-function analyzeMarket(market, trades, rawCandles, rawStats, rawCandles15, rawCandles4h, nowSeconds, marketRegime) {
+// ==================== Per-market scan ====================
+
+function addNearMiss(context, item) {
+  context.nearMisses.push({
+    symbol: item.symbol,
+    side: item.side,
+    score: item.score,
+    required: item._required,
+    setup: item.setup,
+    rsi15: item.rsi15,
+    rr1: item.riskRewardToTp1,
+    rr2: item.riskRewardToTp2,
+    targetCount: item.targetCount,
+    scoreBreakdown: item.scoreBreakdown,
+    reasons: item.reasons,
+  });
+}
+
+async function scanOneMarket(market, context) {
+  const [raw15, raw4] = await Promise.all([
+    requestGate(`/futures/${CONFIG.SETTLE}/candlesticks`, {
+      contract: market.symbol,
+      interval: '15m',
+      limit: CONFIG.CANDLES_15M_LIMIT,
+    }),
+    requestGate(`/futures/${CONFIG.SETTLE}/candlesticks`, {
+      contract: market.symbol,
+      interval: '4h',
+      limit: CONFIG.CANDLES_4H_LIMIT,
+    }),
+  ]);
+
+  const prepared = prepareAnalysis(raw15, raw4, context);
+
+  if (prepared.error) return reject(context, prepared.error);
+
+  const longCandidate = CONFIG.ENABLE_LONG
+    ? analyzeDirection(market, prepared, context, 'LONG')
+    : null;
+
+  const shortCandidate = CONFIG.ENABLE_SHORT
+    ? analyzeDirection(market, prepared, context, 'SHORT')
+    : null;
+
+  if (longCandidate && shortCandidate) {
+    return reject(context, 'CONFLICTING_DIRECTIONS');
+  }
+
+  const candidate = longCandidate || shortCandidate;
+  if (!candidate) return null;
+
+  const hourStart = Math.floor(context.asOf / 3600) * 3600;
+
+  const tradeFrom = Math.min(
+    hourStart,
+    Math.floor(context.asOf / 60) * 60 - 540
+  );
+
+  const [trades, candles1h, stats] = await Promise.all([
+    optionalArrayRequest(
+      `/futures/${CONFIG.SETTLE}/trades`,
+      {
+        contract: market.symbol,
+        from: tradeFrom,
+        to: Math.floor(context.asOf),
+        limit: CONFIG.TRADE_LIMIT,
+      },
+      `${market.symbol} trades`
+    ),
+    optionalArrayRequest(
+      `/futures/${CONFIG.SETTLE}/candlesticks`,
+      {
+        contract: market.symbol,
+        interval: '1h',
+        limit: CONFIG.HISTORY_HOURS + 2,
+      },
+      `${market.symbol} hourly candles`
+    ),
+    optionalArrayRequest(
+      `/futures/${CONFIG.SETTLE}/contract_stats`,
+      {
+        contract: market.symbol,
+        from: hourStart - CONFIG.HISTORY_HOURS * 3600,
+        interval: '1h',
+        limit: CONFIG.HISTORY_HOURS + 2,
+      },
+      `${market.symbol} contract stats`
+    ),
+  ]);
+
   const multiplier = num(market.contract.quanto_multiplier);
-  if (!positive(multiplier)) return { symbol: market.symbol, __error: 'quanto_multiplier نامعتبر است' };
 
-  const hourStart = Math.floor(nowSeconds / 3600) * 3600;
-  const metrics = aggregateCurrentTrades(trades, multiplier, hourStart, nowSeconds);
-  const history = buildHourlyHistory(rawCandles, rawStats, multiplier, nowSeconds);
-  const hourly = analyzeHourlyHistory(history);
+  const flow = aggregateTrades(
+    trades, multiplier, tradeFrom, context.asOf
+  );
 
-  const long = analyzeLong(market, metrics, hourly, rawCandles15, rawCandles4h, nowSeconds, marketRegime);
-  if (!long) return null;
+  const hourly = buildHourlyContext(
+    candles1h, stats, multiplier, context.asOf
+  );
 
-  const hourlyCandles = hourly.candles.map(candle => ({
-    time: new Date(candle.time * 1000).toISOString(), open: candle.open, close: candle.close,
-    priceChangePct: round(candle.priceChangePct, 2), totalVolumeUSDT: round(candle.totalQuoteVolume, 2),
-    buyVolumeUSDT: round(candle.buyQuoteVolume, 2), sellVolumeUSDT: round(candle.sellQuoteVolume, 2),
-    buySharePct: round(candle.buySharePct, 1), deltaUSDT: round(candle.deltaQuote, 2),
-    directionalDataAvailable: candle.hasDirectionalStats,
-  }));
+  const recent = flow.recent3m;
+  const isLong = candidate.side === 'LONG';
 
-  return {
-    ...long,
-    currentHour: {
-      buyNotionalSample: round(metrics.buyHour, 2), sellNotionalSample: round(metrics.sellHour, 2),
-      buySharePct: round(metrics.buyShareHour, 1), netDeltaSample: round(metrics.deltaHour, 2),
-      sampleCoveragePct: metrics.coveragePct, sampleTruncated: metrics.truncated, sampleTrades: metrics.validTrades,
-    },
-    recent3m: {
-      buyNotional: round(metrics.buyLast3, 2), sellNotional: round(metrics.sellLast3, 2),
-      buySharePct: round(metrics.buyShareRecent, 1), netDelta: round(metrics.deltaRecent, 2),
-      buyNotionalPerMinute: round(metrics.buyRateLast, 2), previousBuyNotionalPerMinute: round(metrics.buyRatePrevious, 2),
-      buyRateMultiple: round(metrics.rateMultiple, 2), buyAcceleration: round(metrics.acceleration, 2),
-      baselineValid: metrics.validBaseline, persistencePct: round(metrics.persistence, 0), activeBuyMinutes: metrics.positiveBuyMinutes,
-    },
-    hourlyHistory: {
-      available: hourly.available, priceTrend: hourly.priceTrend, priceChangePct: round(hourly.priceChangePct, 2),
-      volumeTrend: hourly.volumeTrend, sellerPressure: hourly.sellerPressure,
-      sellerPressureFalling: hourly.sellerPressureFalling, buyShareImproving: hourly.buyShareImproving,
-      directionalCoveragePct: hourly.directionalCoverage, candles: hourlyCandles,
-    },
-    volume: {
-      currentHour: {
-        buyNotionalSample: round(metrics.buyHour, 2), sellNotionalSample: round(metrics.sellHour, 2),
-        buySharePct: round(metrics.buyShareHour, 1), netDeltaSample: round(metrics.deltaHour, 2),
-        sampleCoveragePct: metrics.coveragePct, sampleTruncated: metrics.truncated,
-      },
-      recent3m: {
-        buyNotional: round(metrics.buyLast3, 2), sellNotional: round(metrics.sellLast3, 2),
-        buySharePct: round(metrics.buyShareRecent, 1), netDelta: round(metrics.deltaRecent, 2),
-        buyRateMultiple: round(metrics.rateMultiple, 2), persistencePct: round(metrics.persistence, 0),
-      },
-      hourlyHistory: {
-        priceTrend: hourly.priceTrend, volumeTrend: hourly.volumeTrend, sellerPressure: hourly.sellerPressure,
-        directionalCoveragePct: hourly.directionalCoverage, candles: hourlyCandles,
-      },
-    },
-    tradesObserved: metrics.validTrades,
-    dataQuality: {
-      currentHour: metrics.truncated ? 'TRUNCATED_RECENT_TRADE_SAMPLE' : 'REST_TRADE_SAMPLE_COMPLETE_FOR_RETURNED_RANGE',
-      hourlyDirectionalCoveragePct: hourly.directionalCoverage,
-    },
+  const liveConfirmed = flow.recentComplete && (
+    isLong
+      ? (
+          recent.buyNotional >= CONFIG.MIN_RECENT_BUY_NOTIONAL &&
+          recent.buySharePct >= 56 &&
+          recent.netDelta > 0
+        )
+      : (
+          recent.sellNotional >= CONFIG.MIN_RECENT_SELL_NOTIONAL &&
+          recent.sellSharePct >= 56 &&
+          recent.netDelta < 0
+        )
+  );
+
+  const liveScore = liveConfirmed ? 5 : 0;
+
+  candidate.score = Math.round(clamp(candidate.score + liveScore));
+  candidate.rankScore = candidate.score;
+  candidate.scoreBreakdown.liveFlow = liveScore;
+
+  if (liveConfirmed) {
+    candidate.reasons[2] = isLong
+      ? `خرید تهاجمی ${fmt(recent.buySharePct, 0)}٪ در نمونه کامل ۳دقیقه`
+      : `فروش تهاجمی ${fmt(recent.sellSharePct, 0)}٪ در نمونه کامل ۳دقیقه`;
+  }
+
+  if (candidate.score < candidate._required) {
+    addNearMiss(context, candidate);
+    return reject(context, 'SCORE_LOW', candidate.side);
+  }
+
+  candidate.grade =
+    candidate.score >= 85 ? 'A+' :
+    candidate.score >= 75 ? 'A' : 'B';
+
+  candidate.currentHour = flow.currentHour;
+  candidate.recent3m = flow.recent3m;
+  candidate.hourlyHistory = hourly;
+
+  candidate.volume = {
+    currentHour: { ...flow.currentHour },
+    recent3m: { ...flow.recent3m },
+    hourlyHistory: { ...hourly },
   };
+
+  candidate.tradesObserved = flow.validTrades;
+
+  candidate.dataQuality = {
+    currentHour: !flow.available
+      ? 'UNAVAILABLE'
+      : flow.currentHour.sampleTruncated
+        ? 'TRUNCATED_RECENT_TRADE_SAMPLE'
+        : 'RETURNED_RANGE_NOT_TRUNCATED',
+    recent3mComplete: flow.recentComplete,
+    hourlyDirectionalCoveragePct: hourly.directionalCoveragePct,
+    targetSource: isLong
+      ? 'HISTORICAL_PIVOT_RESISTANCE'
+      : 'HISTORICAL_PIVOT_SUPPORT',
+  };
+
+  delete candidate._required;
+  return candidate;
+}
+
+// ==================== Price revalidation ====================
+
+async function revalidateCandidates(candidates, context) {
+  if (!candidates.length) return [];
+
+  if (Date.now() / 1000 - context.asOf > CONFIG.MAX_SCAN_AGE_SECONDS) {
+    candidates.forEach(() => reject(context, 'SCAN_TOO_OLD'));
+    return [];
+  }
+
+  try {
+    const rows = requireArray(
+      await requestGate(`/futures/${CONFIG.SETTLE}/tickers`),
+      'fresh tickers'
+    );
+
+    const map = new Map(
+      rows.map(ticker => [ticker.contract, ticker])
+    );
+
+    const checkedAt = new Date().toISOString();
+
+    return candidates.filter(item => {
+      const price = num(map.get(item.symbol)?.last);
+
+      if (Date.now() >= Date.parse(item.validUntil)) {
+        reject(context, 'ENTRY_EXPIRED', item.side);
+        return false;
+      }
+
+      if (
+        !positive(price) ||
+        price < item.entryLow ||
+        price > item.entryHigh
+      ) {
+        reject(context, 'PRICE_LEFT_ENTRY_ZONE', item.side);
+        return false;
+      }
+
+      item.lastCheckedPrice = price;
+      item.priceCheckedAt = checkedAt;
+      return true;
+    });
+  } catch (error) {
+    console.error('[PRICE RECHECK]', error.message);
+    candidates.forEach(() => reject(context, 'PRICE_RECHECK_FAILED'));
+    return [];
+  }
 }
 
 function rankCandidates(items) {
-  return items.sort((a, b) =>
-    (b.score - a.score) ||
-    ((b._sort?.rateMultiple ?? -1) - (a._sort?.rateMultiple ?? -1)) ||
-    ((b._sort?.buyLast3 || 0) - (a._sort?.buyLast3 || 0))
-  ).map((item, index) => ({ ...item, rank: index + 1 }));
+  return [...items]
+    .sort((a, b) =>
+      b.score - a.score ||
+      b.riskRewardToTp1 - a.riskRewardToTp1 ||
+      b.quoteVolume24h - a.quoteVolume24h
+    )
+    .map((item, index) => ({
+      ...item,
+      rank: index + 1,
+    }));
 }
 
-/* ---------------- Compact Telegram report ---------------- */
+// ==================== Telegram reporting ====================
+
 function reportLine(item, index) {
+  const isLong = item.side === 'LONG';
+  const icon = isLong ? '🟢' : '🔴';
+  const entry = isLong ? item.entryHigh : item.entryLow;
+
+  const targets = item.takeProfits.map(target =>
+    `T${target.level}: ${fmtPrice(target.price)} ` +
+    `(${directionalPctText(item.side, entry, target.price)})`
+  ).join(' | ');
+
+  const rrText = [
+    `RR خالص تخمینی T1: ${fmt(item.riskRewardToTp1)}`,
+    item.tp2 != null ? `T2: ${fmt(item.riskRewardToTp2)}` : null,
+  ].filter(Boolean).join(' | ');
+
   const lines = [
-    `${index + 1}. ${item.symbol} 🟢 LONG | ${item.score}/100 (${item.grade}) | ${item.setup}`,
-    `ورود: ${fmtPrice(item.entryLow)} - ${fmtPrice(item.entryHigh)}`,
-    `حد ضرر: ${fmtPrice(item.stopLoss)} (${signedPct(item.price, item.stopLoss)})`,
-    `سقف‌ها: ${fmtPrice(item.tp1)} (${signedPct(item.price, item.tp1)}) | ${fmtPrice(item.tp2)} (${signedPct(item.price, item.tp2)}) | ${fmtPrice(item.tp3)} (${signedPct(item.price, item.tp3)})`,
-    `RR تا سقف۲: 1:${fmt(item.riskRewardToTp2, 1)} | RSI 15m: ${fmt(item.rsi15, 0)}`,
-    `دلیل: ${(item.reasons || []).slice(0, 3).join(' • ')}`,
+    `${index + 1}. ${item.symbol} ${icon} ${item.side} | ${item.score}/100`,
+    `ورود: ${fmtPrice(item.entryLow)} تا ${fmtPrice(item.entryHigh)}`,
+    `حد ضرر: ${fmtPrice(item.stopLoss)} ` +
+      `(${directionalPctText(item.side, entry, item.stopLoss)})`,
+    `${isLong ? 'مقاومت‌های هدف' : 'حمایت‌های هدف'}: ${targets}`,
+    rrText,
+    `دلیل: ${item.reasons.slice(0, 3).join(' • ')}`,
+    `اعتبار تا ${item.validUntil.slice(11, 16)} UTC؛ فقط داخل ناحیه ورود`,
   ];
+
+  if (item.targetCount < 3) {
+    lines.push(
+      `هدف تاریخی شناسایی‌شده: ${item.targetCount} مورد؛ بقیه نامشخص.`
+    );
+  }
+
   if (item.riskNote) lines.push(`⚠️ ${item.riskNote}`);
+
   return lines.join('\n');
 }
 
 function buildReport(output) {
-  const btcText = output.marketRegime === 'BULLISH' ? 'صعودی ✅' : output.marketRegime === 'BEARISH' ? 'نزولی 🔴' : 'خنثی ⚠️';
+  const regimeText = {
+    BULLISH: 'صعودی',
+    BEARISH: 'نزولی',
+    NEUTRAL: 'خنثی',
+    UNKNOWN: 'داده نامعتبر/ناموجود',
+  }[output.marketRegime];
+
   const lines = [
-    '🚀 فرصت‌های لانگ Gate.io | USDT Perp',
-    `BTC 4H: ${btcText} | حالت: ${CONFIG.LONG_MODE} | ${output.scannedAt}`,
-    `بررسی: ${output.stats.scanned ?? output.stats.liquid} بازار از ${output.stats.liquid} بازار نقدشونده | ورود معتبر: ${output.stats.candidates}`,
+    '📊 Gate.io | فرصت‌های لانگ و شورت',
+    `BTC 4H: ${regimeText} | حالت: ${CONFIG.MODE}`,
+    `زمان: ${output.scannedAt}`,
+    `بررسی: ${output.stats.scanned}/${output.stats.liquid} بازار | ` +
+      `لانگ: ${output.stats.longCandidates} | شورت: ${output.stats.shortCandidates}`,
+    `نمایش: ${output.candidates.length} فرصت برتر`,
     '━━━━━━━━━━━━━━━━━━',
   ];
+
   if (!output.candidates.length) {
-    lines.push('در این اسکن نقطه ورود لانگ باکیفیتی پیدا نشد.');
+    lines.push(
+      output.marketRegime === 'UNKNOWN'
+        ? 'داده معتبر BTC در دسترس نیست؛ سیگنال صادر نشد.'
+        : 'در این اسکن ورود مطابق شروط پیدا نشد.'
+    );
   } else {
-    output.candidates.forEach((item, index) => lines.push(reportLine(item, index), '━━━━━━━━━━━━━━━━━━'));
+    output.candidates.forEach((item, index) => {
+      lines.push(reportLine(item, index), '━━━━━━━━━━━━━━━━━━');
+    });
+
+    lines.push(
+      'اهداف حمایت/مقاومت تاریخی‌اند، نه قیمت تضمینی.',
+      'درصدها ناخالص و بدون اهرم از بدترین قیمت ورودند؛ RR با هزینه تخمینی و بدون فاندینگ است.',
+      'امتیاز، احتمال موفقیت نیست؛ این برنامه سفارش اجرا نمی‌کند.'
+    );
   }
-  lines.push('خروج پله‌ای: ۴۰٪ سقف۱ + انتقال SL به ورود، ۴۰٪ سقف۲، ۲۰٪ سقف۳ | حد ضرر الزامی است.');
+
   return lines.join('\n');
 }
 
 function splitTelegramMessage(message) {
   const chunks = [];
   let current = '';
+
   for (const line of message.split('\n')) {
-    if ((current + '\n' + line).length > CONFIG.TELEGRAM_MAX_LENGTH && current) {
-      chunks.push(current); current = line;
-    } else current = current ? `${current}\n${line}` : line;
+    const pieces = [];
+
+    for (let i = 0; i < line.length; i += CONFIG.TELEGRAM_MAX_LENGTH) {
+      pieces.push(line.slice(i, i + CONFIG.TELEGRAM_MAX_LENGTH));
+    }
+
+    if (!pieces.length) pieces.push('');
+
+    for (const piece of pieces) {
+      const next = current ? `${current}\n${piece}` : piece;
+
+      if (next.length > CONFIG.TELEGRAM_MAX_LENGTH) {
+        if (current) chunks.push(current);
+        current = piece;
+      } else {
+        current = next;
+      }
+    }
   }
+
   if (current) chunks.push(current);
   return chunks;
 }
 
 async function sendTelegram(message) {
-  const token = process.env.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_TOKEN;
+  const token =
+    process.env.TELEGRAM_BOT_TOKEN ||
+    process.env.TELEGRAM_TOKEN;
+
   const chatId = process.env.TELEGRAM_CHAT_ID;
+
   if (!token || !chatId) {
-    console.warn('[TELEGRAM] Credentials missing; report printed locally only.');
+    console.warn('[TELEGRAM] Credentials missing.');
     return { sent: false, reason: 'MISSING_CREDENTIALS' };
   }
+
   const chunks = splitTelegramMessage(message);
+
   for (let index = 0; index < chunks.length; index++) {
-    const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text: chunks[index], disable_web_page_preview: true }),
-      signal: AbortSignal.timeout(CONFIG.REQUEST_TIMEOUT_MS),
-    });
-    const data = await response.json().catch(() => null);
-    if (!response.ok || !data?.ok) {
-      throw new Error(data?.description || `Telegram HTTP ${response.status} while sending part ${index + 1}/${chunks.length}`);
+    let response;
+
+    try {
+      response = await fetch(
+        `https://api.telegram.org/bot${token}/sendMessage`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: chatId,
+            text: chunks[index],
+            disable_web_page_preview: true,
+          }),
+          signal: AbortSignal.timeout(CONFIG.REQUEST_TIMEOUT_MS),
+        }
+      );
+    } catch {
+      throw new Error(
+        `Telegram network/timeout error on part ${index + 1}`
+      );
     }
+
+    const data = await response.json().catch(() => null);
+
+    if (!response.ok || !data?.ok) {
+      throw new Error(
+        data?.description ||
+        `Telegram HTTP ${response.status}, part ${index + 1}`
+      );
+    }
+
     await sleep(250);
   }
+
   return { sent: true, parts: chunks.length };
 }
 
-async function getMarkets() {
-  const [contracts, tickers] = await Promise.all([
-    requestGate(`/futures/${CONFIG.SETTLE}/contracts`),
-    requestGate(`/futures/${CONFIG.SETTLE}/tickers`),
-  ]);
-  const tickerMap = new Map((tickers || []).map(ticker => [ticker.contract, ticker]));
-  const active = (contracts || []).filter(contract =>
-    typeof contract.name === 'string' && contract.name.endsWith('_USDT') &&
-    contract.status === 'trading' && contract.in_delisting === false && positive(num(contract.quanto_multiplier))
-  );
-  const markets = active.map(contract => {
-    const ticker = tickerMap.get(contract.name);
-    const quoteVolume = num(ticker?.volume_24h_quote) ?? 0;
-    return ticker && positive(num(ticker.last)) && quoteVolume >= CONFIG.MIN_QUOTE_VOLUME_24H
-      ? { symbol: contract.name, contract, ticker, quoteVolume } : null;
-  }).filter(Boolean).sort((a, b) => b.quoteVolume - a.quoteVolume);
-  return { active, markets };
-}
+// ==================== Main scan ====================
 
-async function scanOneMarket(market, nowSeconds, marketRegime) {
-  const hourStart = Math.floor(nowSeconds / 3600) * 3600;
-  const historyStart = hourStart - CONFIG.HISTORY_HOURS * 3600;
-  const [trades, candles, stats, candles15m, candles4h] = await Promise.all([
-    requestGate(`/futures/${CONFIG.SETTLE}/trades`, { contract: market.symbol, from: hourStart, to: Math.floor(nowSeconds), limit: CONFIG.TRADE_LIMIT }),
-    requestGate(`/futures/${CONFIG.SETTLE}/candlesticks`, { contract: market.symbol, interval: '1h', limit: CONFIG.HISTORY_HOURS + 2 }),
-    requestGate(`/futures/${CONFIG.SETTLE}/contract_stats`, { contract: market.symbol, from: historyStart, interval: '1h', limit: CONFIG.HISTORY_HOURS + 2 }),
-    requestGate(`/futures/${CONFIG.SETTLE}/candlesticks`, { contract: market.symbol, interval: '15m', limit: CONFIG.CANDLES_15M_LIMIT }),
-    requestGate(`/futures/${CONFIG.SETTLE}/candlesticks`, { contract: market.symbol, interval: '4h', limit: CONFIG.CANDLES_4H_LIMIT }),
-  ]);
-  return analyzeMarket(market, trades, candles, stats, candles15m, candles4h, nowSeconds, marketRegime);
-}
-
-export async function scanGateMarkets() {
+async function runScan() {
   const started = Date.now();
-  const nowSeconds = Date.now() / 1000;
-  currentRejectStats = {};
-  currentNearMisses = []; // FIXED: was {} which caused "is not iterable"
 
-  console.log('\n🚀 GATE.IO LONG ONLY ENTRY RADAR');
+  console.log('\n📊 GATE.IO LONG + SHORT — STRUCTURAL TARGETS');
+
   const { active, markets: liquidMarkets } = await getMarkets();
-  const marketRegime = await getBtcRegime();
 
-  const strictBearishSkip = marketRegime === 'BEARISH' && CONFIG.LONG_MODE === 'STRICT';
-  const scanLimit = positive(CONFIG.SCAN_LIMIT) ? CONFIG.SCAN_LIMIT : liquidMarkets.length;
-  const markets = strictBearishSkip ? [] : liquidMarkets.slice(0, scanLimit);
-  if (strictBearishSkip) currentRejectStats.BTC_BEARISH_STRICT_SKIPPED = liquidMarkets.length;
+  const context = {
+    asOf: Date.now() / 1000,
+    regime: 'UNKNOWN',
+    rejectStats: {
+      LONG: {},
+      SHORT: {},
+      GLOBAL: {},
+    },
+    nearMisses: [],
+  };
 
-  console.log(`Active contracts: ${active.length} | Liquid markets: ${liquidMarkets.length} | Scanning: ${markets.length} | BTC regime: ${marketRegime} | Mode: ${CONFIG.LONG_MODE}`);
-  if (strictBearishSkip) console.log('[MODE] BTC BEARISH + STRICT mode => scan skipped to avoid API calls.');
+  context.regime = await getBtcRegime(context.asOf);
+  const unknownBTC = context.regime === 'UNKNOWN';
 
-  let completed = 0, success = 0, failed = 0;
-  const results = await mapPool(markets, CONFIG.CONCURRENCY, async market => {
-    const result = await scanOneMarket(market, nowSeconds, marketRegime);
-    completed++; success++;
-    if (completed % 25 === 0 || completed === markets.length) console.log(`[PROGRESS] ${completed}/${markets.length}`);
-    return result;
-  });
+  const limit = CONFIG.SCAN_LIMIT > 0
+    ? CONFIG.SCAN_LIMIT
+    : liquidMarkets.length;
 
-  const candidates = [];
-  for (const item of results) {
-    if (item?.__error) { failed++; continue; }
-    if (item) candidates.push(item);
+  const markets = unknownBTC
+    ? []
+    : liquidMarkets.slice(0, limit);
+
+  if (unknownBTC) {
+    context.rejectStats.GLOBAL.BTC_DATA_UNKNOWN_SKIPPED =
+      liquidMarkets.length;
   }
 
-  const rankedAll = rankCandidates(candidates);
-  const ranked = rankedAll.slice(0, CONFIG.TOP_COUNT).map((item, index) => {
-    const clean = { ...item, rank: index + 1 };
-    delete clean._sort;
-    return clean;
-  });
+  const enabledSides = [
+    CONFIG.ENABLE_LONG ? 'LONG' : null,
+    CONFIG.ENABLE_SHORT ? 'SHORT' : null,
+  ].filter(Boolean);
 
-  const nearMissesTop = [...currentNearMisses]
+  console.log(
+    `Active contracts: ${active.length} | ` +
+    `Liquid markets: ${liquidMarkets.length} | ` +
+    `Scanning: ${markets.length} | ` +
+    `BTC regime: ${context.regime} | ` +
+    `Mode: ${CONFIG.MODE} | Sides: ${enabledSides.join(' + ')}`
+  );
+
+  let completed = 0;
+
+  const results = await mapPool(
+    markets,
+    CONFIG.CONCURRENCY,
+    async market => {
+      try {
+        return await scanOneMarket(market, context);
+      } finally {
+        completed++;
+
+        if (completed % 25 === 0 || completed === markets.length) {
+          console.log(`[PROGRESS] ${completed}/${markets.length}`);
+        }
+      }
+    }
+  );
+
+  const failed = results.filter(item => item?.__error).length;
+  const success = results.length - failed;
+
+  const initialCandidates = results.filter(
+    item => item && !item.__error
+  );
+
+  const verified = await revalidateCandidates(
+    initialCandidates,
+    context
+  );
+
+  const rankedAll = rankCandidates(verified);
+  const ranked = rankedAll.slice(0, CONFIG.TOP_COUNT);
+
+  const nearMisses = [...context.nearMisses]
     .sort((a, b) => b.score - a.score)
     .slice(0, 5);
 
+  const longCount = rankedAll.filter(item => item.side === 'LONG').length;
+  const shortCount = rankedAll.filter(item => item.side === 'SHORT').length;
+
   const output = {
-    success: true, exchange: 'GATE.IO', market: 'USDT PERPETUAL',
-    strategy: 'LONG ONLY: BTC FILTER + 4H TREND + 15M PULLBACK/BREAKOUT TRIGGER',
-    marketRegime,
-    longMode: CONFIG.LONG_MODE,
+    success: !unknownBTC && (markets.length === 0 || success > 0),
+    exchange: 'GATE.IO',
+    market: 'USDT PERPETUAL',
+    strategy: 'LONG + SHORT: 4H TREND + 15M SETUP + HISTORICAL LEVELS',
+    marketRegime: context.regime,
+    longMode: CONFIG.MODE,
+    mode: CONFIG.MODE,
+    sides: enabledSides,
     scannedAt: new Date().toISOString(),
+
     stats: {
-      active: active.length, liquid: liquidMarkets.length, scanned: markets.length,
-      success, failed, candidates: candidates.length, durationMs: Date.now() - started,
+      active: active.length,
+      liquid: liquidMarkets.length,
+      scanned: markets.length,
+      success,
+      failed,
+      candidates: rankedAll.length,
+      longCandidates: longCount,
+      shortCandidates: shortCount,
+      durationMs: Date.now() - started,
     },
-    filterStats: { ...currentRejectStats },
-    nearMisses: nearMissesTop,
-    candidates: ranked, rankedCandidates: ranked,
+
+    filterStats: {
+      LONG: { ...context.rejectStats.LONG },
+      SHORT: { ...context.rejectStats.SHORT },
+      GLOBAL: { ...context.rejectStats.GLOBAL },
+    },
+
+    nearMisses,
+    candidates: ranked,
+    rankedCandidates: ranked,
   };
 
-  try {
-    const stored = await saveMarketSnapshot(rankedAll.map(item => { const copy = { ...item }; delete copy._sort; return copy; }));
-    output.historyCount = stored?.historyCount ?? 0;
-    output.summaryCount = stored?.summaryCount ?? rankedAll.length;
-    output.rankChanges = stored?.rankChanges ?? {};
-  } catch (error) {
-    console.error('[STORAGE] Snapshot save failed; scan result is still available:', error?.stack || error?.message || error);
+  if (markets.length > 0 && success > 0) {
+    try {
+      const stored = await saveMarketSnapshot(rankedAll);
+
+      output.historyCount = stored?.historyCount ?? 0;
+      output.summaryCount = stored?.summaryCount ?? rankedAll.length;
+      output.rankChanges = stored?.rankChanges ?? {};
+    } catch (error) {
+      console.error(
+        '[STORAGE] Snapshot save failed:',
+        error?.message || error
+      );
+    }
   }
 
-  console.log('[FILTER STATS]', JSON.stringify(currentRejectStats));
-  if (nearMissesTop.length) {
-    console.log('[NEAR MISSES]', JSON.stringify(nearMissesTop, null, 2));
-  } else {
-    console.log('[NEAR MISSES] []');
-  }
+  console.log('[FILTER STATS]', JSON.stringify(output.filterStats));
+  console.log('[NEAR MISSES]', JSON.stringify(nearMisses, null, 2));
 
   const report = buildReport(output);
   console.log(report);
-  console.log(`\nFinished in ${(output.stats.durationMs / 1000).toFixed(1)}s | scanned ${markets.length} | success ${success} | failed ${failed}`);
 
-  // Telegram is kept, but an empty list is not spammed because TELEGRAM_SEND_EMPTY=false is hard-coded
   try {
     if (!ranked.length && !CONFIG.TELEGRAM_SEND_EMPTY) {
-      output.telegram = { sent: false, reason: 'NO_LONG_CANDIDATES_SKIPPED' };
-      console.log('[TELEGRAM] No long entry; empty report skipped.');
+      output.telegram = {
+        sent: false,
+        reason: 'NO_ENTRY_CANDIDATES_SKIPPED',
+      };
     } else {
-      const telegramResult = await sendTelegram(report);
-      console.log('[TELEGRAM RESULT]', JSON.stringify(telegramResult));
-      output.telegram = telegramResult;
+      const staleReport = ranked.some(item =>
+        Date.now() >= Date.parse(item.validUntil) ||
+        Date.now() - Date.parse(item.priceCheckedAt) >
+          CONFIG.MAX_QUOTE_AGE_SECONDS * 1000
+      );
+
+      if (staleReport) {
+        output.telegram = {
+          sent: false,
+          reason: 'REPORT_EXPIRED_BEFORE_DELIVERY',
+        };
+      } else {
+        output.telegram = await sendTelegram(report);
+      }
     }
   } catch (error) {
-    console.error('[TELEGRAM DELIVERY ERROR] Scan completed, but notification failed:', error?.stack || error?.message || error);
-    output.telegram = { sent: false, reason: error?.message || String(error) };
+    console.error('[TELEGRAM DELIVERY ERROR]', error.message);
+
+    output.telegram = {
+      sent: false,
+      reason: error.message,
+    };
   }
+
+  output.stats.durationMs = Date.now() - started;
+
+  console.log('[TELEGRAM RESULT]', JSON.stringify(output.telegram));
+
+  console.log(
+    `Finished in ${(output.stats.durationMs / 1000).toFixed(1)}s | ` +
+    `scanned ${markets.length} | success ${success} | failed ${failed} | ` +
+    `LONG ${longCount} | SHORT ${shortCount}`
+  );
+
   return output;
 }
 
-// src/index.js imports this module to start the scanner.
+export async function scanGateMarkets() {
+  if (runningScan) return runningScan;
+
+  runningScan = runScan();
+
+  try {
+    return await runningScan;
+  } finally {
+    runningScan = null;
+  }
+}
+
+// Preserve the original import-to-run behavior used by src/index.js.
 try {
   const result = await scanGateMarkets();
-  console.log('[SCANNER RESULT]', JSON.stringify({
-    success: result.success, active: result.stats.active, liquid: result.stats.liquid, scanned: result.stats.scanned,
-    successful: result.stats.success, failed: result.stats.failed,
-    candidates: result.stats.candidates, durationMs: result.stats.durationMs,
-    filterStats: result.filterStats,
-    nearMisses: result.nearMisses,
-    telegramSent: result.telegram?.sent ?? false,
-  }, null, 2));
+
+  console.log(
+    '[SCANNER RESULT]',
+    JSON.stringify(
+      {
+        success: result.success,
+        active: result.stats.active,
+        liquid: result.stats.liquid,
+        scanned: result.stats.scanned,
+        successful: result.stats.success,
+        failed: result.stats.failed,
+        candidates: result.stats.candidates,
+        longCandidates: result.stats.longCandidates,
+        shortCandidates: result.stats.shortCandidates,
+        durationMs: result.stats.durationMs,
+        filterStats: result.filterStats,
+        nearMisses: result.nearMisses,
+        telegramSent: result.telegram?.sent ?? false,
+      },
+      null,
+      2
+    )
+  );
+
+  if (!result.success) process.exitCode = 1;
 } catch (error) {
   console.error('[SCANNER FATAL ERROR]', error?.stack || error);
   process.exitCode = 1;
 }
+```
