@@ -1,72 +1,12 @@
-
-name: Continuous Gate Scanner
+name: Run Gate Scanner Manually
 
 on:
   workflow_dispatch:
 
 permissions:
   contents: write
-  actions: write
-
-concurrency:
-  group: continuous-gate-scanner
-  cancel-in-progress: false
 
 jobs:
   scan:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: true
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Run scanner once
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: npm start
-
-      - name: Save Market Data
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git add data/market-state.json
-
-          if ! git diff --cached --quiet; then
-            git commit -m "Update market scanner data"
-            git push origin HEAD:main
-            echo "Market data successfully saved."
-          else
-            echo "No market data changes to save."
-          fi
-
-      - name: Wait 4 minutes
-        if: success()
-        run: sleep 240
-
-      - name: Start next scan automatically
-        if: success()
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            await github.rest.actions.createWorkflowDispatch({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: "continuous-scanner.yml",
-              ref: "main"
-            });
-
-            console.log("Next scan has been queued.");
+    uses: ./.github/workflows/scanner.yml
+    secrets: inherit
