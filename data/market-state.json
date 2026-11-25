@@ -1859813,6 +1859813,117 @@
       "scoreRaw": 72,
       "timestamp": "2026-11-25T13:53:51.630Z",
       "recordType": "SCANNER_CANDIDATE"
+    },
+    {
+      "symbol": "BCH_USDT",
+      "contract": "BCH_USDT",
+      "side": "SHORT",
+      "setup": "Pullback",
+      "strategyVersion": "gate-structural-ls-v1",
+      "status": "SHORT_ENTRY",
+      "statusLabel": "SHORT Pullback",
+      "price": 192.99,
+      "entryLow": 192.8126961415236,
+      "entryHigh": 193.16730385847643,
+      "referenceEntry": 192.8126961415236,
+      "entry": {
+        "low": 192.8126961415236,
+        "high": 193.16730385847643,
+        "price": 192.99
+      },
+      "stopLoss": 196.17101286158805,
+      "stopLossPct": -1.74,
+      "tp1": 179.74,
+      "tp2": null,
+      "tp3": null,
+      "tp1Pct": 6.78,
+      "tp2Pct": null,
+      "tp3Pct": null,
+      "takeProfits": [
+        {
+          "level": 1,
+          "price": 179.74,
+          "zoneLow": 179.74,
+          "zoneHigh": 179.74,
+          "source": "HISTORICAL_PIVOT_SUPPORT",
+          "timeframes": [
+            "4h"
+          ],
+          "touches": 1,
+          "pct": 6.78,
+          "rrNet": 3.43
+        }
+      ],
+      "targetCount": 1,
+      "riskRewardToTp1": 3.43,
+      "riskRewardToTp2": null,
+      "rr": 3.43,
+      "rsi15": 36.8,
+      "rsi4h": 41.8,
+      "fundingRate": 0.0000013,
+      "change24h": -2.22,
+      "quoteVolume24h": 2737928,
+      "triggerCandleTime": "2026-11-25T13:30:00.000Z",
+      "analyzedAt": "2026-11-25T13:58:55.995Z",
+      "validUntil": "2026-11-25T14:00:00.000Z",
+      "riskNote": null,
+      "reasons": [
+        "پولبک و برگشت از مقاومت",
+        "کراس نزولی MACD + پوشای نزولی",
+        "حجم 3.6 برابر میانگین"
+      ],
+      "score": 72,
+      "rankScore": 72,
+      "scoreBreakdown": {
+        "trend": 20,
+        "setup": 15,
+        "trigger": 22,
+        "candleVolume": 10,
+        "liveFlow": 0,
+        "firstTargetRR": 5
+      },
+      "costAssumptions": {
+        "feeRatePerSide": 0.0006,
+        "slippageRatePerSide": 0.0003,
+        "fundingIncludedInRR": false
+      },
+      "grade": "B",
+      "recent3m": {
+        "available": true,
+        "sampleComplete": false,
+        "sampleTruncated": true,
+        "tradesObserved": 0,
+        "buyNotional": 0,
+        "sellNotional": 0,
+        "buySharePct": null,
+        "sellSharePct": null,
+        "netDelta": 0,
+        "windowEnd": "2026-11-25T13:58:00.000Z"
+      },
+      "volume": {
+        "recent3m": {
+          "available": true,
+          "sampleComplete": false,
+          "sampleTruncated": true,
+          "tradesObserved": 0,
+          "buyNotional": 0,
+          "sellNotional": 0,
+          "buySharePct": null,
+          "sellSharePct": null,
+          "netDelta": 0,
+          "windowEnd": "2026-11-25T13:58:00.000Z"
+        }
+      },
+      "dataQuality": {
+        "recent3mComplete": false
+      },
+      "tradesObserved": 0,
+      "lastCheckedPrice": 192.99,
+      "priceCheckedAt": "2026-11-25T13:59:35.183Z",
+      "rank": 1,
+      "scoreRaw": 72,
+      "timestamp": "2026-11-25T13:59:35.406Z",
+      "recordType": "SCANNER_CANDIDATE"
     }
   ],
   "summaries": {
@@ -1868234,13 +1868345,13 @@
       "firstDiscoveredAt": "2026-11-25T13:53:51.630Z",
       "firstDiscoveryPrice": 193.14,
       "highestPrice": 193.14,
-      "lowestPrice": 193.14,
+      "lowestPrice": 192.99,
       "bestRank": 1,
       "bestScore": 72,
-      "observations": 1,
-      "maxFavorableObservedPct": 0,
-      "lastSeenAt": "2026-11-25T13:53:51.630Z",
-      "lastPrice": 193.14,
+      "observations": 2,
+      "maxFavorableObservedPct": 0.07766387076730728,
+      "lastSeenAt": "2026-11-25T13:59:35.406Z",
+      "lastPrice": 192.99,
       "lastScore": 72
     }
   },
@@ -1870507,7 +1870618,7 @@
       "side": "SHORT",
       "score": 72,
       "rank": 1,
-      "updatedAt": "2026-11-25T13:53:51.630Z"
+      "updatedAt": "2026-11-25T13:59:35.406Z"
     }
   },
   "tradeStates": {
@@ -1884097,12 +1884208,12 @@
     }
   },
   "scanMeta": {
-    "timestamp": "2026-11-25T13:53:51.630Z",
+    "timestamp": "2026-11-25T13:59:35.406Z",
     "candidateCount": 1,
     "ranks": {
       "BCH_USDT:SHORT": 1
     }
   },
-  "updatedAt": "2026-11-25T13:53:51.630Z",
+  "updatedAt": "2026-11-25T13:59:35.406Z",
   "schemaVersion": 2
 }
