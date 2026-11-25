@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/index.js",
     "test": "node --test",
-    "check": "node --check src/index.js && node --check src/scanner/marketScanner.js && node --check src/storage/marketStorage.js && node --check src/services/gate.js && node --check src/services/telegram.js && node --check src/tracking/signalTracker.js && node --check src/tracking/symbolStats.js && node --check src/wave/waveAnalysis.js && node --check src/wave/waveRider.js && node --check src/wave/waveWatch.js"
+    "check": "node --check src/index.js && node --check src/scanner/marketScanner.js && node --check src/storage/marketStorage.js && node --check src/services/gate.js && node --check src/services/telegram.js && node --check src/tracking/signalTracker.js && node --check src/tracking/symbolStats.js && node --check src/wave/waveAnalysis.js && node --check src/wave/waveRider.js && node --check src/wave/waveWatch.js && node --check src/wave/waveTracker.js && node --check src/wave/waveEntries.js"
   },
   "engines": {
     "node": ">=20"
