@@ -68,7 +68,7 @@
       },
       "createdAt": "2026-11-25T07:47:57.169Z",
       "sentAt": "2026-11-25T07:47:57.629Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 100.59809948773345,
       "entryLow": 100.59809948773345,
       "entryHigh": 100.76190051226656,
@@ -87,30 +87,41 @@
       "triggerCandleTime": "2026-11-25T07:30:00.000Z",
       "score": 88,
       "setup": "BreakdownRetest",
-      "nextMinute": 1795595280,
+      "nextMinute": 1795595640,
       "entryTime": "2026-11-25T07:51:00.000Z",
-      "exitTime": null,
-      "remaining": 1,
-      "realizedGrossPct": 0,
-      "estimatedCostsPct": 0,
-      "netPct": null,
-      "netR": null,
-      "exits": [],
+      "exitTime": "2026-11-25T08:30:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": -0.6778463169174482,
+      "estimatedCostsPct": 0.18061006168522573,
+      "netPct": -0.858456378602674,
+      "netR": -1.3819614883938613,
+      "exits": [
+        {
+          "time": "2026-11-25T08:30:00.000Z",
+          "price": 101.28,
+          "fraction": 1,
+          "reason": "STOP_GAP",
+          "grossPct": -0.6778463169174482,
+          "costPct": 0.18061006168522573
+        }
+      ],
       "observedMfePct": 0.24662442829121992,
-      "observedMaePct": 0.44921376702713023,
+      "observedMaePct": 0.5486192235011883,
       "observationMfePct": 0.24662442829121992,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "messageIds": [
         2707
       ],
       "entryCandleTime": 1795593000,
       "holdUntil": 1795679460,
-      "observeUntil": 1795765860
+      "observeUntil": 1795765860,
+      "exitReason": "STOP_GAP",
+      "resultNotifiedAt": "2026-11-25T08:34:20.361Z"
     }
   },
   "lastDailyReportDay": "2026-11-25",
-  "updatedAt": "2026-11-25T08:29:05.574Z"
+  "updatedAt": "2026-11-25T08:35:02.198Z"
 }
