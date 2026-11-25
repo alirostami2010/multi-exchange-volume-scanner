@@ -1,11 +1,70 @@
 {
   "schemaVersion": 1,
-  "trades": {},
-  "attempts": {},
+  "trades": {
+    "89fc10345d9acad1fd5338b1": {
+      "id": "89fc10345d9acad1fd5338b1",
+      "experimental": true,
+      "symbol": "AMZN_USDT",
+      "side": "SHORT",
+      "strategyVersion": "wave-rider-prototype-v1",
+      "evaluationVersion": "wave-trail-v1",
+      "evaluation": {
+        "version": "wave-trail-v1",
+        "maxHoldSeconds": 43200,
+        "feeRate": 0.0006,
+        "slippageRate": 0.0003,
+        "fundingIncluded": false,
+        "entryModel": "CONSERVATIVE_BOUNDARY_TOUCH_AFTER_DELIVERY",
+        "exitModel": "1M_STOP_THEN_15M_STRUCTURE_OR_TRAIL",
+        "initialRiskIncludesCosts": false
+      },
+      "status": "PENDING_ENTRY",
+      "createdAt": "2026-11-25T21:13:06.919Z",
+      "sentAt": "2026-11-25T21:13:07.306Z",
+      "entry": 244.68952900255917,
+      "entryLow": 244.68952900255917,
+      "entryHigh": 244.95047099744082,
+      "initialStop": 247.44141299232248,
+      "activeStop": 247.44141299232248,
+      "priorExtremeTarget": 236.45,
+      "validUntil": "2026-11-25T21:15:00.000Z",
+      "triggerCandleTime": "2026-11-25T20:45:00.000Z",
+      "waveNumberHeuristic": 3,
+      "correctionDepthPct": 54.75,
+      "nextMinute": 1795641240,
+      "structureReviewedUntil": null,
+      "entryTime": null,
+      "exitTime": null,
+      "exitReason": null,
+      "grossPct": 0,
+      "costPct": 0,
+      "netPct": null,
+      "netR": null,
+      "mfePct": 0,
+      "maePct": 0,
+      "exits": [],
+      "trailHistory": [],
+      "notifications": {
+        "breakeven": false,
+        "correction": null
+      },
+      "dataIssue": null,
+      "resultNotified": false,
+      "messageIds": [
+        2724
+      ]
+    }
+  },
+  "attempts": {
+    "AMZN_USDT:SHORT": {
+      "lastAttemptAt": "2026-11-25T21:13:06.918Z",
+      "status": "SENT"
+    }
+  },
   "daily": {
-    "day": null,
-    "attempts": 0
+    "day": "2026-11-25",
+    "attempts": 1
   },
   "lastReportDay": "2026-11-25",
-  "updatedAt": "2026-11-25T21:05:59.453Z"
+  "updatedAt": "2026-11-25T21:13:07.308Z"
 }
