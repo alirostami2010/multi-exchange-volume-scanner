@@ -44,15 +44,24 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: npm start
 
-      - name: Save scanner and tracking data
+      - name: Back up local data as an artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scanner-state-${{ github.run_id }}-${{ github.run_attempt }}
+          path: data/*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Save scanner and tracking data with retries
         if: always()
         shell: bash
         run: |
           set -euo pipefail
 
           if [ ! -d .git ]; then
-            echo "Repository not available."
-            exit 0
+            echo "Repository is unavailable; cannot persist data."
+            exit 1
           fi
 
           mkdir -p data
@@ -64,34 +73,54 @@ jobs:
             -exec git add -- {} +
 
           if git diff --cached --quiet; then
-            echo "No data changes."
+            echo "No data changes to save."
             exit 0
           fi
 
           git commit -m "Update scanner and paper evaluation data"
 
+          # Keep this commit limited to scanner data.
+          # npm install may have modified tracked dependency files.
           git restore --worktree -- package.json
 
           if git ls-files --error-unmatch package-lock.json >/dev/null 2>&1; then
             git restore --worktree -- package-lock.json
           fi
 
-          for attempt in 1 2 3; do
-            if git push origin HEAD:main; then
-              echo "Tracking data saved successfully."
-              exit 0
+          MAX_ATTEMPTS=6
+          DELAY=10
+
+          for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
+            echo "Persistence attempt ${attempt}/${MAX_ATTEMPTS}"
+
+            if git fetch origin main; then
+              # Refuse to overwrite concurrent changes.
+              if ! git rebase origin/main; then
+                git rebase --abort || true
+
+                echo "::error::Rebase conflict or failure. Remote data will not be overwritten."
+                echo "Use the uploaded artifact to inspect and recover local data."
+                exit 1
+              fi
+
+              if git push origin HEAD:main; then
+                echo "Scanner and tracking data saved successfully."
+                exit 0
+              fi
+
+              echo "::warning::Push failed. A retry may recover from a temporary GitHub error."
+            else
+              echo "::warning::Fetch failed. Waiting before retry."
             fi
 
-            git fetch origin main
-
-            if ! git rebase origin/main; then
-              git rebase --abort || true
-              echo "Data conflict: refusing to overwrite remote state."
-              exit 1
+            if [ "$attempt" -lt "$MAX_ATTEMPTS" ]; then
+              echo "Waiting ${DELAY} seconds..."
+              sleep "$DELAY"
+              DELAY=$((DELAY * 2))
             fi
-
-            sleep 2
           done
 
-          echo "Unable to persist tracking data."
+          echo "::error::Unable to persist data after all attempts."
+          echo "The continuous chain will stop to avoid using stale tracking state."
+          echo "Inspect the data backup artifact before restarting."
           exit 1
