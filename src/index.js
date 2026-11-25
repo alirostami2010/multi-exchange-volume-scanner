@@ -1,4 +1,3 @@
-
 import 'dotenv/config';
 
 import {
@@ -27,23 +26,39 @@ import {
   performanceMessages,
 } from './tracking/signalTracker.js';
 
+import {
+  symbolStats,
+  symbolHistoryLine,
+  symbolReportMessage,
+} from './tracking/symbolStats.js';
+
+const FINAL_STATUSES = ['CLOSED', 'AMBIGUOUS', 'EXPIRED_NO_ENTRY'];
+
+function needsResultNotification(signal) {
+  if (!signal.sentAt) return false;
+  if (signal.resultNotified) return false;
+  return FINAL_STATUSES.includes(signal.status);
+}
+
 async function notifyResults(state) {
   if (!telegramConfigured()) return;
 
   let sent = 0;
 
   for (const signal of Object.values(state.signals)) {
-    if (
-      !signal.sentAt ||
-      signal.resultNotified ||
-      !['CLOSED', 'AMBIGUOUS', 'EXPIRED_NO_ENTRY'].includes(signal.status)
-    ) continue;
+    if (!needsResultNotification(signal)) continue;
 
-    // Bound notifications per run. Remaining results wait for later runs.
+    // Bound notifications per run; the rest wait for later runs.
     if (sent >= 10) break;
 
     try {
-      const delivery = await sendTelegram(resultMessage(signal));
+      const history = symbolHistoryLine(
+        symbolStats(state, signal.symbol)
+      );
+
+      const delivery = await sendTelegram(
+        resultMessage(signal) + '\n━━━━━━━━━━━━━━━━━━\n' + history
+      );
 
       if (delivery.sent) {
         signal.resultNotified = true;
@@ -65,7 +80,12 @@ async function notifyDailyReport(state) {
   if (state.lastDailyReportDay === day) return;
 
   try {
-    for (const message of performanceMessages(state)) {
+    const messages = [
+      ...performanceMessages(state),
+      symbolReportMessage(state),
+    ];
+
+    for (const message of messages) {
       const delivery = await sendTelegram(message);
       if (!delivery.sent) return;
     }
@@ -75,6 +95,19 @@ async function notifyDailyReport(state) {
   } catch (error) {
     console.error('[DAILY REPORT]', error.message);
   }
+}
+
+function candidateIsFresh(candidate) {
+  const now = Date.now();
+
+  if (now >= Date.parse(candidate.validUntil)) return false;
+
+  const quoteAge = now - Date.parse(candidate.priceCheckedAt);
+
+  if (!Number.isFinite(quoteAge)) return false;
+  if (quoteAge > CONFIG.MAX_QUOTE_AGE_SECONDS * 1000) return false;
+
+  return true;
 }
 
 async function main() {
@@ -91,6 +124,7 @@ async function main() {
   if (output.success && output.stats.scanned > 0) {
     try {
       const stored = await saveMarketSnapshot(output.rankedCandidates);
+
       console.log('[STORAGE]', {
         historyCount: stored.historyCount,
         summaryCount: stored.summaryCount,
@@ -104,28 +138,29 @@ async function main() {
   const strategy = strategyKey(STRATEGY_VERSION, CONFIG);
   let sentCount = 0;
 
-  if (output.success && telegramConfigured()) {
+  if (!telegramConfigured()) {
+    console.warn('[TELEGRAM] Missing credentials; no issued signals registered.');
+  } else if (output.success) {
     for (const candidate of output.rankedCandidates) {
       if (sentCount >= CONFIG.TOP_COUNT) break;
       if (!canRegister(state, candidate, strategy)) continue;
+      if (!candidateIsFresh(candidate)) continue;
 
-      const now = Date.now();
-
-      if (
-        now >= Date.parse(candidate.validUntil) ||
-        now - Date.parse(candidate.priceCheckedAt) >
-          CONFIG.MAX_QUOTE_AGE_SECONDS * 1000
-      ) continue;
+      // History is computed BEFORE this signal is registered.
+      const history = symbolHistoryLine(
+        symbolStats(state, candidate.symbol)
+      );
 
       const signal = createSignal(candidate, strategy, CONFIG);
       state.signals[signal.id] = signal;
 
-      // Local durable intent before external notification.
+      // Durable local intent before external notification.
       await saveSignalState(state);
 
-try {
+      try {
         const delivery = await sendTelegram(
-          signalMessage(candidate, signal.id, output.marketRegime)
+          signalMessage(candidate, signal.id, output.marketRegime) +
+          '\n━━━━━━━━━━━━━━━━━━\n' + history
         );
 
         if (delivery.sent) {
@@ -145,15 +180,14 @@ try {
 
       if (signal.status === 'DELIVERY_UNKNOWN') break;
     }
-  } else if (!telegramConfigured()) {
-    console.warn('[TELEGRAM] Missing credentials; no issued signals registered.');
   }
 
   await saveSignalState(state);
 
   console.log('[SCANNER RESULT]', JSON.stringify({
-    success: output.success,
     ...output.stats,
+    successfulMarkets: output.stats.success,
+    success: output.success,
     newSignalsSent: sentCount,
     trackedRecords: Object.keys(state.signals).length,
     filterStats: output.filterStats,
@@ -165,6 +199,6 @@ try {
 try {
   await main();
 } catch (error) {
-  console.error('[FATAL]', error?.stack || error);
+  console.error('[FATAL]', error?.stack ?? error);
   process.exitCode = 1;
 }
