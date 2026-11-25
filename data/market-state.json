@@ -1859924,6 +1859924,117 @@
       "scoreRaw": 72,
       "timestamp": "2026-11-25T13:59:35.406Z",
       "recordType": "SCANNER_CANDIDATE"
+    },
+    {
+      "symbol": "UNI_USDT",
+      "contract": "UNI_USDT",
+      "side": "SHORT",
+      "setup": "BreakdownRetest",
+      "strategyVersion": "gate-structural-ls-v1",
+      "status": "SHORT_ENTRY",
+      "statusLabel": "SHORT BreakdownRetest",
+      "price": 4.456,
+      "entryLow": 4.451247666589419,
+      "entryHigh": 4.460752333410582,
+      "referenceEntry": 4.451247666589419,
+      "entry": {
+        "low": 4.451247666589419,
+        "high": 4.460752333410582,
+        "price": 4.456
+      },
+      "stopLoss": 4.497841111368606,
+      "stopLossPct": -1.05,
+      "tp1": 4.184,
+      "tp2": null,
+      "tp3": null,
+      "tp1Pct": 6,
+      "tp2Pct": null,
+      "tp3Pct": null,
+      "takeProfits": [
+        {
+          "level": 1,
+          "price": 4.184,
+          "zoneLow": 4.184,
+          "zoneHigh": 4.184,
+          "source": "HISTORICAL_PIVOT_SUPPORT",
+          "timeframes": [
+            "4h"
+          ],
+          "touches": 1,
+          "pct": 6,
+          "rrNet": 4.75
+        }
+      ],
+      "targetCount": 1,
+      "riskRewardToTp1": 4.75,
+      "riskRewardToTp2": null,
+      "rr": 4.75,
+      "rsi15": 30.3,
+      "rsi4h": 37.3,
+      "fundingRate": -0.0000179,
+      "change24h": -5.65,
+      "quoteVolume24h": 8029919,
+      "triggerCandleTime": "2026-11-25T13:45:00.000Z",
+      "analyzedAt": "2026-11-25T14:10:59.510Z",
+      "validUntil": "2026-11-25T14:15:00.000Z",
+      "riskNote": null,
+      "reasons": [
+        "شکست حمایت و بازآزمایی",
+        "کراس نزولی MACD",
+        "حجم 3.4 برابر میانگین"
+      ],
+      "score": 88,
+      "rankScore": 88,
+      "scoreBreakdown": {
+        "trend": 30,
+        "setup": 25,
+        "trigger": 18,
+        "candleVolume": 10,
+        "liveFlow": 0,
+        "firstTargetRR": 5
+      },
+      "costAssumptions": {
+        "feeRatePerSide": 0.0006,
+        "slippageRatePerSide": 0.0003,
+        "fundingIncludedInRR": false
+      },
+      "grade": "A+",
+      "recent3m": {
+        "available": true,
+        "sampleComplete": true,
+        "sampleTruncated": false,
+        "tradesObserved": 0,
+        "buyNotional": 0,
+        "sellNotional": 0,
+        "buySharePct": null,
+        "sellSharePct": null,
+        "netDelta": 0,
+        "windowEnd": "2026-11-25T14:10:00.000Z"
+      },
+      "volume": {
+        "recent3m": {
+          "available": true,
+          "sampleComplete": true,
+          "sampleTruncated": false,
+          "tradesObserved": 0,
+          "buyNotional": 0,
+          "sellNotional": 0,
+          "buySharePct": null,
+          "sellSharePct": null,
+          "netDelta": 0,
+          "windowEnd": "2026-11-25T14:10:00.000Z"
+        }
+      },
+      "dataQuality": {
+        "recent3mComplete": true
+      },
+      "tradesObserved": 0,
+      "lastCheckedPrice": 4.46,
+      "priceCheckedAt": "2026-11-25T14:11:37.575Z",
+      "rank": 1,
+      "scoreRaw": 88,
+      "timestamp": "2026-11-25T14:11:37.929Z",
+      "recordType": "SCANNER_CANDIDATE"
     }
   ],
   "summaries": {
@@ -1868353,6 +1868464,21 @@
       "lastSeenAt": "2026-11-25T13:59:35.406Z",
       "lastPrice": 192.99,
       "lastScore": 72
+    },
+    "UNI_USDT:SHORT": {
+      "symbol": "UNI_USDT",
+      "side": "SHORT",
+      "firstDiscoveredAt": "2026-11-25T14:11:37.929Z",
+      "firstDiscoveryPrice": 4.46,
+      "highestPrice": 4.46,
+      "lowestPrice": 4.46,
+      "bestRank": 1,
+      "bestScore": 88,
+      "observations": 1,
+      "maxFavorableObservedPct": 0,
+      "lastSeenAt": "2026-11-25T14:11:37.929Z",
+      "lastPrice": 4.46,
+      "lastScore": 88
     }
   },
   "rankMemory": {
@@ -1870619,6 +1870745,13 @@
       "score": 72,
       "rank": 1,
       "updatedAt": "2026-11-25T13:59:35.406Z"
+    },
+    "UNI_USDT:SHORT": {
+      "symbol": "UNI_USDT",
+      "side": "SHORT",
+      "score": 88,
+      "rank": 1,
+      "updatedAt": "2026-11-25T14:11:37.929Z"
     }
   },
   "tradeStates": {
@@ -1884208,10 +1884341,12 @@
     }
   },
   "scanMeta": {
-    "timestamp": "2026-11-25T14:05:33.505Z",
-    "candidateCount": 0,
-    "ranks": {}
+    "timestamp": "2026-11-25T14:11:37.929Z",
+    "candidateCount": 1,
+    "ranks": {
+      "UNI_USDT:SHORT": 1
+    }
   },
-  "updatedAt": "2026-11-25T14:05:33.505Z",
+  "updatedAt": "2026-11-25T14:11:37.929Z",
   "schemaVersion": 2
 }
