@@ -1859369,6 +1859369,117 @@
       },
       "components": {},
       "confirmations": []
+    },
+    {
+      "symbol": "COIN_USDT",
+      "contract": "COIN_USDT",
+      "side": "SHORT",
+      "setup": "BreakdownRetest",
+      "strategyVersion": "gate-structural-ls-v1",
+      "status": "SHORT_ENTRY",
+      "statusLabel": "SHORT BreakdownRetest",
+      "price": 100.68,
+      "entryLow": 100.59809948773345,
+      "entryHigh": 100.76190051226656,
+      "referenceEntry": 100.59809948773345,
+      "entry": {
+        "low": 100.59809948773345,
+        "high": 100.76190051226656,
+        "price": 100.68
+      },
+      "stopLoss": 101.22300170755521,
+      "stopLossPct": -0.62,
+      "tp1": 96.57,
+      "tp2": null,
+      "tp3": null,
+      "tp1Pct": 4,
+      "tp2Pct": null,
+      "tp3Pct": null,
+      "takeProfits": [
+        {
+          "level": 1,
+          "price": 96.57,
+          "zoneLow": 96.57,
+          "zoneHigh": 96.57,
+          "source": "HISTORICAL_PIVOT_SUPPORT",
+          "timeframes": [
+            "4h"
+          ],
+          "touches": 1,
+          "pct": 4,
+          "rrNet": 4.77
+        }
+      ],
+      "targetCount": 1,
+      "riskRewardToTp1": 4.77,
+      "riskRewardToTp2": null,
+      "rr": 4.77,
+      "rsi15": 33.3,
+      "rsi4h": 35.2,
+      "fundingRate": 0,
+      "change24h": -6.13,
+      "quoteVolume24h": 2340632,
+      "triggerCandleTime": "2026-11-25T07:30:00.000Z",
+      "analyzedAt": "2026-11-25T07:47:16.929Z",
+      "validUntil": "2026-11-25T08:00:00.000Z",
+      "riskNote": null,
+      "reasons": [
+        "شکست حمایت و بازآزمایی",
+        "کراس نزولی MACD",
+        "حجم 4.8 برابر میانگین"
+      ],
+      "score": 88,
+      "rankScore": 88,
+      "scoreBreakdown": {
+        "trend": 30,
+        "setup": 25,
+        "trigger": 18,
+        "candleVolume": 10,
+        "liveFlow": 0,
+        "firstTargetRR": 5
+      },
+      "costAssumptions": {
+        "feeRatePerSide": 0.0006,
+        "slippageRatePerSide": 0.0003,
+        "fundingIncludedInRR": false
+      },
+      "grade": "A+",
+      "recent3m": {
+        "available": true,
+        "sampleComplete": true,
+        "sampleTruncated": false,
+        "tradesObserved": 0,
+        "buyNotional": 0,
+        "sellNotional": 0,
+        "buySharePct": null,
+        "sellSharePct": null,
+        "netDelta": 0,
+        "windowEnd": "2026-11-25T07:47:00.000Z"
+      },
+      "volume": {
+        "recent3m": {
+          "available": true,
+          "sampleComplete": true,
+          "sampleTruncated": false,
+          "tradesObserved": 0,
+          "buyNotional": 0,
+          "sellNotional": 0,
+          "buySharePct": null,
+          "sellSharePct": null,
+          "netDelta": 0,
+          "windowEnd": "2026-11-25T07:47:00.000Z"
+        }
+      },
+      "dataQuality": {
+        "recent3mComplete": true
+      },
+      "tradesObserved": 0,
+      "lastCheckedPrice": 100.61,
+      "priceCheckedAt": "2026-11-25T07:47:56.227Z",
+      "rank": 1,
+      "scoreRaw": 88,
+      "timestamp": "2026-11-25T07:47:56.456Z",
+      "recordType": "SCANNER_CANDIDATE"
     }
   ],
   "summaries": {
@@ -1867753,6 +1867864,21 @@
       "lastPrice": 363.9,
       "lastScore": 53.3,
       "observations": 1
+    },
+    "COIN_USDT:SHORT": {
+      "symbol": "COIN_USDT",
+      "side": "SHORT",
+      "firstDiscoveredAt": "2026-11-25T07:47:56.456Z",
+      "firstDiscoveryPrice": 100.61,
+      "highestPrice": 100.61,
+      "lowestPrice": 100.61,
+      "bestRank": 1,
+      "bestScore": 88,
+      "observations": 1,
+      "maxFavorableObservedPct": 0,
+      "lastSeenAt": "2026-11-25T07:47:56.456Z",
+      "lastPrice": 100.61,
+      "lastScore": 88
     }
   },
   "rankMemory": {
@@ -1869998,6 +1870124,13 @@
       "score": 53.3,
       "rank": 123,
       "updatedAt": "2026-11-23T16:05:15.953Z"
+    },
+    "COIN_USDT:SHORT": {
+      "symbol": "COIN_USDT",
+      "side": "SHORT",
+      "score": 88,
+      "rank": 1,
+      "updatedAt": "2026-11-25T07:47:56.456Z"
     }
   },
   "tradeStates": {
@@ -1883587,10 +1883720,12 @@
     }
   },
   "scanMeta": {
-    "timestamp": "2026-11-25T07:42:20.624Z",
-    "candidateCount": 0,
-    "ranks": {}
+    "timestamp": "2026-11-25T07:47:56.456Z",
+    "candidateCount": 1,
+    "ranks": {
+      "COIN_USDT:SHORT": 1
+    }
   },
-  "updatedAt": "2026-11-25T07:42:20.624Z",
+  "updatedAt": "2026-11-25T07:47:56.456Z",
   "schemaVersion": 2
 }
