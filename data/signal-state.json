@@ -87,7 +87,7 @@
       "triggerCandleTime": "2026-11-25T07:30:00.000Z",
       "score": 88,
       "setup": "BreakdownRetest",
-      "nextMinute": 1795618680,
+      "nextMinute": 1795619040,
       "entryTime": "2026-11-25T07:51:00.000Z",
       "exitTime": "2026-11-25T08:30:00.000Z",
       "remaining": 0,
@@ -295,7 +295,7 @@
       },
       "createdAt": "2026-11-25T13:53:52.358Z",
       "sentAt": "2026-11-25T13:53:52.972Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 193.0926961415236,
       "entryLow": 193.0926961415236,
       "entryHigh": 193.44730385847643,
@@ -314,28 +314,39 @@
       "triggerCandleTime": "2026-11-25T13:30:00.000Z",
       "score": 72,
       "setup": "Pullback",
-      "nextMinute": 1795618680,
+      "nextMinute": 1795619040,
       "entryTime": "2026-11-25T13:57:00.000Z",
-      "exitTime": null,
-      "remaining": 1,
-      "realizedGrossPct": 0,
-      "estimatedCostsPct": 0,
-      "netPct": null,
-      "netR": null,
-      "exits": [],
+      "exitTime": "2026-11-25T15:02:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": -1.5942170685774002,
+      "estimatedCostsPct": 0.18143479536171964,
+      "netPct": -1.77565186393912,
+      "netR": -1.1138080873287997,
+      "exits": [
+        {
+          "time": "2026-11-25T15:02:00.000Z",
+          "price": 196.17101286158805,
+          "fraction": 1,
+          "reason": "STOP",
+          "grossPct": -1.5942170685774002,
+          "costPct": 0.18143479536171964
+        }
+      ],
       "observedMfePct": 1.4204038766507194,
-      "observedMaePct": 0.6822131985307794,
+      "observedMaePct": 0.9152618891297228,
       "observationMfePct": 1.4204038766507194,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "messageIds": [
         2710
       ],
       "entryCandleTime": 1795614960,
       "holdUntil": 1795701420,
-      "observeUntil": 1795787820
+      "observeUntil": 1795787820,
+      "exitReason": "STOP",
+      "resultNotifiedAt": "2026-11-25T15:04:19.251Z"
     },
     "5e51126956a0f19c909dae36": {
       "id": "5e51126956a0f19c909dae36",
@@ -404,7 +415,7 @@
       },
       "createdAt": "2026-11-25T14:11:38.751Z",
       "sentAt": "2026-11-25T14:11:39.207Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 4.451247666589419,
       "entryLow": 4.451247666589419,
       "entryHigh": 4.460752333410582,
@@ -423,30 +434,41 @@
       "triggerCandleTime": "2026-11-25T13:45:00.000Z",
       "score": 88,
       "setup": "BreakdownRetest",
-      "nextMinute": 1795618680,
+      "nextMinute": 1795619040,
       "entryTime": "2026-11-25T14:14:00.000Z",
-      "exitTime": null,
-      "remaining": 1,
-      "realizedGrossPct": 0,
-      "estimatedCostsPct": 0,
-      "netPct": null,
-      "netR": null,
-      "exits": [],
+      "exitTime": "2026-11-25T15:02:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": -1.0467502208181472,
+      "estimatedCostsPct": 0.18094207519873634,
+      "netPct": -1.2276922960168835,
+      "netR": -1.1728607948678633,
+      "exits": [
+        {
+          "time": "2026-11-25T15:02:00.000Z",
+          "price": 4.497841111368606,
+          "fraction": 1,
+          "reason": "STOP",
+          "grossPct": -1.0467502208181472,
+          "costPct": 0.18094207519873634
+        }
+      ],
       "observedMfePct": 2.0050033894834005,
-      "observedMaePct": 0.3314201885756858,
+      "observedMaePct": 0.713335581143024,
       "observationMfePct": 2.0050033894834005,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "messageIds": [
         2712
       ],
       "entryCandleTime": 1795615980,
       "holdUntil": 1795702440,
-      "observeUntil": 1795788840
+      "observeUntil": 1795788840,
+      "exitReason": "STOP",
+      "resultNotifiedAt": "2026-11-25T15:04:19.460Z"
     }
   },
   "lastDailyReportDay": "2026-11-25",
-  "updatedAt": "2026-11-25T14:59:06.328Z"
+  "updatedAt": "2026-11-25T15:04:59.226Z"
 }
