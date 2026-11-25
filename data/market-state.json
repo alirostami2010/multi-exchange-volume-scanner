@@ -1859591,6 +1859591,117 @@
       "scoreRaw": 88,
       "timestamp": "2026-11-25T07:53:33.395Z",
       "recordType": "SCANNER_CANDIDATE"
+    },
+    {
+      "symbol": "APT_USDT",
+      "contract": "APT_USDT",
+      "side": "SHORT",
+      "setup": "Pullback",
+      "strategyVersion": "gate-structural-ls-v1",
+      "status": "SHORT_ENTRY",
+      "statusLabel": "SHORT Pullback",
+      "price": 0.3547,
+      "entryLow": 0.35434188379518855,
+      "entryHigh": 0.3550581162048115,
+      "referenceEntry": 0.35434188379518855,
+      "entry": {
+        "low": 0.35434188379518855,
+        "high": 0.3550581162048115,
+        "price": 0.3547
+      },
+      "stopLoss": 0.35909372068270484,
+      "stopLossPct": -1.34,
+      "tp1": 0.3351,
+      "tp2": null,
+      "tp3": null,
+      "tp1Pct": 5.43,
+      "tp2Pct": null,
+      "tp3Pct": null,
+      "takeProfits": [
+        {
+          "level": 1,
+          "price": 0.3351,
+          "zoneLow": 0.3351,
+          "zoneHigh": 0.3351,
+          "source": "HISTORICAL_PIVOT_SUPPORT",
+          "timeframes": [
+            "4h"
+          ],
+          "touches": 1,
+          "pct": 5.43,
+          "rrNet": 3.45
+        }
+      ],
+      "targetCount": 1,
+      "riskRewardToTp1": 3.45,
+      "riskRewardToTp2": null,
+      "rr": 3.45,
+      "rsi15": 32.2,
+      "rsi4h": 32.2,
+      "fundingRate": -0.0000194,
+      "change24h": -4.88,
+      "quoteVolume24h": 3163631,
+      "triggerCandleTime": "2026-11-25T13:30:00.000Z",
+      "analyzedAt": "2026-11-25T13:47:32.166Z",
+      "validUntil": "2026-11-25T14:00:00.000Z",
+      "riskNote": null,
+      "reasons": [
+        "پولبک و برگشت از مقاومت",
+        "پوشای نزولی + تأیید EMA9",
+        "حجم 4.5 برابر میانگین"
+      ],
+      "score": 72,
+      "rankScore": 72,
+      "scoreBreakdown": {
+        "trend": 30,
+        "setup": 15,
+        "trigger": 12,
+        "candleVolume": 10,
+        "liveFlow": 0,
+        "firstTargetRR": 5
+      },
+      "costAssumptions": {
+        "feeRatePerSide": 0.0006,
+        "slippageRatePerSide": 0.0003,
+        "fundingIncludedInRR": false
+      },
+      "grade": "B",
+      "recent3m": {
+        "available": true,
+        "sampleComplete": true,
+        "sampleTruncated": false,
+        "tradesObserved": 0,
+        "buyNotional": 0,
+        "sellNotional": 0,
+        "buySharePct": null,
+        "sellSharePct": null,
+        "netDelta": 0,
+        "windowEnd": "2026-11-25T13:47:00.000Z"
+      },
+      "volume": {
+        "recent3m": {
+          "available": true,
+          "sampleComplete": true,
+          "sampleTruncated": false,
+          "tradesObserved": 0,
+          "buyNotional": 0,
+          "sellNotional": 0,
+          "buySharePct": null,
+          "sellSharePct": null,
+          "netDelta": 0,
+          "windowEnd": "2026-11-25T13:47:00.000Z"
+        }
+      },
+      "dataQuality": {
+        "recent3mComplete": true
+      },
+      "tradesObserved": 0,
+      "lastCheckedPrice": 0.355,
+      "priceCheckedAt": "2026-11-25T13:48:11.827Z",
+      "rank": 1,
+      "scoreRaw": 72,
+      "timestamp": "2026-11-25T13:48:12.190Z",
+      "recordType": "SCANNER_CANDIDATE"
     }
   ],
   "summaries": {
@@ -1867990,6 +1868101,21 @@
       "lastSeenAt": "2026-11-25T07:53:33.395Z",
       "lastPrice": 100.45,
       "lastScore": 88
+    },
+    "APT_USDT:SHORT": {
+      "symbol": "APT_USDT",
+      "side": "SHORT",
+      "firstDiscoveredAt": "2026-11-25T13:48:12.190Z",
+      "firstDiscoveryPrice": 0.355,
+      "highestPrice": 0.355,
+      "lowestPrice": 0.355,
+      "bestRank": 1,
+      "bestScore": 72,
+      "observations": 1,
+      "maxFavorableObservedPct": 0,
+      "lastSeenAt": "2026-11-25T13:48:12.190Z",
+      "lastPrice": 0.355,
+      "lastScore": 72
     }
   },
   "rankMemory": {
@@ -1870242,6 +1870368,13 @@
       "score": 88,
       "rank": 1,
       "updatedAt": "2026-11-25T07:53:33.395Z"
+    },
+    "APT_USDT:SHORT": {
+      "symbol": "APT_USDT",
+      "side": "SHORT",
+      "score": 72,
+      "rank": 1,
+      "updatedAt": "2026-11-25T13:48:12.190Z"
     }
   },
   "tradeStates": {
@@ -1883831,10 +1883964,12 @@
     }
   },
   "scanMeta": {
-    "timestamp": "2026-11-25T13:42:09.810Z",
-    "candidateCount": 0,
-    "ranks": {}
+    "timestamp": "2026-11-25T13:48:12.190Z",
+    "candidateCount": 1,
+    "ranks": {
+      "APT_USDT:SHORT": 1
+    }
   },
-  "updatedAt": "2026-11-25T13:42:09.810Z",
+  "updatedAt": "2026-11-25T13:48:12.190Z",
   "schemaVersion": 2
 }
