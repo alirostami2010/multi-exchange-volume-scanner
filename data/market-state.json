@@ -1864465,6 +1864465,421 @@
       "scoreRaw": 69,
       "timestamp": "2026-11-26T10:10:49.224Z",
       "recordType": "SCANNER_CANDIDATE"
+    },
+    {
+      "symbol": "BLUR_USDT",
+      "contract": "BLUR_USDT",
+      "side": "LONG",
+      "setup": "Pullback",
+      "strategyVersion": "gate-structural-ls-v3.2-calibrated",
+      "status": "LONG_ENTRY",
+      "statusLabel": "LONG Pullback",
+      "price": 0.01054,
+      "entryLow": 0.010480115008255984,
+      "entryHigh": 0.010581458840438167,
+      "referenceEntry": 0.01054,
+      "entry": {
+        "low": 0.010480115008255984,
+        "high": 0.010581458840438167,
+        "price": 0.01054
+      },
+      "stopLoss": 0.010344620290112426,
+      "stopLossPct": -1.85,
+      "tp1": 0.01085,
+      "tp2": 0.01092,
+      "tp3": 0.01104,
+      "tp1Pct": 2.94,
+      "tp2Pct": 3.61,
+      "tp3Pct": 4.74,
+      "takeProfits": [
+        {
+          "level": 1,
+          "price": 0.01085,
+          "zoneLow": 0.01085,
+          "zoneHigh": 0.01088,
+          "source": "HISTORICAL_PIVOT_RESISTANCE",
+          "timeframes": [
+            "15m"
+          ],
+          "touches": 3,
+          "pct": 2.94,
+          "rrNet": 1.36
+        },
+        {
+          "level": 2,
+          "price": 0.01092,
+          "zoneLow": 0.01092,
+          "zoneHigh": 0.01092,
+          "source": "HISTORICAL_PIVOT_RESISTANCE",
+          "timeframes": [
+            "15m"
+          ],
+          "touches": 1,
+          "pct": 3.61,
+          "rrNet": 1.68
+        },
+        {
+          "level": 3,
+          "price": 0.01104,
+          "zoneLow": 0.01104,
+          "zoneHigh": 0.01105,
+          "source": "HISTORICAL_PIVOT_RESISTANCE",
+          "timeframes": [
+            "4h",
+            "15m"
+          ],
+          "touches": 2,
+          "pct": 4.74,
+          "rrNet": 2.24
+        }
+      ],
+      "targetCount": 3,
+      "riskRewardToTp1": 1.36,
+      "riskRewardToTp2": 1.68,
+      "rr": 1.68,
+      "rsi15": 45.1,
+      "rsi4h": 74.8,
+      "fundingRate": -0.0002358,
+      "change24h": 20.46,
+      "quoteVolume24h": 1259831,
+      "triggerCandleTime": "2026-11-26T09:45:00.000Z",
+      "analyzedAt": "2026-11-26T10:14:39.010Z",
+      "validUntil": "2026-11-26T10:35:00.000Z",
+      "riskNote": "جهت معامله خلاف رژیم BTC است؛ با مدیریت ریسک وارد شوید.",
+      "reasons": [
+        "پولبک هوشمند به حمایت/میانگین",
+        "🔥 سوخت شورت‌اسکوییز (تله بازارگردان) + چرخش مومنتوم MACD",
+        "هم‌جهت با جریان سفارشات صعودی"
+      ],
+      "score": 82,
+      "rankScore": 82,
+      "scoreBreakdown": {
+        "trend": 30,
+        "setup": 20,
+        "trigger": 14,
+        "candleVolume": 4,
+        "liveFlow": 0,
+        "firstTargetRR": 4,
+        "squeezeBonus": 10
+      },
+      "costAssumptions": {
+        "feeRatePerSide": 0.0006,
+        "slippageRatePerSide": 0.0003,
+        "fundingIncludedInRR": false
+      },
+      "grade": "A+",
+      "recent3m": {
+        "available": true,
+        "sampleComplete": true,
+        "sampleTruncated": false,
+        "tradesObserved": 0,
+        "buyNotional": 0,
+        "sellNotional": 0,
+        "buySharePct": null,
+        "sellSharePct": null,
+        "netDelta": 0,
+        "windowEnd": "2026-11-26T10:14:00.000Z"
+      },
+      "volume": {
+        "recent3m": {
+          "available": true,
+          "sampleComplete": true,
+          "sampleTruncated": false,
+          "tradesObserved": 0,
+          "buyNotional": 0,
+          "sellNotional": 0,
+          "buySharePct": null,
+          "sellSharePct": null,
+          "netDelta": 0,
+          "windowEnd": "2026-11-26T10:14:00.000Z"
+        }
+      },
+      "dataQuality": {
+        "recent3mComplete": true
+      },
+      "tradesObserved": 0,
+      "lastCheckedPrice": 0.01054,
+      "priceCheckedAt": "2026-11-26T10:15:15.862Z",
+      "rank": 1,
+      "scoreRaw": 82,
+      "timestamp": "2026-11-26T10:15:16.234Z",
+      "recordType": "SCANNER_CANDIDATE"
+    },
+    {
+      "symbol": "GUA_USDT",
+      "contract": "GUA_USDT",
+      "side": "SHORT",
+      "setup": "LiquiditySweep",
+      "strategyVersion": "gate-structural-ls-v3.2-calibrated",
+      "status": "SHORT_ENTRY",
+      "statusLabel": "SHORT LiquiditySweep",
+      "price": 0.03588,
+      "entryLow": 0.03572836739008916,
+      "entryHigh": 0.036099024880982336,
+      "referenceEntry": 0.03588,
+      "entry": {
+        "low": 0.03572836739008916,
+        "high": 0.036099024880982336,
+        "price": 0.03588
+      },
+      "stopLoss": 0.03635569565438336,
+      "stopLossPct": -1.33,
+      "tp1": 0.03494,
+      "tp2": 0.03488,
+      "tp3": 0.03475,
+      "tp1Pct": 2.62,
+      "tp2Pct": 2.79,
+      "tp3Pct": 3.15,
+      "takeProfits": [
+        {
+          "level": 1,
+          "price": 0.03494,
+          "zoneLow": 0.03494,
+          "zoneHigh": 0.03494,
+          "source": "HISTORICAL_PIVOT_SUPPORT",
+          "timeframes": [
+            "4h"
+          ],
+          "touches": 1,
+          "pct": 2.62,
+          "rrNet": 1.62
+        },
+        {
+          "level": 2,
+          "price": 0.03488,
+          "zoneLow": 0.03481,
+          "zoneHigh": 0.03488,
+          "source": "HISTORICAL_PIVOT_SUPPORT",
+          "timeframes": [
+            "15m"
+          ],
+          "touches": 3,
+          "pct": 2.79,
+          "rrNet": 1.73
+        },
+        {
+          "level": 3,
+          "price": 0.03475,
+          "zoneLow": 0.03469,
+          "zoneHigh": 0.03475,
+          "source": "HISTORICAL_PIVOT_SUPPORT",
+          "timeframes": [
+            "15m"
+          ],
+          "touches": 2,
+          "pct": 3.15,
+          "rrNet": 1.97
+        }
+      ],
+      "targetCount": 3,
+      "riskRewardToTp1": 1.62,
+      "riskRewardToTp2": 1.73,
+      "rr": 1.73,
+      "rsi15": 49,
+      "rsi4h": 55.5,
+      "fundingRate": 0.00009,
+      "change24h": -6.47,
+      "quoteVolume24h": 1154814,
+      "triggerCandleTime": "2026-11-26T09:45:00.000Z",
+      "analyzedAt": "2026-11-26T10:14:39.010Z",
+      "validUntil": "2026-11-26T10:35:00.000Z",
+      "riskNote": null,
+      "reasons": [
+        "شکار استاپ‌ها در سقف و توزیع نهنگ‌ها",
+        "جمع‌آوری نقدینگی (Stop Hunt) + چرخش نزولی RSI",
+        "هم‌جهت با جریان سفارشات نزولی"
+      ],
+      "score": 77,
+      "rankScore": 77,
+      "scoreBreakdown": {
+        "trend": 22,
+        "setup": 28,
+        "trigger": 19,
+        "candleVolume": 4,
+        "liveFlow": 0,
+        "firstTargetRR": 4,
+        "squeezeBonus": 0
+      },
+      "costAssumptions": {
+        "feeRatePerSide": 0.0006,
+        "slippageRatePerSide": 0.0003,
+        "fundingIncludedInRR": false
+      },
+      "grade": "A",
+      "recent3m": {
+        "available": true,
+        "sampleComplete": true,
+        "sampleTruncated": false,
+        "tradesObserved": 0,
+        "buyNotional": 0,
+        "sellNotional": 0,
+        "buySharePct": null,
+        "sellSharePct": null,
+        "netDelta": 0,
+        "windowEnd": "2026-11-26T10:14:00.000Z"
+      },
+      "volume": {
+        "recent3m": {
+          "available": true,
+          "sampleComplete": true,
+          "sampleTruncated": false,
+          "tradesObserved": 0,
+          "buyNotional": 0,
+          "sellNotional": 0,
+          "buySharePct": null,
+          "sellSharePct": null,
+          "netDelta": 0,
+          "windowEnd": "2026-11-26T10:14:00.000Z"
+        }
+      },
+      "dataQuality": {
+        "recent3mComplete": true
+      },
+      "tradesObserved": 0,
+      "lastCheckedPrice": 0.03596,
+      "priceCheckedAt": "2026-11-26T10:15:15.862Z",
+      "rank": 2,
+      "scoreRaw": 77,
+      "timestamp": "2026-11-26T10:15:16.234Z",
+      "recordType": "SCANNER_CANDIDATE"
+    },
+    {
+      "symbol": "LIT_USDT",
+      "contract": "LIT_USDT",
+      "side": "SHORT",
+      "setup": "Pullback",
+      "strategyVersion": "gate-structural-ls-v3.2-calibrated",
+      "status": "SHORT_ENTRY",
+      "statusLabel": "SHORT Pullback",
+      "price": 2.501,
+      "entryLow": 2.4965797495920437,
+      "entryHigh": 2.5073848061448256,
+      "referenceEntry": 2.501,
+      "entry": {
+        "low": 2.4965797495920437,
+        "high": 2.5073848061448256,
+        "price": 2.501
+      },
+      "stopLoss": 2.522036818923557,
+      "stopLossPct": -0.84,
+      "tp1": 2.45,
+      "tp2": 2.439,
+      "tp3": 2.433,
+      "tp1Pct": 2.04,
+      "tp2Pct": 2.48,
+      "tp3Pct": 2.72,
+      "takeProfits": [
+        {
+          "level": 1,
+          "price": 2.45,
+          "zoneLow": 2.449,
+          "zoneHigh": 2.45,
+          "source": "HISTORICAL_PIVOT_SUPPORT",
+          "timeframes": [
+            "15m"
+          ],
+          "touches": 2,
+          "pct": 2.04,
+          "rrNet": 1.82
+        },
+        {
+          "level": 2,
+          "price": 2.439,
+          "zoneLow": 2.439,
+          "zoneHigh": 2.439,
+          "source": "HISTORICAL_PIVOT_SUPPORT",
+          "timeframes": [
+            "15m"
+          ],
+          "touches": 1,
+          "pct": 2.48,
+          "rrNet": 2.25
+        },
+        {
+          "level": 3,
+          "price": 2.433,
+          "zoneLow": 2.433,
+          "zoneHigh": 2.433,
+          "source": "HISTORICAL_PIVOT_SUPPORT",
+          "timeframes": [
+            "15m"
+          ],
+          "touches": 1,
+          "pct": 2.72,
+          "rrNet": 2.49
+        }
+      ],
+      "targetCount": 3,
+      "riskRewardToTp1": 1.82,
+      "riskRewardToTp2": 2.25,
+      "rr": 2.25,
+      "rsi15": 57.1,
+      "rsi4h": 53.8,
+      "fundingRate": 0.0000357,
+      "change24h": 8.41,
+      "quoteVolume24h": 2124611,
+      "triggerCandleTime": "2026-11-26T09:45:00.000Z",
+      "analyzedAt": "2026-11-26T10:14:39.010Z",
+      "validUntil": "2026-11-26T10:35:00.000Z",
+      "riskNote": null,
+      "reasons": [
+        "پولبک هوشمند به مقاومت/میانگین",
+        "چرخش مومنتوم MACD + چرخش نزولی RSI",
+        "هم‌جهت با جریان سفارشات نزولی"
+      ],
+      "score": 71,
+      "rankScore": 71,
+      "scoreBreakdown": {
+        "trend": 27,
+        "setup": 20,
+        "trigger": 14,
+        "candleVolume": 4,
+        "liveFlow": 0,
+        "firstTargetRR": 6,
+        "squeezeBonus": 0
+      },
+      "costAssumptions": {
+        "feeRatePerSide": 0.0006,
+        "slippageRatePerSide": 0.0003,
+        "fundingIncludedInRR": false
+      },
+      "grade": "A",
+      "recent3m": {
+        "available": true,
+        "sampleComplete": true,
+        "sampleTruncated": false,
+        "tradesObserved": 0,
+        "buyNotional": 0,
+        "sellNotional": 0,
+        "buySharePct": null,
+        "sellSharePct": null,
+        "netDelta": 0,
+        "windowEnd": "2026-11-26T10:14:00.000Z"
+      },
+      "volume": {
+        "recent3m": {
+          "available": true,
+          "sampleComplete": true,
+          "sampleTruncated": false,
+          "tradesObserved": 0,
+          "buyNotional": 0,
+          "sellNotional": 0,
+          "buySharePct": null,
+          "sellSharePct": null,
+          "netDelta": 0,
+          "windowEnd": "2026-11-26T10:14:00.000Z"
+        }
+      },
+      "dataQuality": {
+        "recent3mComplete": true
+      },
+      "tradesObserved": 0,
+      "lastCheckedPrice": 2.5,
+      "priceCheckedAt": "2026-11-26T10:15:15.862Z",
+      "rank": 3,
+      "scoreRaw": 71,
+      "timestamp": "2026-11-26T10:15:16.234Z",
+      "recordType": "SCANNER_CANDIDATE"
     }
   ],
   "summaries": {
@@ -1873024,11 +1873439,11 @@
       "lowestPrice": 0.01048,
       "bestRank": 1,
       "bestScore": 92,
-      "observations": 3,
+      "observations": 4,
       "maxFavorableObservedPct": 0.6679389312977158,
-      "lastSeenAt": "2026-11-26T09:57:45.902Z",
-      "lastPrice": 0.01055,
-      "lastScore": 90
+      "lastSeenAt": "2026-11-26T10:15:16.234Z",
+      "lastPrice": 0.01054,
+      "lastScore": 82
     },
     "UNITREE_USDT:LONG": {
       "symbol": "UNITREE_USDT",
@@ -1873065,29 +1873480,29 @@
       "side": "SHORT",
       "firstDiscoveredAt": "2026-11-26T10:02:00.772Z",
       "firstDiscoveryPrice": 2.498,
-      "highestPrice": 2.499,
+      "highestPrice": 2.5,
       "lowestPrice": 2.498,
       "bestRank": 1,
-      "bestScore": 69,
-      "observations": 2,
+      "bestScore": 71,
+      "observations": 3,
       "maxFavorableObservedPct": 0,
-      "lastSeenAt": "2026-11-26T10:06:22.956Z",
-      "lastPrice": 2.499,
-      "lastScore": 69
+      "lastSeenAt": "2026-11-26T10:15:16.234Z",
+      "lastPrice": 2.5,
+      "lastScore": 71
     },
     "GUA_USDT:SHORT": {
       "symbol": "GUA_USDT",
       "side": "SHORT",
       "firstDiscoveredAt": "2026-11-26T10:06:22.956Z",
       "firstDiscoveryPrice": 0.03593,
-      "highestPrice": 0.03593,
+      "highestPrice": 0.03596,
       "lowestPrice": 0.03593,
       "bestRank": 2,
       "bestScore": 77,
-      "observations": 1,
+      "observations": 2,
       "maxFavorableObservedPct": 0,
-      "lastSeenAt": "2026-11-26T10:06:22.956Z",
-      "lastPrice": 0.03593,
+      "lastSeenAt": "2026-11-26T10:15:16.234Z",
+      "lastPrice": 0.03596,
       "lastScore": 77
     },
     "MANTRA_USDT:LONG": {
@@ -1875430,9 +1875845,9 @@
     "BLUR_USDT:LONG": {
       "symbol": "BLUR_USDT",
       "side": "LONG",
-      "score": 90,
+      "score": 82,
       "rank": 1,
-      "updatedAt": "2026-11-26T09:57:45.902Z"
+      "updatedAt": "2026-11-26T10:15:16.234Z"
     },
     "UNITREE_USDT:LONG": {
       "symbol": "UNITREE_USDT",
@@ -1875451,16 +1875866,16 @@
     "LIT_USDT:SHORT": {
       "symbol": "LIT_USDT",
       "side": "SHORT",
-      "score": 69,
+      "score": 71,
       "rank": 3,
-      "updatedAt": "2026-11-26T10:06:22.956Z"
+      "updatedAt": "2026-11-26T10:15:16.234Z"
     },
     "GUA_USDT:SHORT": {
       "symbol": "GUA_USDT",
       "side": "SHORT",
       "score": 77,
       "rank": 2,
-      "updatedAt": "2026-11-26T10:06:22.956Z"
+      "updatedAt": "2026-11-26T10:15:16.234Z"
     },
     "MANTRA_USDT:LONG": {
       "symbol": "MANTRA_USDT",
@@ -1889057,13 +1889472,14 @@
     }
   },
   "scanMeta": {
-    "timestamp": "2026-11-26T10:10:49.224Z",
-    "candidateCount": 2,
+    "timestamp": "2026-11-26T10:15:16.234Z",
+    "candidateCount": 3,
     "ranks": {
-      "MANTRA_USDT:LONG": 1,
-      "UNITREE_USDT:LONG": 2
+      "BLUR_USDT:LONG": 1,
+      "GUA_USDT:SHORT": 2,
+      "LIT_USDT:SHORT": 3
     }
   },
-  "updatedAt": "2026-11-26T10:10:49.224Z",
+  "updatedAt": "2026-11-26T10:15:16.234Z",
   "schemaVersion": 2
 }
