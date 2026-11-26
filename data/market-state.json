@@ -1874306,6 +1874306,147 @@
       "scoreRaw": 83,
       "timestamp": "2026-11-26T11:54:14.093Z",
       "recordType": "SCANNER_CANDIDATE"
+    },
+    {
+      "symbol": "NG_USDT",
+      "contract": "NG_USDT",
+      "side": "SHORT",
+      "setup": "LiquiditySweep",
+      "strategyVersion": "gate-structural-ls-v4-major-sr",
+      "status": "SHORT_ENTRY",
+      "statusLabel": "SHORT LiquiditySweep",
+      "price": 3.636,
+      "entryLow": 3.633954261724215,
+      "entryHigh": 3.639506979901346,
+      "referenceEntry": 3.636,
+      "entry": {
+        "low": 3.633954261724215,
+        "high": 3.639506979901346,
+        "price": 3.636
+      },
+      "stopLoss": 3.655844966502243,
+      "stopLossPct": -0.55,
+      "tp1": 3.593,
+      "tp2": 3.57,
+      "tp3": 3.536,
+      "tp1Pct": 1.18,
+      "tp2Pct": 1.82,
+      "tp3Pct": 2.75,
+      "takeProfits": [
+        {
+          "level": 1,
+          "price": 3.593,
+          "zoneLow": 3.587,
+          "zoneHigh": 3.593,
+          "source": "MAJOR_PIVOT_SUPPORT",
+          "timeframes": [
+            "15m",
+            "4h"
+          ],
+          "touches": 4,
+          "pct": 1.18,
+          "rrNet": 1.38
+        },
+        {
+          "level": 2,
+          "price": 3.57,
+          "zoneLow": 3.565,
+          "zoneHigh": 3.57,
+          "source": "MAJOR_PIVOT_SUPPORT",
+          "timeframes": [
+            "4h",
+            "15m"
+          ],
+          "touches": 2,
+          "pct": 1.82,
+          "rrNet": 2.25
+        },
+        {
+          "level": 3,
+          "price": 3.536,
+          "zoneLow": 3.526,
+          "zoneHigh": 3.536,
+          "source": "MAJOR_PIVOT_SUPPORT",
+          "timeframes": [
+            "4h",
+            "15m"
+          ],
+          "touches": 3,
+          "pct": 2.75,
+          "rrNet": 3.54
+        }
+      ],
+      "targetCount": 3,
+      "riskRewardToTp1": 1.38,
+      "riskRewardToTp2": 2.25,
+      "rr": 2.25,
+      "rsi15": 52.2,
+      "rsi4h": 46.7,
+      "fundingRate": 0,
+      "change24h": -0.82,
+      "quoteVolume24h": 3520699,
+      "triggerCandleTime": "2026-11-26T11:30:00.000Z",
+      "analyzedAt": "2026-11-26T11:59:35.257Z",
+      "validUntil": "2026-11-26T12:15:00.000Z",
+      "riskNote": null,
+      "reasons": [
+        "شکار استاپ‌ها در سقف ماژور و توزیع نهنگ‌ها",
+        "جمع‌آوری نقدینگی (Stop Hunt) + شدو برگشتی قوی نزولی",
+        "حجم 1.4 برابر میانگین"
+      ],
+      "score": 85,
+      "rankScore": 85,
+      "scoreBreakdown": {
+        "trend": 25,
+        "setup": 28,
+        "trigger": 20,
+        "candleVolume": 8,
+        "liveFlow": 0,
+        "firstTargetRR": 4,
+        "squeezeBonus": 0
+      },
+      "costAssumptions": {
+        "feeRatePerSide": 0.0006,
+        "slippageRatePerSide": 0.0003,
+        "fundingIncludedInRR": false
+      },
+      "grade": "A+",
+      "recent3m": {
+        "available": true,
+        "sampleComplete": true,
+        "sampleTruncated": false,
+        "tradesObserved": 0,
+        "buyNotional": 0,
+        "sellNotional": 0,
+        "buySharePct": null,
+        "sellSharePct": null,
+        "netDelta": 0,
+        "windowEnd": "2026-11-26T11:59:00.000Z"
+      },
+      "volume": {
+        "recent3m": {
+          "available": true,
+          "sampleComplete": true,
+          "sampleTruncated": false,
+          "tradesObserved": 0,
+          "buyNotional": 0,
+          "sellNotional": 0,
+          "buySharePct": null,
+          "sellSharePct": null,
+          "netDelta": 0,
+          "windowEnd": "2026-11-26T11:59:00.000Z"
+        }
+      },
+      "dataQuality": {
+        "recent3mComplete": true
+      },
+      "tradesObserved": 0,
+      "lastCheckedPrice": 3.634,
+      "priceCheckedAt": "2026-11-26T12:00:12.054Z",
+      "rank": 1,
+      "scoreRaw": 85,
+      "timestamp": "2026-11-26T12:00:12.365Z",
+      "recordType": "SCANNER_CANDIDATE"
     }
   ],
   "summaries": {
@@ -1883162,14 +1883303,14 @@
       "firstDiscoveredAt": "2026-11-26T11:51:23.095Z",
       "firstDiscoveryPrice": 3.641,
       "highestPrice": 3.641,
-      "lowestPrice": 3.639,
+      "lowestPrice": 3.634,
       "bestRank": 1,
       "bestScore": 85,
-      "observations": 2,
-      "maxFavorableObservedPct": 0.054929964295529356,
-      "lastSeenAt": "2026-11-26T11:54:14.093Z",
-      "lastPrice": 3.639,
-      "lastScore": 83
+      "observations": 3,
+      "maxFavorableObservedPct": 0.19225487503433444,
+      "lastSeenAt": "2026-11-26T12:00:12.365Z",
+      "lastPrice": 3.634,
+      "lastScore": 85
     }
   },
   "rankMemory": {
@@ -1885636,9 +1885777,9 @@
     "NG_USDT:SHORT": {
       "symbol": "NG_USDT",
       "side": "SHORT",
-      "score": 83,
+      "score": 85,
       "rank": 1,
-      "updatedAt": "2026-11-26T11:54:14.093Z"
+      "updatedAt": "2026-11-26T12:00:12.365Z"
     }
   },
   "tradeStates": {
@@ -1899228,10 +1899369,12 @@
     }
   },
   "scanMeta": {
-    "timestamp": "2026-11-26T11:57:12.265Z",
-    "candidateCount": 0,
-    "ranks": {}
+    "timestamp": "2026-11-26T12:00:12.365Z",
+    "candidateCount": 1,
+    "ranks": {
+      "NG_USDT:SHORT": 1
+    }
   },
-  "updatedAt": "2026-11-26T11:57:12.265Z",
+  "updatedAt": "2026-11-26T12:00:12.365Z",
   "schemaVersion": 2
 }
