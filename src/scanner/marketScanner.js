@@ -8,7 +8,7 @@ import {
   requireArray,
 } from '../services/gate.js';
 
-export const STRATEGY_VERSION = 'gate-structural-ls-v4-major-sr';
+export const STRATEGY_VERSION = 'gate-structural-ls-v5-ai-radar';
 
 export const CONFIG = Object.freeze({
   MODE: 'BALANCED',
@@ -69,7 +69,7 @@ export const CONFIG = Object.freeze({
 
   MAX_SCAN_AGE_SECONDS: 240,
   MAX_QUOTE_AGE_SECONDS: 60,
-  LEVEL_CLUSTER_ATR: 0.4, // افزایش شعاع ترکیب سطوح برای ساختن نواحی بزرگ و واقعی
+  LEVEL_CLUSTER_ATR: 0.4,
 });
 
 const any = values => values.some(Boolean);
@@ -85,8 +85,6 @@ function reject(context, reason, side = 'GLOBAL') {
   return null;
 }
 
-// ==================== Candle validation ====================
-
 function validSeries(candles, seconds, minimum, asOf) {
   if (candles.length < minimum) return false;
 
@@ -101,8 +99,6 @@ function validSeries(candles, seconds, minimum, asOf) {
   }
   return true;
 }
-
-// ==================== Indicators ====================
 
 function ema(values, period) {
   if (values.length === 0) return [];
@@ -167,7 +163,7 @@ function rsi(closes, period = 14) {
   return output;
 }
 
-function indicators(candles) {
+export function indicators(candles) {
   if (candles.length === 0) return [];
 
   const closes = candles.map(candle => candle.close);
@@ -280,8 +276,6 @@ function indicators(candles) {
   });
 }
 
-// ==================== Candle patterns ====================
-
 function engulfing(candles, longSide) {
   const last = candles.at(-1);
   const previous = candles.at(-2);
@@ -325,12 +319,98 @@ function rejectionPattern(candles, longSide) {
   );
 }
 
-// ==================== Major Support & Resistance Zones (UPGRADED) ====================
+function analyzeHistoricalBehavior(c15, c4, btc15, btc4, longSide) {
+  if (!btc15?.length || !btc4?.length) {
+    return {
+      resiliencePct: 50,
+      beta: 1.0,
+      whenBtcBullish: 'حرکت هم‌راستا با کلیت بازار',
+      whenBtcBearish: 'نیازمند رعایت دقیق حد ضرر',
+      whenBtcNeutral: 'حرکت بر اساس جریان نقدینگی مستقل',
+    };
+  }
+
+  const map4h = new Map(btc4.map((c, idx) => [c.time, idx]));
+  let btcDownCount = 0;
+  let coinResilientOnDown = 0;
+  let btcUpCount = 0;
+  let betaSum = 0;
+
+  for (let i = 1; i < c4.length; i++) {
+    const bIdx = map4h.get(c4[i].time);
+    if (bIdx == null || bIdx < 1) continue;
+
+    const btcRet = ((btc4[bIdx].close - btc4[bIdx - 1].close) / btc4[bIdx - 1].close) * 100;
+    const coinRet = ((c4[i].close - c4[i - 1].close) / c4[i - 1].close) * 100;
+
+    if (btcRet < -0.45) {
+      btcDownCount++;
+      if (longSide ? coinRet > btcRet * 0.5 : coinRet < btcRet * 1.1) {
+        coinResilientOnDown++;
+      }
+    } else if (btcRet > 0.45) {
+      btcUpCount++;
+      betaSum += coinRet / btcRet;
+    }
+  }
+
+  const map15m = new Map(btc15.map((c, idx) => [c.time, idx]));
+  let neutralOutperform = 0;
+  let neutralTotal = 0;
+  let recentRelStrength = 0;
+
+  const recentSlice = c15.slice(-96);
+  for (let i = 1; i < recentSlice.length; i++) {
+    const bIdx = map15m.get(recentSlice[i].time);
+    if (bIdx == null || bIdx < 1) continue;
+
+    const btcRet = ((btc15[bIdx].close - btc15[bIdx - 1].close) / btc15[bIdx - 1].close) * 100;
+    const coinRet = ((recentSlice[i].close - recentSlice[i - 1].close) / recentSlice[i - 1].close) * 100;
+
+    recentRelStrength += coinRet - btcRet;
+
+    if (Math.abs(btcRet) <= 0.15) {
+      neutralTotal++;
+      if (longSide ? coinRet > 0.15 : coinRet < -0.15) {
+        neutralOutperform++;
+      }
+    }
+  }
+
+  const resiliencePct = btcDownCount > 0 ? Math.round((coinResilientOnDown / btcDownCount) * 100) : 55;
+  const rawBeta = btcUpCount > 0 ? betaSum / btcUpCount : 1.2;
+  const beta = Math.max(0.4, Math.min(3.2, round(rawBeta, 2)));
+  const independentScore = neutralTotal > 0 ? Math.round((neutralOutperform / neutralTotal) * 100) : 30;
+
+  const whenBtcBullish =
+    beta >= 1.4
+      ? 'شتاب‌گیرنده قوی (اهرم ' + beta + ' برابر نسبت به صعود BTC)'
+      : 'هم‌سو و پایدار با رشد BTC (ضریب ' + beta + ')';
+
+  const whenBtcBearish =
+    resiliencePct >= 62
+      ? 'مقاوم و ضدریزش (در ' + resiliencePct + '٪ ریزش‌های گذشته BTC حمایت خود را حفظ کرده)'
+      : 'حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)';
+
+  const whenBtcNeutral =
+    independentScore >= 32
+      ? 'دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد'
+      : 'در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند';
+
+  return {
+    resiliencePct,
+    beta,
+    independentScore,
+    recentRelStrength: round(recentRelStrength, 2),
+    whenBtcBullish,
+    whenBtcBearish,
+    whenBtcNeutral,
+  };
+}
 
 function buildMajorTargets(c15, c4, entry, stop, risk, atr, longSide) {
   const points = [];
 
-  // ۱. استخراج پیوت‌های ماژور ۱۵ دقیقه (حداقل ۸ کندل چپ و ۸ کندل راست = ساختار ۴ ساعته واقعی)
   const lookback15 = 8;
   for (let i = lookback15; i < c15.length - lookback15; i++) {
     const price = longSide ? c15[i].high : c15[i].low;
@@ -355,7 +435,6 @@ function buildMajorTargets(c15, c4, entry, stop, risk, atr, longSide) {
     }
   }
 
-  // ۲. استخراج پیوت‌های کلیدی ۴ ساعته (حداقل ۳ کندل چپ و ۳ کندل راست = ساختار ۲۴ ساعته)
   const lookback4h = 3;
   for (let i = lookback4h; i < c4.length - lookback4h; i++) {
     const price = longSide ? c4[i].high : c4[i].low;
@@ -382,7 +461,6 @@ function buildMajorTargets(c15, c4, entry, stop, risk, atr, longSide) {
 
   points.sort((a, b) => a.price - b.price);
 
-  // ۳. خوشه‌بندی (Clustering) برای تبدیل نقاط نزدیک به یک «ناحیه قوی حمایت/مقاومت»
   const zones = [];
   for (const point of points) {
     const last = zones.at(-1);
@@ -404,8 +482,6 @@ function buildMajorTargets(c15, c4, entry, stop, risk, atr, longSide) {
     }
   }
 
-  // ۴. بررسی وجود «دیوار بتنی ۴ ساعته» دقیقاً جلوی نقطه ورود
-  // (مقاومت‌های ریز ۱۵ دقیقه نادیده گرفته می‌شوند، اما اگر دیوار سنگین ۴ ساعته سر راه باشد رد می‌شود)
   const costBuffer = entry * (CONFIG.FEE_RATE_PER_SIDE + CONFIG.SLIPPAGE_RATE_PER_SIDE) * 4;
   const minValidTp1Distance = risk * 1.12 + costBuffer;
   const minValidTp2Distance = risk * 1.85 + costBuffer;
@@ -416,17 +492,15 @@ function buildMajorTargets(c15, c4, entry, stop, risk, atr, longSide) {
 
     if (longSide) {
       return zone.low > entry && zone.low < entry + risk * 0.75;
-    } else {
-      return zone.high < entry && zone.high > entry - risk * 0.75;
     }
+    return zone.high < entry && zone.high > entry - risk * 0.75;
   });
 
   if (blockingMajorWall) {
-    return { blocked: true, targets: [] };
+    return { blocked: true, zones: [] };
   }
 
-  // ۵. انتخاب حمایت‌ها و مقاومت‌های بزرگِ پیشِ رو که ریسک به ریوارد استاندارد دارند
-  let validZones = longSide
+  const validZones = longSide
     ? zones
         .filter(zone => zone.low >= entry + minValidTp1Distance)
         .sort((a, b) => a.low - b.low)
@@ -442,7 +516,6 @@ function buildMajorTargets(c15, c4, entry, stop, risk, atr, longSide) {
     if (selectedZones.length === 0) {
       selectedZones.push(z);
     } else if (selectedZones.length === 1) {
-      // تارگت دوم باید حداقل به اندازه استاندارد TP2 فاصله داشته باشد
       const distFromEntry = Math.abs(targetPrice - entry);
       const prevPrice = longSide ? selectedZones[0].low : selectedZones[0].high;
       const distFromTp1 = Math.abs(targetPrice - prevPrice);
@@ -459,7 +532,6 @@ function buildMajorTargets(c15, c4, entry, stop, risk, atr, longSide) {
     }
   }
 
-  // ۶. تکمیل تارگت‌ها در صورتی که فضای بالای سر قیمت باز باشد (Clean Air / Price Discovery)
   const dir = longSide ? 1 : -1;
   const fallbackMultipliers = [1.5, 2.4, 3.8];
 
@@ -503,8 +575,6 @@ function riskReward(longSide, entry, stop, target) {
   return reward / risk;
 }
 
-// ==================== Direction analysis (UPGRADED BRAIN V4) ====================
-
 function analyze(market, c15, c4, context, side) {
   const longSide = side === 'LONG';
   const fail = reason => reject(context, reason, side);
@@ -538,7 +608,6 @@ function analyze(market, c15, c4, context, side) {
     return fail('BAD_PRICE_OR_INDICATOR');
   }
 
-  // ۱. تشخیص هوشمند روند ۴ ساعته
   const macroAligned = longSide
     ? (trend.close > trend.ema50 && trend.ema20 >= trend.ema50 * 0.995) ||
       (trend.close > trend.ema20 && trend.rsi > prevTrend.rsi && trend.rsi < 65)
@@ -585,7 +654,6 @@ function analyze(market, c15, c4, context, side) {
     return fail('FUNDING_CROWDED');
   }
 
-  // ۲. تعریف ستاپ‌های ورود در کف و اول حرکت (Smart Money Setups)
   const swingWindow = c15.slice(-30, -1);
   const swingLow = Math.min(...swingWindow.map(c => c.low));
   const swingHigh = Math.max(...swingWindow.map(c => c.high));
@@ -598,7 +666,6 @@ function analyze(market, c15, c4, context, side) {
   const engulfCandle = engulfing(c15, longSide);
   const hasVolume = last.volumeRatio != null && last.volumeRatio >= 1.25;
 
-  // ستاپ ۱: شکار استاپ‌هانت و نقدینگی (Liquidity Sweep)
   const liquiditySweep = longSide
     ? (last.low < minorLow || previous.low < minorLow) &&
       last.close > minorLow &&
@@ -624,7 +691,6 @@ function analyze(market, c15, c4, context, side) {
     return fail('PRICE_CHASING');
   }
 
-  // ستاپ ۲: پولبک دقیق به EMA20 یا ساختار بزرگ (Smart Pullback)
   const nearStructure = longSide
     ? Math.abs(last.low - swingLow) <= atr * 0.65 && last.close > swingLow
     : Math.abs(last.high - swingHigh) <= atr * 0.65 && last.close < swingHigh;
@@ -650,7 +716,6 @@ function analyze(market, c15, c4, context, side) {
   const pullback =
     correction && any([nearStructure, emaTouch]) && directionalCandle;
 
-  // ستاپ ۳: شکست مقاومت/حمایت و پولبک (Breakout Retest)
   const beforeBreak = c15.slice(-25, -2);
   const breakLevel = longSide
     ? Math.max(...beforeBreak.map(candle => candle.high))
@@ -668,7 +733,6 @@ function analyze(market, c15, c4, context, side) {
         last.close < breakLevel &&
         breakLevel - price <= atr * 1.1);
 
-  // ستاپ ۴: استارت پامپ از حالت فشرده (Squeeze Ignition)
   const boxRange = minorHigh - minorLow;
   const tightSqueeze = boxRange <= atr * 2.8;
   const earlyIgnition =
@@ -713,7 +777,6 @@ function analyze(market, c15, c4, context, side) {
     return fail('NO_15M_TRIGGER');
   }
 
-  // ۳. تعیین استاپ‌لاس و محدوده ورود (Entry Zone)
   let stopStructure;
   if (liquiditySweep) {
     stopStructure = longSide
@@ -766,11 +829,14 @@ function analyze(market, c15, c4, context, side) {
     return fail('BAD_RISK');
   }
 
-  // ۴. محاسبه تارگت‌ها بر اساس حمایت و مقاومت‌های بزرگ و واقعی
   const majorResult = buildMajorTargets(c15, c4, entry, stop, risk, atr, longSide);
 
   if (majorResult.blocked) {
-    return fail(longSide ? 'BLOCKED_BY_MAJOR_4H_RESISTANCE' : 'BLOCKED_BY_MAJOR_4H_SUPPORT');
+    return fail(
+      longSide
+        ? 'BLOCKED_BY_MAJOR_4H_RESISTANCE'
+        : 'BLOCKED_BY_MAJOR_4H_SUPPORT'
+    );
   }
 
   const zones = majorResult.zones;
@@ -826,7 +892,6 @@ function analyze(market, c15, c4, context, side) {
     return fail('COUNTER_BTC_WEAK_SETUP');
   }
 
-  // ۵. امتیازدهی + موتور شکارچی پامپ‌های SSV (Short/Long Squeeze Detector)
   const emaAligned = longSide
     ? trend.ema20 > trend.ema50
     : trend.ema20 < trend.ema50;
@@ -929,6 +994,14 @@ function analyze(market, c15, c4, context, side) {
     rrScore +
     squeezeBonus;
 
+  const historyBehavior = analyzeHistoricalBehavior(
+    c15,
+    c4,
+    context.btc15,
+    context.btc4,
+    longSide
+  );
+
   return {
     symbol: market.symbol,
     contract: market.symbol,
@@ -969,7 +1042,10 @@ function analyze(market, c15, c4, context, side) {
 
     rsi15: round(last.rsi, 1),
     rsi4h: round(trend.rsi, 1),
+    adx4h: round(trend.adx, 1),
+    volumeRatio15m: round(last.volumeRatio ?? 1, 2),
     fundingRate: funding,
+    isSqueezeFuel,
 
     change24h: number(market.ticker.change_percentage),
     quoteVolume24h: number(market.ticker.volume_24h_quote),
@@ -986,6 +1062,9 @@ function analyze(market, c15, c4, context, side) {
       : null,
 
     reasons: [setupReason, triggerText, volumeReason],
+
+    historyBehavior,
+    btcIntel: context.btcIntel,
 
     score,
     rankScore: score,
@@ -1010,7 +1089,99 @@ function analyze(market, c15, c4, context, side) {
   };
 }
 
-// ==================== Optional live-flow confirmation ====================
+function buildLiveSignalIntelligence(candidate, flow) {
+  const longSide = candidate.side === 'LONG';
+  const setup = candidate.setup;
+
+  let manipulationStatus = '';
+  let movePhase = '';
+  let entryInstruction = '';
+
+  if (setup === 'LiquiditySweep') {
+    manipulationStatus =
+      '✅ کلک بازارگردان (Stop Hunt) انجام شده؛ استاپ‌های خرد جمع‌آوری شده و قیمت به داخل ساختار برگشته است.';
+    movePhase = '🔋 در حال جمع کردن انرژی در کف/سقف برای پرتاب حرکت اصلی';
+  } else if (setup === 'EarlyIgnition') {
+    manipulationStatus =
+      '🛡️ احتمال کلک پایین است؛ شکست فشردگی با ورود مستقیم حجم انجام شده است.';
+    movePhase = '🚀 حرکت اصلی (Impulse) رسماً آغاز شده است';
+  } else if (setup === 'BreakoutRetest') {
+    manipulationStatus =
+      '✅ تست مجدد سطح شکسته شده با موفقیت انجام شد؛ تله فیک‌اوت خنثی شده است.';
+    movePhase = '⚡ آماده شروع موج دوم حرکت پس از تثبیت';
+  } else {
+    manipulationStatus =
+      '🔍 در فاز اصلاح طبیعی (Pullback)؛ احتمال نوسان و شدوهای فریبنده در محدوده ورود وجود دارد.';
+    movePhase = '⏳ در حال ساختن کف/سقف محلی و جذب سفارشات';
+  }
+
+  const flowAligned =
+    flow?.sampleComplete &&
+    (longSide ? flow.buySharePct >= 54 : flow.sellSharePct >= 54);
+  const flowOpposite =
+    flow?.sampleComplete &&
+    (longSide ? flow.sellSharePct >= 62 : flow.buySharePct >= 62);
+
+  if (flowOpposite) {
+    entryInstruction =
+      '⚠️ احتیاط در ورود لحظه‌ای: در ۳ دقیقه اخیر فشار سفارشات خلاف جهت است؛ منتظر بمانید قیمت به لبه بهینه محدوده ورود برسد.';
+  } else if (flowAligned) {
+    entryInstruction =
+      '🟢 دستور ورود: جریان سفارشات زنده کاملاً هم‌جهت با سیگنال است؛ ورود در محدوده اعلام‌شده با اطمینان بالا مجاز است.';
+  } else {
+    entryInstruction =
+      '🎯 دستور ورود: سفارش خود را در محدوده ورود قرار دهید و حد ضرر را دقیق تنظیم کنید.';
+  }
+
+  let targetProjection = '';
+  if (candidate.isSqueezeFuel || (candidate.adx4h >= 25 && candidate.volumeRatio15m >= 1.6)) {
+    targetProjection =
+      '🔥 ظرفیت بالای ادامه حرکت: به دلیل قدرت روند و تله فاندینگ، در صورت شکست TP2 پتانسیل حرکت فراتر از TP3 وجود دارد.';
+  } else if (candidate.riskRewardToTp1 < 1.25) {
+    targetProjection =
+      '💡 مدیریت تارگت: هدف اول نزدیک است؛ در TP1 حتماً ۵۰٪ سود را سیو و معامله را ریسک‌فری کنید.';
+  } else {
+    targetProjection =
+      '📊 مسیر تا اهداف اول و دوم باز است؛ سیو سود پله‌ای در هر تارگت توصیه می‌شود.';
+  }
+
+  const confidencePct = Math.min(96, Math.max(68, Math.round(candidate.score * 0.95)));
+
+  return {
+    confidencePct,
+    manipulationStatus,
+    movePhase,
+    entryInstruction,
+    targetProjection,
+  };
+}
+
+export function formatInitialAiReport(candidate) {
+  const ai = candidate.liveInsight;
+  const hb = candidate.historyBehavior;
+  const btc = candidate.btcIntel;
+
+  if (!ai) return '';
+
+  return [
+    '🧠 رادار هوش مصنوعی و تحلیل لحظه‌ای سیگنال',
+    '🎯 اطمینان و پایداری حرکت: ' + ai.confidencePct + '% (' + candidate.grade + ')',
+    '🔄 فاز فعلی حرکت: ' + ai.movePhase,
+    '🪤 بررسی کلک بازارگردان: ' + ai.manipulationStatus,
+    '📌 فرمان لحظه‌ای: ' + ai.entryInstruction,
+    '🚀 ظرفیت اهداف: ' + ai.targetProjection,
+    '━━━━━━━━━━━━━━━━━━',
+    '₿ تحلیل عمیق بیت‌کوین (فعلی و حرکت بعدی):',
+    '• وضعیت فعلی: ' + (btc?.regimeFa ?? 'نامشخص') + ' (RSI 4H: ' + (btc?.rsi4h ?? '—') + ')',
+    '• پیش‌بینی حرکت بعدی BTC: ' + (btc?.nextMoveForecast ?? 'در حال رصد'),
+    '━━━━━━━━━━━━━━━━━━',
+    '📜 رفتار تاریخی این ارز نسبت به بیت‌کوین (گذشته دور و نزدیک):',
+    '• در صورت صعود BTC: ' + (hb?.whenBtcBullish ?? '—'),
+    '• در صورت ریزش BTC: ' + (hb?.whenBtcBearish ?? '—'),
+    '• در صورت خنثی شدن BTC: ' + (hb?.whenBtcNeutral ?? '—'),
+    '📡 این سیگنال تا رسیدن به هدف یا خروج، به صورت لحظه‌ای رصد می‌شود.',
+  ].join('\n');
+}
 
 async function flowConfirmation(market, context) {
   const end = Math.floor(context.asOf / 60) * 60;
@@ -1108,40 +1279,107 @@ async function flowConfirmation(market, context) {
   }
 }
 
-// ==================== BTC regime ====================
-
-async function btcRegime(asOf) {
+export async function analyzeBtcDeep(asOf) {
   try {
-    const raw = await requestGate('candlesticks', {
-      contract: 'BTC_USDT',
-      interval: '4h',
-      limit: CONFIG.CANDLES_4H_LIMIT,
-    });
+    const [raw4h, raw15m] = await Promise.all([
+      requestGate('candlesticks', {
+        contract: 'BTC_USDT',
+        interval: '4h',
+        limit: CONFIG.CANDLES_4H_LIMIT,
+      }),
+      requestGate('candlesticks', {
+        contract: 'BTC_USDT',
+        interval: '15m',
+        limit: CONFIG.CANDLES_15M_LIMIT,
+      }),
+    ]);
 
-    const candles = closedCandles(raw, 14400, asOf);
+    const c4raw = closedCandles(raw4h, 14400, asOf);
+    const c15raw = closedCandles(raw15m, 900, asOf);
 
-    if (!validSeries(candles, 14400, CONFIG.MIN_CANDLES_4H, asOf)) {
-      throw new Error('Invalid BTC candle series');
+    if (!validSeries(c4raw, 14400, CONFIG.MIN_CANDLES_4H, asOf)) {
+      throw new Error('Invalid BTC 4h candle series');
     }
 
-    const last = indicators(candles).at(-1);
+    const c4 = indicators(c4raw);
+    const c15 = c15raw.length >= 60 ? indicators(c15raw) : [];
 
-    if (last.close > last.ema50 && last.ema20 >= last.ema50) {
-      return 'BULLISH';
+    const last4 = c4.at(-1);
+    const prev4 = c4.at(-2);
+    const last15 = c15.at(-1) ?? last4;
+
+    let regime = 'NEUTRAL';
+    let regimeFa = 'خنثی / رِنج';
+
+    if (last4.close > last4.ema50 && last4.ema20 >= last4.ema50) {
+      regime = 'BULLISH';
+      regimeFa = 'صعودی (Bullish)';
+    } else if (last4.close < last4.ema50 && last4.ema20 <= last4.ema50) {
+      regime = 'BEARISH';
+      regimeFa = 'نزولی (Bearish)';
     }
 
-    if (last.close < last.ema50 && last.ema20 <= last.ema50) {
-      return 'BEARISH';
+    let nextMoveForecast = '';
+    const macdRising4h = last4.macdHist > prev4.macdHist;
+    const shortTermBullish = last15.close > last15.ema20 && last15.rsi > 52;
+    const shortTermBearish = last15.close < last15.ema20 && last15.rsi < 48;
+
+    if (regime === 'BEARISH') {
+      if (last4.rsi < 34 || (macdRising4h && shortTermBullish)) {
+        nextMoveForecast =
+          '🔄 فروشندگان در حال خسته شدن هستند؛ احتمال توقف ریزش، خنثی شدن و چرخش صعودی کوتاه‌مدت بالاست.';
+      } else if (last4.adx >= 25 && !macdRising4h && shortTermBearish) {
+        nextMoveForecast =
+          '📉 فشار فروش همچنان بالاست و بیت‌کوین تمایل به ادامه حرکت نزولی دارد (در معاملات Long محتاط باشید).';
+      } else {
+        nextMoveForecast =
+          '⚖️ روند کلی نزولی است اما شتاب ریزش کم شده و احتمال ورود به فاز نوسان خنثی (رِنج) وجود دارد.';
+      }
+    } else if (regime === 'BULLISH') {
+      if (last4.rsi > 70 || (!macdRising4h && shortTermBearish)) {
+        nextMoveForecast =
+          '⚠️ اشباع خرید در کوتاه‌مدت؛ احتمال استراحت قیمت، خنثی شدن یا اصلاح جزئی قبل از ادامه صعود.';
+      } else if (last4.adx >= 24 && macdRising4h && shortTermBullish) {
+        nextMoveForecast =
+          '🚀 خریداران مسلط هستند و بیت‌کوین پتانسیل ادامه حرکت صعودی پرقدرت را دارد.';
+      } else {
+        nextMoveForecast =
+          '📈 ساختار صعودی پایدار است اما فعلاً با شیب ملایم و نوسان رو به بالا حرکت می‌کند.';
+      }
+    } else {
+      if (shortTermBullish && macdRising4h) {
+        nextMoveForecast =
+          '🌱 بیت‌کوین در حال خروج از فاز خنثی و جمع کردن انرژی برای تبدیل شدن به روند صعودی است.';
+      } else if (shortTermBearish && !macdRising4h) {
+        nextMoveForecast =
+          '🌧️ ضعف در سقف رِنج؛ احتمال چرخش بیت‌کوین از حالت خنثی به نزولی وجود دارد.';
+      } else {
+        nextMoveForecast =
+          '⏸️ بیت‌کوین کاملاً در فاز خنثی (رِنج) قرار دارد؛ بهترین زمان برای حرکت مستقل آلت‌کوین‌هاست.';
+      }
     }
 
-    return 'NEUTRAL';
+    return {
+      regime,
+      regimeFa,
+      rsi4h: round(last4.rsi, 1),
+      rsi15m: round(last15.rsi, 1),
+      adx4h: round(last4.adx, 1),
+      nextMoveForecast,
+      c4,
+      c15,
+    };
   } catch (error) {
     console.error('[BTC]', error.message);
-    return 'UNKNOWN';
+    return {
+      regime: 'UNKNOWN',
+      regimeFa: 'نامشخص',
+      nextMoveForecast: 'عدم دسترسی موقت به دیتای BTC',
+      c4: [],
+      c15: [],
+    };
   }
 }
-
-// ==================== Scan one market ====================
 
 async function scanOne(market, context) {
   const [raw15, raw4] = await Promise.all([
@@ -1233,12 +1471,12 @@ async function scanOne(market, context) {
   candidate.dataQuality = { recent3mComplete: flow.sampleComplete };
   candidate.tradesObserved = flow.tradesObserved ?? 0;
 
+  candidate.liveInsight = buildLiveSignalIntelligence(candidate, flow);
+
   delete candidate._required;
 
   return candidate;
 }
-
-// ==================== Main exported scanner ====================
 
 export async function scanGateMarkets() {
   const started = Date.now();
@@ -1281,14 +1519,25 @@ export async function scanGateMarkets() {
     .filter(Boolean)
     .sort((a, b) => b.volume - a.volume);
 
+  const asOf = Date.now() / 1000;
+  const btcDeep = await analyzeBtcDeep(asOf);
+
   const context = {
-    asOf: Date.now() / 1000,
-    regime: 'UNKNOWN',
+    asOf,
+    regime: btcDeep.regime,
+    btcIntel: {
+      regime: btcDeep.regime,
+      regimeFa: btcDeep.regimeFa,
+      rsi4h: btcDeep.rsi4h,
+      rsi15m: btcDeep.rsi15m,
+      adx4h: btcDeep.adx4h,
+      nextMoveForecast: btcDeep.nextMoveForecast,
+    },
+    btc4: btcDeep.c4,
+    btc15: btcDeep.c15,
     rejectStats: { LONG: {}, SHORT: {}, GLOBAL: {} },
     nearMisses: [],
   };
-
-  context.regime = await btcRegime(context.asOf);
 
   let markets;
   if (context.regime === 'UNKNOWN') {
@@ -1396,6 +1645,7 @@ export async function scanGateMarkets() {
     strategyVersion: STRATEGY_VERSION,
     strategyConfig: CONFIG,
     marketRegime: context.regime,
+    btcIntel: context.btcIntel,
     scannedAt: new Date().toISOString(),
     candidates: candidates.slice(0, CONFIG.TOP_COUNT),
     rankedCandidates: candidates,
@@ -1420,4 +1670,4 @@ export async function scanGateMarkets() {
   console.log('[NEAR MISSES]', JSON.stringify(output.nearMisses));
 
   return output;
-        }
+}
