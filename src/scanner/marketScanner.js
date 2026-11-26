@@ -8,7 +8,7 @@ import {
   requireArray,
 } from '../services/gate.js';
 
-export const STRATEGY_VERSION = 'gate-structural-ls-v3.2-calibrated';
+export const STRATEGY_VERSION = 'gate-structural-ls-v4-major-sr';
 
 export const CONFIG = Object.freeze({
   MODE: 'BALANCED',
@@ -19,14 +19,13 @@ export const CONFIG = Object.freeze({
   SCAN_LIMIT: 0,
   TOP_COUNT: 5,
 
-  // کالیبره شده بر اساس خروجی واقعی لاگ گیت‌هاب (NEAR MISSES)
-  MIN_LONG_SCORE: 56,
-  MIN_LONG_SCORE_NEUTRAL: 60,
-  MIN_LONG_SCORE_BEARISH: 64,
+  MIN_LONG_SCORE: 65,
+  MIN_LONG_SCORE_NEUTRAL: 70,
+  MIN_LONG_SCORE_BEARISH: 78,
 
-  MIN_SHORT_SCORE: 56,
-  MIN_SHORT_SCORE_NEUTRAL: 60,
-  MIN_SHORT_SCORE_BULLISH: 64,
+  MIN_SHORT_SCORE: 65,
+  MIN_SHORT_SCORE_NEUTRAL: 70,
+  MIN_SHORT_SCORE_BULLISH: 78,
 
   CONCURRENCY: 6,
 
@@ -36,42 +35,41 @@ export const CONFIG = Object.freeze({
   MIN_CANDLES_4H: 200,
 
   TRADE_LIMIT: 1000,
-  MIN_RECENT_BUY_NOTIONAL: 1000,
-  MIN_RECENT_SELL_NOTIONAL: 1000,
+  MIN_RECENT_BUY_NOTIONAL: 1200,
+  MIN_RECENT_SELL_NOTIONAL: 1200,
 
-  MAX_RSI_LONG_ENTRY: 72,
-  MAX_RSI_LONG_4H: 76,
-  MIN_RSI_SHORT_ENTRY: 28,
-  MIN_RSI_SHORT_4H: 24,
+  MAX_RSI_LONG_ENTRY: 68,
+  MAX_RSI_LONG_4H: 74,
+  MIN_RSI_SHORT_ENTRY: 32,
+  MIN_RSI_SHORT_4H: 26,
 
-  MAX_FUNDING_RATE_LONG: 0.0012,
-  MIN_FUNDING_RATE_SHORT: -0.0012,
+  MAX_FUNDING_RATE_LONG: 0.001,
+  MIN_FUNDING_RATE_SHORT: -0.001,
 
-  MIN_RR_TP1: 0.95,
-  MIN_RR_TP2: 1.5,
-  MIN_SINGLE_TARGET_RR: 1.4,
-  MIN_COUNTER_BTC_RR: 1.6,
+  MIN_RR_TP1: 1.0,
+  MIN_RR_TP2: 1.7,
+  MIN_SINGLE_TARGET_RR: 1.6,
+  MIN_COUNTER_BTC_RR: 2.0,
 
   STOP_ATR_BUFFER: 0.45,
-  MIN_STOP_ATR: 0.6,
-  MAX_STOP_ATR: 5.0,
-  MAX_STOP_PCT: 6.0,
+  MIN_STOP_ATR: 0.7,
+  MAX_STOP_ATR: 4.5,
+  MAX_STOP_PCT: 5.5,
 
-  // افزایش انعطاف برای جلوگیری از سوختن 28 سیگنال در PRICE_MOVED_AWAY_FROM_TRIGGER
-  MAX_DISTANCE_EMA_ATR: 2.2,
-  MAX_TRIGGER_DRIFT_ATR: 1.45,
-  MAX_TRIGGER_DRIFT_PCT: 3.2,
+  MAX_DISTANCE_EMA_ATR: 1.6,
+  MAX_TRIGGER_DRIFT_ATR: 0.85,
+  MAX_TRIGGER_DRIFT_PCT: 2.2,
 
-  ENTRY_ZONE_ATR: 0.55,
-  MAX_ENTRY_ZONE_PCT: 1.0,
-  ENTRY_VALID_MINUTES: 35,
+  ENTRY_ZONE_ATR: 0.45,
+  MAX_ENTRY_ZONE_PCT: 0.8,
+  ENTRY_VALID_MINUTES: 30,
 
   FEE_RATE_PER_SIDE: 0.0006,
   SLIPPAGE_RATE_PER_SIDE: 0.0003,
 
   MAX_SCAN_AGE_SECONDS: 240,
   MAX_QUOTE_AGE_SECONDS: 60,
-  LEVEL_CLUSTER_ATR: 0.25,
+  LEVEL_CLUSTER_ATR: 0.4, // افزایش شعاع ترکیب سطوح برای ساختن نواحی بزرگ و واقعی
 });
 
 const any = values => values.some(Boolean);
@@ -316,81 +314,181 @@ function rejectionPattern(candles, longSide) {
 
   if (longSide) {
     return (
-      lower >= range * 0.4 &&
-      (last.close - last.low) / range >= 0.55
+      lower >= range * 0.45 &&
+      (last.close - last.low) / range >= 0.6
     );
   }
 
   return (
-    upper >= range * 0.4 &&
-    (last.close - last.low) / range <= 0.45
+    upper >= range * 0.45 &&
+    (last.close - last.low) / range <= 0.4
   );
 }
 
-// ==================== Historical target zones ====================
+// ==================== Major Support & Resistance Zones (UPGRADED) ====================
 
-function targetZones(c15, c4, entry, atr, longSide) {
+function buildMajorTargets(c15, c4, entry, stop, risk, atr, longSide) {
   const points = [];
 
-  for (const [timeframe, candles] of [
-    ['15m', c15],
-    ['4h', c4],
-  ]) {
-    for (let i = 2; i < candles.length - 2; i++) {
-      const price = longSide ? candles[i].high : candles[i].low;
+  // ۱. استخراج پیوت‌های ماژور ۱۵ دقیقه (حداقل ۸ کندل چپ و ۸ کندل راست = ساختار ۴ ساعته واقعی)
+  const lookback15 = 8;
+  for (let i = lookback15; i < c15.length - lookback15; i++) {
+    const price = longSide ? c15[i].high : c15[i].low;
+    let isMajorPivot = true;
 
-      const confirmed = longSide
-        ? price > candles[i - 1].high &&
-          price > candles[i - 2].high &&
-          price >= candles[i + 1].high &&
-          price >= candles[i + 2].high
-        : price < candles[i - 1].low &&
-          price < candles[i - 2].low &&
-          price <= candles[i + 1].low &&
-          price <= candles[i + 2].low;
-
-      if (confirmed) {
-        points.push({ price, timeframe });
+    for (let j = 1; j <= lookback15; j++) {
+      if (longSide) {
+        if (c15[i - j].high >= price || c15[i + j].high > price) {
+          isMajorPivot = false;
+          break;
+        }
+      } else {
+        if (c15[i - j].low <= price || c15[i + j].low < price) {
+          isMajorPivot = false;
+          break;
+        }
       }
+    }
+
+    if (isMajorPivot) {
+      points.push({ price, timeframe: '15m', weight: 1 });
+    }
+  }
+
+  // ۲. استخراج پیوت‌های کلیدی ۴ ساعته (حداقل ۳ کندل چپ و ۳ کندل راست = ساختار ۲۴ ساعته)
+  const lookback4h = 3;
+  for (let i = lookback4h; i < c4.length - lookback4h; i++) {
+    const price = longSide ? c4[i].high : c4[i].low;
+    let isMajor4h = true;
+
+    for (let j = 1; j <= lookback4h; j++) {
+      if (longSide) {
+        if (c4[i - j].high >= price || c4[i + j].high > price) {
+          isMajor4h = false;
+          break;
+        }
+      } else {
+        if (c4[i - j].low <= price || c4[i + j].low < price) {
+          isMajor4h = false;
+          break;
+        }
+      }
+    }
+
+    if (isMajor4h) {
+      points.push({ price, timeframe: '4h', weight: 2 });
     }
   }
 
   points.sort((a, b) => a.price - b.price);
 
+  // ۳. خوشه‌بندی (Clustering) برای تبدیل نقاط نزدیک به یک «ناحیه قوی حمایت/مقاومت»
   const zones = [];
-
   for (const point of points) {
     const last = zones.at(-1);
-    const tolerance = Math.min(
-      atr * CONFIG.LEVEL_CLUSTER_ATR,
-      point.price * 0.003
-    );
+    const tolerance = Math.max(atr * CONFIG.LEVEL_CLUSTER_ATR, point.price * 0.004);
 
     if (last && point.price - last.low <= tolerance) {
       last.high = Math.max(last.high, point.price);
-      last.touches++;
+      last.touches += 1;
+      last.strength += point.weight;
       last.timeframes = [...new Set([...last.timeframes, point.timeframe])];
     } else {
       zones.push({
         low: point.price,
         high: point.price,
         touches: 1,
+        strength: point.weight,
         timeframes: [point.timeframe],
       });
     }
   }
 
-  const minDistance = atr * 0.7;
+  // ۴. بررسی وجود «دیوار بتنی ۴ ساعته» دقیقاً جلوی نقطه ورود
+  // (مقاومت‌های ریز ۱۵ دقیقه نادیده گرفته می‌شوند، اما اگر دیوار سنگین ۴ ساعته سر راه باشد رد می‌شود)
+  const costBuffer = entry * (CONFIG.FEE_RATE_PER_SIDE + CONFIG.SLIPPAGE_RATE_PER_SIDE) * 4;
+  const minValidTp1Distance = risk * 1.12 + costBuffer;
+  const minValidTp2Distance = risk * 1.85 + costBuffer;
 
-  if (longSide) {
-    return zones
-      .filter(zone => zone.low >= entry + minDistance)
-      .sort((a, b) => a.low - b.low);
+  const blockingMajorWall = zones.find(zone => {
+    const isMajorWall = zone.timeframes.includes('4h') && zone.strength >= 4;
+    if (!isMajorWall) return false;
+
+    if (longSide) {
+      return zone.low > entry && zone.low < entry + risk * 0.75;
+    } else {
+      return zone.high < entry && zone.high > entry - risk * 0.75;
+    }
+  });
+
+  if (blockingMajorWall) {
+    return { blocked: true, targets: [] };
   }
 
-  return zones
-    .filter(zone => zone.high <= entry - minDistance)
-    .sort((a, b) => b.high - a.high);
+  // ۵. انتخاب حمایت‌ها و مقاومت‌های بزرگِ پیشِ رو که ریسک به ریوارد استاندارد دارند
+  let validZones = longSide
+    ? zones
+        .filter(zone => zone.low >= entry + minValidTp1Distance)
+        .sort((a, b) => a.low - b.low)
+    : zones
+        .filter(zone => zone.high <= entry - minValidTp1Distance)
+        .sort((a, b) => b.high - a.high);
+
+  const selectedZones = [];
+
+  for (const z of validZones) {
+    const targetPrice = longSide ? z.low : z.high;
+
+    if (selectedZones.length === 0) {
+      selectedZones.push(z);
+    } else if (selectedZones.length === 1) {
+      // تارگت دوم باید حداقل به اندازه استاندارد TP2 فاصله داشته باشد
+      const distFromEntry = Math.abs(targetPrice - entry);
+      const prevPrice = longSide ? selectedZones[0].low : selectedZones[0].high;
+      const distFromTp1 = Math.abs(targetPrice - prevPrice);
+
+      if (distFromEntry >= minValidTp2Distance && distFromTp1 >= risk * 0.6) {
+        selectedZones.push(z);
+      }
+    } else if (selectedZones.length === 2) {
+      const prevPrice = longSide ? selectedZones[1].low : selectedZones[1].high;
+      if (Math.abs(targetPrice - prevPrice) >= risk * 0.8) {
+        selectedZones.push(z);
+        break;
+      }
+    }
+  }
+
+  // ۶. تکمیل تارگت‌ها در صورتی که فضای بالای سر قیمت باز باشد (Clean Air / Price Discovery)
+  const dir = longSide ? 1 : -1;
+  const fallbackMultipliers = [1.5, 2.4, 3.8];
+
+  while (selectedZones.length < 3) {
+    const idx = selectedZones.length;
+    let fallbackPrice = entry + dir * (risk * fallbackMultipliers[idx] + costBuffer);
+
+    if (idx > 0) {
+      const prevTarget = longSide
+        ? selectedZones[idx - 1].low
+        : selectedZones[idx - 1].high;
+      const minStep = prevTarget + dir * (risk * 0.85);
+
+      fallbackPrice = longSide
+        ? Math.max(fallbackPrice, minStep)
+        : Math.min(fallbackPrice, minStep);
+    }
+
+    selectedZones.push({
+      low: fallbackPrice,
+      high: fallbackPrice,
+      touches: 1,
+      strength: 2,
+      timeframes: ['4h'],
+      isStructuralProjection: true,
+    });
+  }
+
+  return { blocked: false, zones: selectedZones.slice(0, 3) };
 }
 
 function riskReward(longSide, entry, stop, target) {
@@ -405,7 +503,7 @@ function riskReward(longSide, entry, stop, target) {
   return reward / risk;
 }
 
-// ==================== Direction analysis (UPGRADED BRAIN V3.2) ====================
+// ==================== Direction analysis (UPGRADED BRAIN V4) ====================
 
 function analyze(market, c15, c4, context, side) {
   const longSide = side === 'LONG';
@@ -440,27 +538,12 @@ function analyze(market, c15, c4, context, side) {
     return fail('BAD_PRICE_OR_INDICATOR');
   }
 
-  // ۱. تشخیص روند ۴ ساعته + مجوز ورود در استارتِ پامپ‌های کف (مشابه SSV)
-  // اگر ۴ ساعته هنوز زیر EMA50 باشد، ولی تایم‌فریم ۱۵ دقیقه روندش صعودی شده باشد (EMA9 > EMA20 > EMA50)، مجوز صادر می‌شود!
-  const intradayReversal = longSide
-    ? last.close > last.ema50 &&
-      last.ema20 > last.ema50 &&
-      last.rsi > 50 &&
-      (last.volumeRatio >= 1.2 || previous.volumeRatio >= 1.2)
-    : last.close < last.ema50 &&
-      last.ema20 < last.ema50 &&
-      last.rsi < 50 &&
-      (last.volumeRatio >= 1.2 || previous.volumeRatio >= 1.2);
-
+  // ۱. تشخیص هوشمند روند ۴ ساعته
   const macroAligned = longSide
-    ? trend.close > trend.ema50 ||
-      trend.close > trend.ema20 ||
-      (trend.rsi > prevTrend.rsi && trend.rsi >= 42) ||
-      intradayReversal
-    : trend.close < trend.ema50 ||
-      trend.close < trend.ema20 ||
-      (trend.rsi < prevTrend.rsi && trend.rsi <= 58) ||
-      intradayReversal;
+    ? (trend.close > trend.ema50 && trend.ema20 >= trend.ema50 * 0.995) ||
+      (trend.close > trend.ema20 && trend.rsi > prevTrend.rsi && trend.rsi < 65)
+    : (trend.close < trend.ema50 && trend.ema20 <= trend.ema50 * 1.005) ||
+      (trend.close < trend.ema20 && trend.rsi < prevTrend.rsi && trend.rsi > 35);
 
   if (!macroAligned) return fail('COIN_4H_TREND');
 
@@ -502,7 +585,7 @@ function analyze(market, c15, c4, context, side) {
     return fail('FUNDING_CROWDED');
   }
 
-  // ۲. ستاپ‌های چهارگانه (رفع مشکل NO_VALID_SETUP: 77)
+  // ۲. تعریف ستاپ‌های ورود در کف و اول حرکت (Smart Money Setups)
   const swingWindow = c15.slice(-30, -1);
   const swingLow = Math.min(...swingWindow.map(c => c.low));
   const swingHigh = Math.max(...swingWindow.map(c => c.high));
@@ -513,24 +596,24 @@ function analyze(market, c15, c4, context, side) {
 
   const rejectCandle = rejectionPattern(c15, longSide);
   const engulfCandle = engulfing(c15, longSide);
-  const hasVolume =
-    (last.volumeRatio != null && last.volumeRatio >= 1.15) ||
-    (previous.volumeRatio != null && previous.volumeRatio >= 1.25);
+  const hasVolume = last.volumeRatio != null && last.volumeRatio >= 1.25;
 
-  // ستاپ ۱: شکار استاپ‌هانت در کف/سقف (Liquidity Sweep)
+  // ستاپ ۱: شکار استاپ‌هانت و نقدینگی (Liquidity Sweep)
   const liquiditySweep = longSide
     ? (last.low < minorLow || previous.low < minorLow) &&
       last.close > minorLow &&
       price >= minorLow &&
-      (rejectCandle || engulfCandle || last.close > last.open)
+      (rejectCandle || engulfCandle || last.close > last.open) &&
+      (hasVolume || previous.volumeRatio >= 1.3)
     : (last.high > minorHigh || previous.high > minorHigh) &&
       last.close < minorHigh &&
       price <= minorHigh &&
-      (rejectCandle || engulfCandle || last.close < last.open);
+      (rejectCandle || engulfCandle || last.close < last.open) &&
+      (hasVolume || previous.volumeRatio >= 1.3);
 
   const hardBreakdown = longSide
-    ? last.close < swingLow - atr * 0.25
-    : last.close > swingHigh + atr * 0.25;
+    ? last.close < swingLow - atr * 0.2
+    : last.close > swingHigh + atr * 0.2;
 
   if (hardBreakdown && !liquiditySweep) {
     return fail(longSide ? 'SUPPORT_BROKEN' : 'RESISTANCE_BROKEN');
@@ -541,84 +624,79 @@ function analyze(market, c15, c4, context, side) {
     return fail('PRICE_CHASING');
   }
 
-  // ستاپ ۲: پولبک دو کندلی هوشمند به EMA9 / EMA20 / حمایت (رفع خطای تک‌کندلی)
+  // ستاپ ۲: پولبک دقیق به EMA20 یا ساختار بزرگ (Smart Pullback)
   const nearStructure = longSide
-    ? (Math.abs(last.low - swingLow) <= atr * 0.8 ||
-        Math.abs(previous.low - swingLow) <= atr * 0.8) &&
-      last.close > swingLow
-    : (Math.abs(last.high - swingHigh) <= atr * 0.8 ||
-        Math.abs(previous.high - swingHigh) <= atr * 0.8) &&
-      last.close < swingHigh;
+    ? Math.abs(last.low - swingLow) <= atr * 0.65 && last.close > swingLow
+    : Math.abs(last.high - swingHigh) <= atr * 0.65 && last.close < swingHigh;
 
   const emaTouch = longSide
-    ? (last.low <= last.ema20 + atr * 0.35 ||
-        previous.low <= previous.ema20 + atr * 0.35 ||
-        last.low <= last.ema9 + atr * 0.15) &&
-      last.close >= last.ema20
-    : (last.high >= last.ema20 - atr * 0.35 ||
-        previous.high >= previous.ema20 - atr * 0.35 ||
-        last.high >= last.ema9 - atr * 0.15) &&
-      last.close <= last.ema20;
+    ? last.low <= last.ema20 + atr * 0.25 &&
+      last.close >= last.ema20 &&
+      last.ema20 > last.ema50
+    : last.high >= last.ema20 - atr * 0.25 &&
+      last.close <= last.ema20 &&
+      last.ema20 < last.ema50;
 
-  const correction = c15.slice(-6, -1).some(candle =>
+  const correction = c15.slice(-5, -1).some(candle =>
     longSide
-      ? candle.close < candle.open || candle.low <= candle.ema20 * 1.002
-      : candle.close > candle.open || candle.high >= candle.ema20 * 0.998
+      ? candle.close < candle.ema9 || candle.close < candle.open
+      : candle.close > candle.ema9 || candle.close > candle.open
   );
 
   const directionalCandle = longSide
-    ? last.close > last.open || last.close > previous.close
-    : last.close < last.open || last.close < previous.close;
+    ? last.close > last.open && last.close >= previous.close
+    : last.close < last.open && last.close <= previous.close;
 
   const pullback =
     correction && any([nearStructure, emaTouch]) && directionalCandle;
 
-  // ستاپ ۳: شکست ساختار و بازآزمایی (Breakout Retest)
+  // ستاپ ۳: شکست مقاومت/حمایت و پولبک (Breakout Retest)
   const beforeBreak = c15.slice(-25, -2);
   const breakLevel = longSide
     ? Math.max(...beforeBreak.map(candle => candle.high))
     : Math.min(...beforeBreak.map(candle => candle.low));
 
   const retest =
-    hasVolume &&
+    (previous.volumeRatio >= 1.3 || last.volumeRatio >= 1.5) &&
     (longSide
-      ? (previous.close > breakLevel || last.close > breakLevel) &&
-        last.low <= breakLevel + atr * 0.5 &&
+      ? previous.close > breakLevel &&
+        last.low <= breakLevel + atr * 0.4 &&
         last.close > breakLevel &&
-        price - breakLevel <= atr * 1.3
-      : (previous.close < breakLevel || last.close < breakLevel) &&
-        last.high >= breakLevel - atr * 0.5 &&
+        price - breakLevel <= atr * 1.1
+      : previous.close < breakLevel &&
+        last.high >= breakLevel - atr * 0.4 &&
         last.close < breakLevel &&
-        breakLevel - price <= atr * 1.3);
+        breakLevel - price <= atr * 1.1);
 
-  // ستاپ ۴: استارت حرکت انفجاری و شکست مومنتوم (Early Ignition)
+  // ستاپ ۴: استارت پامپ از حالت فشرده (Squeeze Ignition)
+  const boxRange = minorHigh - minorLow;
+  const tightSqueeze = boxRange <= atr * 2.8;
   const earlyIgnition =
-    (last.volumeRatio >= 1.4 || previous.volumeRatio >= 1.5) &&
+    tightSqueeze &&
+    last.volumeRatio >= 1.8 &&
     (longSide
       ? last.close > minorHigh &&
-        last.close - minorHigh <= atr * 1.1 &&
-        last.close > last.ema20
+        last.close - minorHigh <= atr * 0.8 &&
+        last.close > last.ema50
       : last.close < minorLow &&
-        minorLow - last.close <= atr * 1.1 &&
-        last.close < last.ema20);
+        minorLow - last.close <= atr * 0.8 &&
+        last.close < last.ema50);
 
   if (!any([liquiditySweep, pullback, retest, earlyIgnition])) {
     return fail('NO_VALID_SETUP');
   }
 
   const cross = longSide
-    ? (previous.macdHist <= 0 && last.macdHist > 0) ||
-      last.macdHist > previous.macdHist
-    : (previous.macdHist >= 0 && last.macdHist < 0) ||
-      last.macdHist < previous.macdHist;
+    ? previous.macdHist <= 0 && last.macdHist > 0
+    : previous.macdHist >= 0 && last.macdHist < 0;
 
   const rsiTurn = longSide
-    ? last.rsi >= 30 && last.rsi <= 66 && last.rsi >= previous.rsi + 1
-    : last.rsi >= 34 && last.rsi <= 70 && last.rsi <= previous.rsi - 1;
+    ? last.rsi >= 32 && last.rsi <= 62 && last.rsi >= previous.rsi + 1.5
+    : last.rsi >= 38 && last.rsi <= 68 && last.rsi <= previous.rsi - 1.5;
 
   const emaTrigger = longSide
-    ? last.close > last.ema9 && last.close > last.open
-    : last.close < last.ema9 && last.close < last.open;
+    ? previous.close <= previous.ema9 && last.close > last.ema9
+    : previous.close >= previous.ema9 && last.close < last.ema9;
 
   if (
     !any([
@@ -643,8 +721,8 @@ function analyze(market, c15, c4, context, side) {
       : Math.max(last.high, previous.high);
   } else if (retest || earlyIgnition) {
     stopStructure = longSide
-      ? Math.min(last.low, breakLevel - atr * 0.35)
-      : Math.max(last.high, breakLevel + atr * 0.35);
+      ? Math.min(last.low, breakLevel - atr * 0.3)
+      : Math.max(last.high, breakLevel + atr * 0.3);
   } else {
     stopStructure = longSide
       ? Math.min(...c15.slice(-5).map(candle => candle.low))
@@ -664,12 +742,12 @@ function analyze(market, c15, c4, context, side) {
     : Math.max(price, Math.min(last.ema9, price + zoneWidth));
 
   const entryLow = longSide
-    ? Math.min(pullbackAnchor, price - zoneWidth * 0.65)
-    : price - zoneWidth * 0.45;
+    ? Math.min(pullbackAnchor, price - zoneWidth * 0.6)
+    : price - zoneWidth * 0.35;
 
   const entryHigh = longSide
-    ? price + zoneWidth * 0.45
-    : Math.max(pullbackAnchor, price + zoneWidth * 0.65);
+    ? price + zoneWidth * 0.35
+    : Math.max(pullbackAnchor, price + zoneWidth * 0.6);
 
   const entry = price;
   const risk = longSide ? entry - stop : stop - entry;
@@ -688,33 +766,16 @@ function analyze(market, c15, c4, context, side) {
     return fail('BAD_RISK');
   }
 
-  let zones = targetZones(c15, c4, entry, atr, longSide);
+  // ۴. محاسبه تارگت‌ها بر اساس حمایت و مقاومت‌های بزرگ و واقعی
+  const majorResult = buildMajorTargets(c15, c4, entry, stop, risk, atr, longSide);
 
-  if (zones.length === 0) {
-    const dir = longSide ? 1 : -1;
-    zones = [
-      {
-        low: entry + dir * risk * 1.5,
-        high: entry + dir * risk * 1.5,
-        touches: 1,
-        timeframes: ['15m'],
-      },
-      {
-        low: entry + dir * risk * 2.5,
-        high: entry + dir * risk * 2.5,
-        touches: 1,
-        timeframes: ['4h'],
-      },
-      {
-        low: entry + dir * risk * 4.0,
-        high: entry + dir * risk * 4.0,
-        touches: 1,
-        timeframes: ['4h'],
-      },
-    ];
+  if (majorResult.blocked) {
+    return fail(longSide ? 'BLOCKED_BY_MAJOR_4H_RESISTANCE' : 'BLOCKED_BY_MAJOR_4H_SUPPORT');
   }
 
-  const targets = zones.slice(0, 3).map((zone, index) => {
+  const zones = majorResult.zones;
+
+  const targets = zones.map((zone, index) => {
     const target = longSide ? zone.low : zone.high;
     const gain = longSide ? target - entry : entry - target;
 
@@ -723,9 +784,11 @@ function analyze(market, c15, c4, context, side) {
       price: target,
       zoneLow: zone.low,
       zoneHigh: zone.high,
-      source: longSide
-        ? 'HISTORICAL_PIVOT_RESISTANCE'
-        : 'HISTORICAL_PIVOT_SUPPORT',
+      source: zone.isStructuralProjection
+        ? 'STRUCTURAL_R_EXTENSION'
+        : longSide
+        ? 'MAJOR_PIVOT_RESISTANCE'
+        : 'MAJOR_PIVOT_SUPPORT',
       timeframes: zone.timeframes,
       touches: zone.touches,
       pct: round((gain / entry) * 100),
@@ -743,20 +806,19 @@ function analyze(market, c15, c4, context, side) {
       !Number.isFinite(rr1),
       rr1 < CONFIG.MIN_RR_TP1,
       rr2 != null && rr2 < CONFIG.MIN_RR_TP2,
-      rr2 == null && rr1 < CONFIG.MIN_SINGLE_TARGET_RR,
     ])
   ) {
     return fail('LOW_RR_AT_NEAREST_LEVEL');
   }
 
   const strength = longSide
-    ? trend.plusDI > trend.minusDI || intradayReversal
-    : trend.minusDI > trend.plusDI || intradayReversal;
+    ? trend.plusDI > trend.minusDI
+    : trend.minusDI > trend.plusDI;
 
   if (
     oppositeBTC &&
     any([
-      trend.adx < 18 && !intradayReversal,
+      trend.adx < 22,
       !strength,
       (rr2 ?? rr1) < CONFIG.MIN_COUNTER_BTC_RR,
     ])
@@ -764,15 +826,15 @@ function analyze(market, c15, c4, context, side) {
     return fail('COUNTER_BTC_WEAK_SETUP');
   }
 
-  // ۴. امتیازدهی + موتور شکارچی SSV (Short/Long Squeeze Detector)
+  // ۵. امتیازدهی + موتور شکارچی پامپ‌های SSV (Short/Long Squeeze Detector)
   const emaAligned = longSide
-    ? trend.ema20 > trend.ema50 || intradayReversal
-    : trend.ema20 < trend.ema50 || intradayReversal;
+    ? trend.ema20 > trend.ema50
+    : trend.ema20 < trend.ema50;
 
   const trendScore =
-    14 + (emaAligned ? 10 : 5) + (trend.adx >= 18 && strength ? 6 : 3);
+    12 + (emaAligned ? 10 : 5) + (trend.adx >= 18 && strength ? 8 : 0);
 
-  let setupScore = 20;
+  let setupScore = 18;
   if (liquiditySweep) setupScore = 28;
   else if (earlyIgnition) setupScore = 26;
   else if (retest) setupScore = 24;
@@ -782,18 +844,18 @@ function analyze(market, c15, c4, context, side) {
     25,
     (liquiditySweep ? 12 : 0) +
       (earlyIgnition ? 10 : 0) +
-      (cross ? 7 : 0) +
+      (cross ? 8 : 0) +
       (rsiTurn ? 7 : 0) +
       (engulfCandle ? 8 : 0) +
       (rejectCandle ? 8 : 0) +
-      (emaTrigger ? 6 : 0) +
+      (emaTrigger ? 5 : 0) +
       (retest ? 7 : 0)
   );
 
   const volumeScore =
-    last.volumeRatio >= 1.6 ? 12 : last.volumeRatio >= 1.1 ? 8 : 4;
+    last.volumeRatio >= 1.8 ? 12 : last.volumeRatio >= 1.2 ? 8 : 3;
 
-  const rrScore = rr1 >= 1.7 ? 6 : rr1 >= 1.2 ? 4 : 2;
+  const rrScore = rr1 >= 1.8 ? 6 : rr1 >= 1.3 ? 4 : 2;
 
   const isSqueezeFuel =
     (longSide && funding < -0.00005) || (!longSide && funding > 0.00025);
@@ -824,10 +886,10 @@ function analyze(market, c15, c4, context, side) {
         : '🔥 سوخت لانگ‌اسکوییز (لیکوییدیتی سنگین)'
       : null,
     liquiditySweep ? 'جمع‌آوری نقدینگی (Stop Hunt)' : null,
-    earlyIgnition ? 'شکست پرقدرت همراه با حجم' : null,
+    earlyIgnition ? 'انفجار حجم از فشردگی' : null,
     rejectCandle ? 'شدو برگشتی قوی ' + direction : null,
     engulfCandle ? 'کندل پوشای ' + direction : null,
-    cross ? 'چرخش مومنتوم MACD' : null,
+    cross ? 'کراس ' + direction + ' MACD' : null,
     rsiTurn ? 'چرخش ' + direction + ' RSI' : null,
   ].filter(Boolean);
 
@@ -837,27 +899,27 @@ function analyze(market, c15, c4, context, side) {
       : 'تأیید ساختار قیمت';
 
   let setupReason = longSide
-    ? 'پولبک هوشمند به حمایت/میانگین'
-    : 'پولبک هوشمند به مقاومت/میانگین';
+    ? 'پولبک هوشمند به حمایت بزرگ'
+    : 'پولبک هوشمند به مقاومت بزرگ';
 
   if (liquiditySweep) {
     setupReason = longSide
-      ? 'شکار استاپ‌ها در کف و ورود پول هوشمند'
-      : 'شکار استاپ‌ها در سقف و توزیع نهنگ‌ها';
+      ? 'شکار استاپ‌ها در کف ماژور و ورود پول هوشمند'
+      : 'شکار استاپ‌ها در سقف ماژور و توزیع نهنگ‌ها';
   } else if (earlyIgnition) {
     setupReason = longSide
-      ? 'آغاز موج صعودی (شکست مقاومت ۱۵ دقیقه)'
-      : 'آغاز موج نزولی (شکست حمایت ۱۵ دقیقه)';
+      ? 'آغاز حرکت انفجاری (شکست فشردگی)'
+      : 'آغاز ریزش سنگین (شکست فشردگی)';
   } else if (retest) {
     setupReason = longSide
-      ? 'شکست مقاومت و پولبک تأییدی'
-      : 'شکست حمایت و پولبک تأییدی';
+      ? 'شکست مقاومت اصلی و پولبک تأییدی'
+      : 'شکست حمایت اصلی و پولبک تأییدی';
   }
 
   const volumeReason =
     last.volumeRatio >= 1.1
       ? 'حجم ' + last.volumeRatio.toFixed(1) + ' برابر میانگین'
-      : 'هم‌جهت با جریان سفارشات ' + direction;
+      : 'هم‌جهت با ساختار ۴ ساعته ' + direction;
 
   const score =
     trendScore +
@@ -1139,10 +1201,10 @@ async function scanOne(market, context) {
     flow.sampleComplete &&
     (longSide
       ? flow.buyNotional >= CONFIG.MIN_RECENT_BUY_NOTIONAL &&
-        flow.buySharePct >= 53 &&
+        flow.buySharePct >= 54 &&
         flow.netDelta > 0
       : flow.sellNotional >= CONFIG.MIN_RECENT_SELL_NOTIONAL &&
-        flow.sellSharePct >= 53 &&
+        flow.sellSharePct >= 54 &&
         flow.netDelta < 0);
 
   const liveScore = confirmed ? 6 : 0;
@@ -1164,7 +1226,7 @@ async function scanOne(market, context) {
   }
 
   candidate.grade =
-    candidate.score >= 78 ? 'A+' : candidate.score >= 66 ? 'A' : 'B';
+    candidate.score >= 82 ? 'A+' : candidate.score >= 72 ? 'A' : 'B';
 
   candidate.recent3m = flow;
   candidate.volume = { recent3m: flow };
@@ -1358,4 +1420,4 @@ export async function scanGateMarkets() {
   console.log('[NEAR MISSES]', JSON.stringify(output.nearMisses));
 
   return output;
-    }
+        }
