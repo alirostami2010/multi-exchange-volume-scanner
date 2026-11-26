@@ -2,6 +2,7 @@ import 'dotenv/config';
 
 import {
   scanGateMarkets,
+  formatInitialAiReport,
   CONFIG,
   STRATEGY_VERSION,
 } from './scanner/marketScanner.js';
@@ -40,6 +41,42 @@ function needsResultNotification(signal) {
     !signal.resultNotified &&
     FINAL_STATUSES.includes(signal.status)
   );
+}
+
+async function notifyLiveRadarUpdates(state) {
+  if (!telegramConfigured()) return 0;
+
+  let liveSent = 0;
+
+  for (const signal of Object.values(state.signals)) {
+    if (!signal.pendingLiveAlerts?.length) continue;
+
+    const remainingAlerts = [];
+
+    for (const alert of signal.pendingLiveAlerts) {
+      if (liveSent >= 12) {
+        remainingAlerts.push(alert);
+        continue;
+      }
+
+      try {
+        const delivery = await sendTelegram(alert.text);
+        if (delivery.sent) {
+          liveSent++;
+        } else {
+          remainingAlerts.push(alert);
+        }
+      } catch (error) {
+        console.error('[LIVE RADAR TELEGRAM]', error.message);
+        remainingAlerts.push(alert);
+      }
+    }
+
+    signal.pendingLiveAlerts = remainingAlerts;
+    await saveSignalState(state);
+  }
+
+  return liveSent;
 }
 
 async function notifyResults(state) {
@@ -108,6 +145,8 @@ async function main() {
 
   await saveSignalState(state);
   await updateTrackedSignals(state);
+
+  const liveRadarSent = await notifyLiveRadarUpdates(state);
   await notifyResults(state);
   await notifyDailyReport(state);
 
@@ -138,16 +177,21 @@ async function main() {
       if (!candidateIsFresh(candidate)) continue;
 
       const history = symbolHistoryLine(symbolStats(state, candidate.symbol));
+      const aiReport = formatInitialAiReport(candidate);
       const signal = createSignal(candidate, strategy, CONFIG);
       state.signals[signal.id] = signal;
       await saveSignalState(state);
 
       try {
-        const delivery = await sendTelegram(
-          signalMessage(candidate, signal.id, output.marketRegime) +
-            '\n━━━━━━━━━━━━━━━━━━\n' +
-            history
-        );
+        const fullMessage = [
+          signalMessage(candidate, signal.id, output.marketRegime),
+          '━━━━━━━━━━━━━━━━━━',
+          aiReport,
+          '━━━━━━━━━━━━━━━━━━',
+          history,
+        ].join('\n');
+
+        const delivery = await sendTelegram(fullMessage);
 
         if (delivery.sent) {
           markDelivered(signal, delivery);
@@ -177,7 +221,9 @@ async function main() {
         successfulMarkets: output.stats.success,
         success: output.success,
         newSignalsSent: sentCount,
+        liveRadarUpdatesSent: liveRadarSent,
         trackedRecords: Object.keys(state.signals).length,
+        btcForecast: output.btcIntel?.nextMoveForecast,
         filterStats: output.filterStats,
       },
       null,
