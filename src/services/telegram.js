@@ -1,8 +1,5 @@
 import { sleep } from './gate.js';
 
-// File: src/services/telegram.js
-// Telegram notifications only. No order execution.
-
 const MAX_LENGTH = 3800;
 const TIMEOUT_MS = 15000;
 
@@ -37,7 +34,6 @@ function splitMessage(text) {
     const pieces = [];
     let piece = '';
 
-    // Iterate by Unicode code point to avoid splitting emoji surrogates.
     for (const character of line) {
       if (piece.length + character.length > MAX_LENGTH) {
         pieces.push(piece);
@@ -125,8 +121,6 @@ export async function sendTelegram(text) {
         }
       );
     } catch {
-      // Do not expose the token-containing request URL.
-      // A timeout does not prove the message was not delivered.
       throw new Error(
         'Telegram network/timeout on part ' +
         (index + 1) +
@@ -169,7 +163,6 @@ export async function sendTelegram(text) {
       Number.isFinite(messageId) ? messageId : null
     );
 
-    // Conservative timestamp: after successful API acknowledgement.
     confirmedAt = new Date().toISOString();
 
     if (index < chunks.length - 1) {
@@ -208,7 +201,7 @@ function formatDirectionalPercent(side, entry, exit) {
     ? exit - entry
     : entry - exit;
 
-  const value = difference / entry * 100;
+  const value = (difference / entry) * 100;
   const sign = value >= 0 ? '+' : '';
 
   return sign + value.toFixed(2) + '%';
@@ -225,72 +218,73 @@ export function signalMessage(item, id, regime) {
     ? item.takeProfits
     : [];
 
-  const targetText = targets.map(target =>
-    'T' + target.level +
-    ': ' + formatPrice(target.price) +
-    ' (' +
-    formatDirectionalPercent(
-      item.side,
-      referenceEntry,
-      target.price
-    ) +
-    ')'
-  ).join(' | ');
+  const targetLines = targets.map((target, idx) => {
+    const icon = idx === targets.length - 1 ? '🚀' : '✅';
+    return (
+      icon +
+      ' هدف ' +
+      target.level +
+      ' (TP' +
+      target.level +
+      '): ' +
+      formatPrice(target.price) +
+      ' (' +
+      formatDirectionalPercent(item.side, referenceEntry, target.price) +
+      ')'
+    );
+  });
 
   const reasons = Array.isArray(item.reasons)
     ? item.reasons.slice(0, 3).join(' • ')
     : '—';
 
   const regimeNames = {
-    BULLISH: 'صعودی',
-    BEARISH: 'نزولی',
-    NEUTRAL: 'خنثی',
+    BULLISH: 'صعودی 🟢',
+    BEARISH: 'نزولی 🔴',
+    NEUTRAL: 'خنثی ⚖️',
     UNKNOWN: 'نامشخص',
   };
 
+  const setupNames = {
+    LiquiditySweep: 'شکار نقدینگی و استاپ‌هانت (Liquidity Sweep)',
+    EarlyIgnition: 'انفجار حجم از فشردگی (Early Ignition)',
+    BreakoutRetest: 'شکست ساختار و پولبک (Breakout Retest)',
+    BreakdownRetest: 'شکست حمایت و پولبک (Breakdown Retest)',
+    Pullback: 'پولبک هوشمند به سطح کلیدی (Smart Pullback)',
+  };
+
   const regimeText = regimeNames[regime] ?? String(regime);
-  const icon = isLong ? '🟢' : '🔴';
+  const setupText = setupNames[item.setup] ?? item.setup ?? 'ساختاری';
+  const icon = isLong ? '🟢 LONG (خرید)' : '🔴 SHORT (فروش)';
+  const grade = item.grade ?? (item.score >= 82 ? 'A+' : 'A');
 
   const lines = [
-    '📊 Gate.io | ' + icon + ' ' + item.side +
-      ' | ' + item.symbol,
-
-    'شناسه: ' + String(id).slice(0, 12),
-
-    'BTC: ' + regimeText +
-      ' | امتیاز: ' + formatNumber(item.score, 0) + '/100',
-
-    'ورود: ' + formatPrice(item.entryLow) +
-      ' تا ' + formatPrice(item.entryHigh),
-
-    'حد ضرر: ' + formatPrice(item.stopLoss) +
+    '🚨 سیگنال VIP شکارچی هوشمند | #' + item.symbol,
+    '📊 جهت معامله: ' + icon,
+    '⭐ درجه کیفی: ' + grade + ' (امتیاز: ' + formatNumber(item.score, 0) + '/100) | رژیم BTC: ' + regimeText,
+    '🧩 ستاپ ورود: ' + setupText,
+    '━━━━━━━━━━━━━━━━━━',
+    '🎯 محدوده ورود (Entry Zone): ' + formatPrice(item.entryLow) + ' تا ' + formatPrice(item.entryHigh),
+    '💵 قیمت لحظه‌ای بازار: ' + formatPrice(item.lastCheckedPrice ?? item.price),
+    '🛑 حد ضرر (Stop Loss): ' +
+      formatPrice(item.stopLoss) +
       ' (' +
-      formatDirectionalPercent(
-        item.side,
-        referenceEntry,
-        item.stopLoss
-      ) +
+      formatDirectionalPercent(item.side, referenceEntry, item.stopLoss) +
       ')',
-
-    'اهداف تاریخی: ' + (targetText ? targetText : 'نامشخص'),
-
-    'RR خالص تخمینی T1: ' +
-      formatNumber(item.riskRewardToTp1),
-
-    'دلیل: ' + reasons,
-
-    'اعتبار ورود: ' + item.validUntil,
+    '━━━━━━━━━━━━━━━━━━',
+    '🎯 اهداف قیمتی (حمایت و مقاومت‌های ماژور):',
+    ...(targetLines.length > 0 ? targetLines : ['• نامشخص']),
+    '⚖️ نسبت ریسک به ریوارد خالص: TP1 (' +
+      formatNumber(item.riskRewardToTp1) +
+      'R) | TP2 (' +
+      formatNumber(item.riskRewardToTp2 ?? item.rr) +
+      'R)',
+    '📌 دلایل تایید: ' + reasons,
   ];
 
   if (item.riskNote) {
-    lines.push('⚠️ ' + item.riskNote);
+    lines.push('⚠️ نکته مدیریت ریسک: ' + item.riskNote);
   }
-
-  lines.push(
-    'این سیگنال برای ارزیابی فرضی ثبت می‌شود؛ سفارش اجرا نمی‌شود.',
-    'منبع Gate است؛ قیمت LBank تأیید نشده.',
-    'درصدها بدون اهرم‌اند؛ امتیاز، احتمال موفقیت نیست.'
-  );
 
   return lines.join('\n');
 }
