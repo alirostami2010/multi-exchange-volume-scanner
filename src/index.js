@@ -32,24 +32,14 @@ import {
   symbolReportMessage,
 } from './tracking/symbolStats.js';
 
-import { runWaveWatch } from './wave/waveWatch.js';
-import { runWaveEntries } from './wave/waveEntries.js';
-
-import {
-  loadWaveState,
-  saveWaveState,
-  updateWaveTrades,
-  waveResultMessage,
-  waveNotification,
-  wavePerformanceMessage,
-} from './wave/waveTracker.js';
-
 const FINAL_STATUSES = ['CLOSED', 'AMBIGUOUS', 'EXPIRED_NO_ENTRY'];
 
 function needsResultNotification(signal) {
-  return signal.sentAt &&
+  return (
+    signal.sentAt &&
     !signal.resultNotified &&
-    FINAL_STATUSES.includes(signal.status);
+    FINAL_STATUSES.includes(signal.status)
+  );
 }
 
 async function notifyResults(state) {
@@ -79,7 +69,7 @@ async function notifyResults(state) {
   }
 }
 
-async function notifyDailyReport(state, waveState) {
+async function notifyDailyReport(state) {
   if (!telegramConfigured()) return;
 
   const day = new Date().toISOString().slice(0, 10);
@@ -100,93 +90,26 @@ async function notifyDailyReport(state, waveState) {
       console.error('[DAILY REPORT]', error.message);
     }
   }
-
-  if (waveState.lastReportDay !== day) {
-    try {
-      const delivery = await sendTelegram(
-        wavePerformanceMessage(waveState)
-      );
-
-      if (delivery.sent) {
-        waveState.lastReportDay = day;
-        await saveWaveState(waveState);
-      }
-    } catch (error) {
-      console.error('[WAVE REPORT]', error.message);
-    }
-  }
-}
-
-async function notifyWaveResults(waveState) {
-  if (!telegramConfigured()) return;
-
-  for (const trade of Object.values(waveState.trades)) {
-    const text = waveNotification(trade);
-
-    if (text) {
-      try {
-        const delivery = await sendTelegram(text);
-
-        if (delivery.sent) {
-          if (trade.pendingNotification?.type === 'BREAKEVEN_TRAIL') {
-            trade.notifications.breakeven = true;
-          }
-
-          if (trade.pendingNotification?.type === 'CORRECTION_WATCH') {
-            trade.notifications.correction =
-              trade.pendingNotification.at;
-          }
-
-          trade.pendingNotification = null;
-          await saveWaveState(waveState);
-        }
-      } catch (error) {
-        console.error('[WAVE NOTIFY]', error.message);
-      }
-    }
-
-    if (
-      !trade.sentAt ||
-      trade.resultNotified ||
-      !FINAL_STATUSES.includes(trade.status)
-    ) continue;
-
-    try {
-      const delivery = await sendTelegram(waveResultMessage(trade));
-
-      if (delivery.sent) {
-        trade.resultNotified = true;
-        trade.resultNotifiedAt = delivery.confirmedAt;
-        await saveWaveState(waveState);
-      }
-    } catch (error) {
-      console.error('[WAVE RESULT]', error.message);
-      break;
-    }
-  }
 }
 
 function candidateIsFresh(candidate) {
   const now = Date.now();
   const checkedAt = Date.parse(candidate.priceCheckedAt);
 
-  return now < Date.parse(candidate.validUntil) &&
+  return (
+    now < Date.parse(candidate.validUntil) &&
     Number.isFinite(checkedAt) &&
-    now - checkedAt <= CONFIG.MAX_QUOTE_AGE_SECONDS * 1000;
+    now - checkedAt <= CONFIG.MAX_QUOTE_AGE_SECONDS * 1000
+  );
 }
 
 async function main() {
   const state = await loadSignalState();
-  const waveState = await loadWaveState();
 
   await saveSignalState(state);
-  await saveWaveState(waveState);
-
   await updateTrackedSignals(state);
-  await updateWaveTrades(waveState);
   await notifyResults(state);
-  await notifyWaveResults(waveState);
-  await notifyDailyReport(state, waveState);
+  await notifyDailyReport(state);
 
   const output = await scanGateMarkets();
 
@@ -222,7 +145,8 @@ async function main() {
       try {
         const delivery = await sendTelegram(
           signalMessage(candidate, signal.id, output.marketRegime) +
-          '\n━━━━━━━━━━━━━━━━━━\n' + history
+            '\n━━━━━━━━━━━━━━━━━━\n' +
+            history
         );
 
         if (delivery.sent) {
@@ -243,46 +167,23 @@ async function main() {
     }
   }
 
-  let waveWatch = { sent: 0, reason: 'BASE_SCAN_UNAVAILABLE' };
-  let waveEntry = { sent: 0, reason: 'BASE_SCAN_UNAVAILABLE' };
-
-  if (output.success) {
-    try {
-      waveWatch = await runWaveWatch(state, output.marketRegime);
-    } catch (error) {
-      console.error('[WAVE WATCH ERROR]', error?.stack ?? error);
-      waveWatch = { sent: 0, reason: 'WAVE_WATCH_ERROR' };
-    }
-
-    try {
-      waveEntry = await runWaveEntries(
-        waveState,
-        state,
-        output.marketRegime
-      );
-    } catch (error) {
-      console.error('[WAVE ENTRY ERROR]', error?.stack ?? error);
-      waveEntry = { sent: 0, reason: 'WAVE_ENTRY_ERROR' };
-    }
-  }
-
   await saveSignalState(state);
-  await saveWaveState(waveState);
 
-  console.log('[WAVE WATCH RESULT]', JSON.stringify(waveWatch));
-  console.log('[WAVE ENTRY RESULT]', JSON.stringify(waveEntry));
-
-  console.log('[SCANNER RESULT]', JSON.stringify({
-    ...output.stats,
-    successfulMarkets: output.stats.success,
-    success: output.success,
-    newSignalsSent: sentCount,
-    waveWatchSent: waveWatch.sent,
-    waveEntrySent: waveEntry.sent,
-    trackedRecords: Object.keys(state.signals).length,
-    waveTrackedRecords: Object.keys(waveState.trades).length,
-    filterStats: output.filterStats,
-  }, null, 2));
+  console.log(
+    '[SCANNER RESULT]',
+    JSON.stringify(
+      {
+        ...output.stats,
+        successfulMarkets: output.stats.success,
+        success: output.success,
+        newSignalsSent: sentCount,
+        trackedRecords: Object.keys(state.signals).length,
+        filterStats: output.filterStats,
+      },
+      null,
+      2
+    )
+  );
 
   if (!output.success) process.exitCode = 1;
 }
