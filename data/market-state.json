@@ -1865572,6 +1865572,145 @@
       "scoreRaw": 72,
       "timestamp": "2026-11-26T10:24:07.312Z",
       "recordType": "SCANNER_CANDIDATE"
+    },
+    {
+      "symbol": "INJ_USDT",
+      "contract": "INJ_USDT",
+      "side": "SHORT",
+      "setup": "Pullback",
+      "strategyVersion": "gate-structural-ls-v4-major-sr",
+      "status": "SHORT_ENTRY",
+      "statusLabel": "SHORT Pullback",
+      "price": 6.207,
+      "entryLow": 6.199731348346314,
+      "entryHigh": 6.219460545692032,
+      "referenceEntry": 6.207,
+      "entry": {
+        "low": 6.199731348346314,
+        "high": 6.219460545692032,
+        "price": 6.207
+      },
+      "stopLoss": 6.301767576153385,
+      "stopLossPct": -1.53,
+      "tp1": 5.878,
+      "tp2": 5.755,
+      "tp3": 5.55,
+      "tp1Pct": 5.3,
+      "tp2Pct": 7.28,
+      "tp3Pct": 10.58,
+      "takeProfits": [
+        {
+          "level": 1,
+          "price": 5.878,
+          "zoneLow": 5.878,
+          "zoneHigh": 5.878,
+          "source": "MAJOR_PIVOT_SUPPORT",
+          "timeframes": [
+            "15m"
+          ],
+          "touches": 1,
+          "pct": 5.3,
+          "rrNet": 3
+        },
+        {
+          "level": 2,
+          "price": 5.755,
+          "zoneLow": 5.755,
+          "zoneHigh": 5.755,
+          "source": "MAJOR_PIVOT_SUPPORT",
+          "timeframes": [
+            "15m"
+          ],
+          "touches": 1,
+          "pct": 7.28,
+          "rrNet": 4.16
+        },
+        {
+          "level": 3,
+          "price": 5.55,
+          "zoneLow": 5.55,
+          "zoneHigh": 5.55,
+          "source": "MAJOR_PIVOT_SUPPORT",
+          "timeframes": [
+            "15m",
+            "4h"
+          ],
+          "touches": 2,
+          "pct": 10.58,
+          "rrNet": 6.1
+        }
+      ],
+      "targetCount": 3,
+      "riskRewardToTp1": 3,
+      "riskRewardToTp2": 4.16,
+      "rr": 4.16,
+      "rsi15": 56.8,
+      "rsi4h": 50.3,
+      "fundingRate": -0.0000419,
+      "change24h": 7.52,
+      "quoteVolume24h": 2539858,
+      "triggerCandleTime": "2026-11-26T10:00:00.000Z",
+      "analyzedAt": "2026-11-26T10:28:06.300Z",
+      "validUntil": "2026-11-26T10:45:00.000Z",
+      "riskNote": null,
+      "reasons": [
+        "پولبک هوشمند به مقاومت بزرگ",
+        "چرخش نزولی RSI",
+        "حجم 2.0 برابر میانگین"
+      ],
+      "score": 70,
+      "rankScore": 70,
+      "scoreBreakdown": {
+        "trend": 22,
+        "setup": 18,
+        "trigger": 12,
+        "candleVolume": 12,
+        "liveFlow": 0,
+        "firstTargetRR": 6,
+        "squeezeBonus": 0
+      },
+      "costAssumptions": {
+        "feeRatePerSide": 0.0006,
+        "slippageRatePerSide": 0.0003,
+        "fundingIncludedInRR": false
+      },
+      "grade": "B",
+      "recent3m": {
+        "available": true,
+        "sampleComplete": true,
+        "sampleTruncated": false,
+        "tradesObserved": 0,
+        "buyNotional": 0,
+        "sellNotional": 0,
+        "buySharePct": null,
+        "sellSharePct": null,
+        "netDelta": 0,
+        "windowEnd": "2026-11-26T10:28:00.000Z"
+      },
+      "volume": {
+        "recent3m": {
+          "available": true,
+          "sampleComplete": true,
+          "sampleTruncated": false,
+          "tradesObserved": 0,
+          "buyNotional": 0,
+          "sellNotional": 0,
+          "buySharePct": null,
+          "sellSharePct": null,
+          "netDelta": 0,
+          "windowEnd": "2026-11-26T10:28:00.000Z"
+        }
+      },
+      "dataQuality": {
+        "recent3mComplete": true
+      },
+      "tradesObserved": 0,
+      "lastCheckedPrice": 6.202,
+      "priceCheckedAt": "2026-11-26T10:28:43.542Z",
+      "rank": 1,
+      "scoreRaw": 70,
+      "timestamp": "2026-11-26T10:28:43.942Z",
+      "recordType": "SCANNER_CANDIDATE"
     }
   ],
   "summaries": {
@@ -1874113,14 +1874252,14 @@
       "firstDiscoveredAt": "2026-11-26T09:44:37.556Z",
       "firstDiscoveryPrice": 6.262,
       "highestPrice": 6.262,
-      "lowestPrice": 6.262,
-      "bestRank": 2,
+      "lowestPrice": 6.202,
+      "bestRank": 1,
       "bestScore": 78,
-      "observations": 1,
-      "maxFavorableObservedPct": 0,
-      "lastSeenAt": "2026-11-26T09:44:37.556Z",
-      "lastPrice": 6.262,
-      "lastScore": 78
+      "observations": 2,
+      "maxFavorableObservedPct": 0.9581603321622423,
+      "lastSeenAt": "2026-11-26T10:28:43.942Z",
+      "lastPrice": 6.202,
+      "lastScore": 70
     },
     "BLUR_USDT:LONG": {
       "symbol": "BLUR_USDT",
@@ -1876545,9 +1876684,9 @@
     "INJ_USDT:SHORT": {
       "symbol": "INJ_USDT",
       "side": "SHORT",
-      "score": 78,
-      "rank": 2,
-      "updatedAt": "2026-11-26T09:44:37.556Z"
+      "score": 70,
+      "rank": 1,
+      "updatedAt": "2026-11-26T10:28:43.942Z"
     },
     "BLUR_USDT:LONG": {
       "symbol": "BLUR_USDT",
@@ -1890186,14 +1890325,12 @@
     }
   },
   "scanMeta": {
-    "timestamp": "2026-11-26T10:24:07.312Z",
-    "candidateCount": 3,
+    "timestamp": "2026-11-26T10:28:43.942Z",
+    "candidateCount": 1,
     "ranks": {
-      "BIGTIME_USDT:LONG": 1,
-      "AXTI_USDT:SHORT": 2,
-      "BASED_USDT:LONG": 3
+      "INJ_USDT:SHORT": 1
     }
   },
-  "updatedAt": "2026-11-26T10:24:07.312Z",
+  "updatedAt": "2026-11-26T10:28:43.942Z",
   "schemaVersion": 2
 }
