@@ -1,4 +1,3 @@
-
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -8,6 +7,7 @@ import {
   positive,
   round,
 } from '../services/gate.js';
+import { indicators, analyzeBtcDeep } from '../scanner/marketScanner.js';
 
 const FILE = path.resolve(process.cwd(), 'data', 'signal-state.json');
 const MINUTE = 60;
@@ -45,12 +45,13 @@ export async function loadSignalState() {
       Array.isArray(state.signals)
     ) throw new Error('Invalid signal-state.json; refusing to overwrite');
 
-    // A prior run may have stopped after sending but before confirmation.
     for (const signal of Object.values(state.signals)) {
       if (signal.status === 'PENDING_DELIVERY') {
         signal.status = 'DELIVERY_UNKNOWN';
         signal.deliveryNote = 'Previous execution ended before delivery confirmation';
       }
+      signal.liveAlertsSent ??= {};
+      signal.pendingLiveAlerts ??= [];
     }
 
     return state;
@@ -120,8 +121,7 @@ export function createSignal(candidate, strategy, config = {}) {
 
   if (
     !['LONG', 'SHORT'].includes(candidate.side) ||
-
-(long ? candidate.stopLoss >= entry : candidate.stopLoss <= entry) ||
+    (long ? candidate.stopLoss >= entry : candidate.stopLoss <= entry) ||
     !targets.every((t, i) =>
       long
         ? t > (i === 0 ? entry : targets[i - 1])
@@ -152,6 +152,7 @@ export function createSignal(candidate, strategy, config = {}) {
     triggerCandleTime: candidate.triggerCandleTime,
     score: candidate.score,
     setup: candidate.setup,
+    historyBehavior: candidate.historyBehavior ?? null,
     nextMinute: null,
     entryTime: null,
     exitTime: null,
@@ -168,6 +169,8 @@ export function createSignal(candidate, strategy, config = {}) {
     observationComplete: false,
     dataIssue: null,
     resultNotified: false,
+    liveAlertsSent: {},
+    pendingLiveAlerts: [],
   };
 }
 
@@ -177,8 +180,6 @@ export function markDelivered(signal, delivery) {
   signal.status = 'PENDING_ENTRY';
 
   const sentSeconds = Date.parse(signal.sentAt) / 1000;
-
-  // Never inspect a candle that started before successful delivery.
   signal.nextMinute = Math.ceil(sentSeconds / MINUTE) * MINUTE;
 
   const expiry = Date.parse(signal.validUntil) / 1000;
@@ -221,17 +222,21 @@ function targetAtOpen(signal, candle, price) {
     : candle.open <= price;
 }
 
+function queueLiveAlert(signal, key, text) {
+  signal.liveAlertsSent ??= {};
+  signal.pendingLiveAlerts ??= [];
+  if (signal.liveAlertsSent[key]) return;
+  signal.liveAlertsSent[key] = new Date().toISOString();
+  signal.pendingLiveAlerts.push({ key, text });
+}
+
 function recordExit(signal, price, fraction, reason, time) {
   const quantity = Math.min(signal.remaining, fraction);
   if (!(quantity > 0)) return;
 
   const gross = direction(signal, price) * quantity;
-
-  const costRate =
-    signal.evaluation.feeRate + signal.evaluation.slippageRate;
-
-  const costs =
-    costRate * (1 + price / signal.entry) * 100 * quantity;
+  const costRate = signal.evaluation.feeRate + signal.evaluation.slippageRate;
+  const costs = costRate * (1 + price / signal.entry) * 100 * quantity;
 
   signal.realizedGrossPct += gross;
   signal.estimatedCostsPct += costs;
@@ -269,7 +274,7 @@ function observePrice(signal, candle) {
   const favorablePrice = signal.side === 'LONG' ? candle.high : candle.low;
   const adversePrice = signal.side === 'LONG' ? candle.low : candle.high;
 
-const favorable = Math.max(0, direction(signal, favorablePrice));
+  const favorable = Math.max(0, direction(signal, favorablePrice));
   const adverse = Math.max(0, -direction(signal, adversePrice));
 
   signal.observationMfePct = Math.max(signal.observationMfePct, favorable);
@@ -286,11 +291,6 @@ const favorable = Math.max(0, direction(signal, favorablePrice));
   return { favorable, adverse };
 }
 
-/**
- * Mutates one paper signal using a fully closed one-minute candle.
- * Unknown intrabar order is marked AMBIGUOUS.
- * No price before successful Telegram delivery is used.
- */
 export function processCandle(signal, candle) {
   const end = candle.time + MINUTE;
   const expiry = Date.parse(signal.validUntil) / 1000;
@@ -323,7 +323,6 @@ export function processCandle(signal, candle) {
       ambiguous(signal, 'ENTRY_AND_EXIT_LEVEL_IN_SAME_MINUTE', end);
     }
 
-    // Do not assign pre-entry candle extremes to post-entry performance.
     return;
   }
 
@@ -342,14 +341,11 @@ export function processCandle(signal, candle) {
   }
 
   if (crossedStopAtOpen(signal, candle)) {
-    // Gap through stop: use the worse opening price, not the old stop.
     recordExit(signal, candle.open, signal.remaining, 'STOP_GAP', candle.time);
     finalize(signal, 'STOP_GAP', candle.time);
     return;
   }
 
-  // Targets already crossed at candle open have known ordering before
-  // later intrabar stop touches. Fill conservatively at target price.
   for (let i = 0; i < signal.targets.length; i++) {
     if (
       signal.targetHits[i] == null &&
@@ -398,7 +394,6 @@ export function processCandle(signal, candle) {
     return;
   }
 
-  // Conservative extrema: only candles where the position remained open.
   signal.observedMfePct = Math.max(
     signal.observedMfePct, movement.favorable
   );
@@ -406,12 +401,184 @@ export function processCandle(signal, candle) {
     signal.observedMaePct, movement.adverse
   );
 
-if (end >= signal.holdUntil) {
+  if (end >= signal.holdUntil) {
     recordExit(signal, candle.close, signal.remaining, 'TIME_EXIT', end);
     finalize(signal, 'TIME_EXIT', end);
   }
 
   if (end >= signal.observeUntil) signal.observationComplete = true;
+}
+
+async function evaluateLiveSignalHealth(signal, nowSeconds, btcDeep) {
+  if (signal.status !== 'OPEN') return;
+
+  try {
+    const raw15 = await requestGate('candlesticks', {
+      contract: signal.symbol,
+      interval: '15m',
+      limit: 60,
+    });
+
+    const c15raw = closedCandles(raw15, 900, nowSeconds);
+    if (c15raw.length < 30) return;
+
+    const c15 = indicators(c15raw);
+    const last = c15.at(-1);
+    const prev = c15.at(-2);
+    const currentPrice = last.close;
+    const longSide = signal.side === 'LONG';
+    const pnlPct = round(direction(signal, currentPrice), 2);
+    const sign = pnlPct >= 0 ? '+' : '';
+
+    for (let i = 0; i < signal.targets.length - 1; i++) {
+      if (signal.targetHits[i] != null) {
+        const tpKey = 'TP_HIT_' + (i + 1);
+        const nextTp = signal.targets[i + 1];
+        const strongContinuation =
+          last.adx >= 22 &&
+          (longSide ? last.close > last.ema9 : last.close < last.ema9);
+
+        queueLiveAlert(
+          signal,
+          tpKey,
+          [
+            '✅ آپدیت لحظه‌ای سیگنال: هدف ' + (i + 1) + ' (TP' + (i + 1) + ') با موفقیت زده شد!',
+            '🪙 ارز: #' + signal.symbol + ' | جهت: ' + signal.side,
+            '💰 قیمت هدف زده‌شده: ' + signal.targets[i],
+            '📊 وضعیت ادامه حرکت: ' + (
+              strongContinuation
+                ? '🔥 قدرت حرکت همچنان بالاست و مسیر به سمت هدف بعدی (' + nextTp + ') باز است.'
+                : '⚖️ شتاب حرکت کمی متعادل شده؛ حتماً بخشی از سود را سیو کنید.'
+            ),
+            '🛡️ فرمان لحظه‌ای: حد ضرر (Stop Loss) باقی‌مانده حجم معامله را به نقطه ورود (' + signal.entry + ') منتقل کنید (ریسک‌فری کامل).',
+            '₿ وضعیت فعلی BTC: ' + (btcDeep?.regimeFa ?? '—') + ' — ' + (btcDeep?.nextMoveForecast ?? ''),
+          ].join('\n')
+        );
+      }
+    }
+
+    const tp2Hit = signal.targets.length >= 2 && signal.targetHits[1] != null;
+    const tp3 = signal.targets.at(-1);
+    const distToTp3 = Math.abs(tp3 - signal.entry);
+    const currentGainDist = longSide
+      ? currentPrice - signal.entry
+      : signal.entry - currentPrice;
+
+    if (
+      (tp2Hit || currentGainDist >= distToTp3 * 0.75) &&
+      last.adx >= 25 &&
+      last.volumeRatio >= 1.35 &&
+      (longSide ? last.close > last.ema9 : last.close < last.ema9)
+    ) {
+      const dir = longSide ? 1 : -1;
+      const extendedTarget4 = round(tp3 + dir * signal.initialRisk * 1.6, 6);
+
+      queueLiveAlert(
+        signal,
+        'EXTENDED_RUNNER',
+        [
+          '🚀 انفجار مومنتوم: ظرفیت عبور از اهداف تعیین‌شده فعال شد!',
+          '🪙 ارز: #' + signal.symbol + ' | سود فعلی: ' + sign + pnlPct + '%',
+          '📈 تحلیل لحظه‌ای: حجم معاملات (' + round(last.volumeRatio, 1) + ' برابر میانگین) و قدرت روند (ADX: ' + round(last.adx, 1) + ') نشان می‌دهد حرکت اصلی بسیار پرقدرت است و پتانسیل عبور از هدف سوم (' + tp3 + ') را دارد.',
+          '🎯 هدف چهارم (فراتر از اهداف): ' + extendedTarget4,
+          '💡 فرمان لحظه‌ای: کل پوزیشن را در TP3 نبندید؛ ۲۰٪ حجم را با تریل کردن حد ضرر زیر کندل‌های ۱۵ دقیقه برای شکار موج بزرگ‌تر نگه دارید.',
+        ].join('\n')
+      );
+    }
+
+    const range = last.high - last.low;
+    const lowerWick = Math.min(last.open, last.close) - last.low;
+    const upperWick = last.high - Math.max(last.open, last.close);
+
+    const dippedIntoDrawdown = longSide
+      ? last.low < signal.entry - signal.initialRisk * 0.25 &&
+        last.low > signal.stop
+      : last.high > signal.entry + signal.initialRisk * 0.25 &&
+        last.high < signal.stop;
+
+    const recoveredStrongly =
+      range > 0 &&
+      (longSide
+        ? lowerWick / range >= 0.45 && last.close >= signal.entry * 0.998
+        : upperWick / range >= 0.45 && last.close <= signal.entry * 1.002);
+
+    if (dippedIntoDrawdown && recoveredStrongly && signal.targetHits[0] == null) {
+      queueLiveAlert(
+        signal,
+        'SHAKEOUT_COMPLETED',
+        [
+          '🪤 کشف کلک بازارگردان (Shakeout) روی #' + signal.symbol,
+          '📊 وضعیت لحظه‌ای: قیمت یک نفوذ فریبنده به سمت حد ضرر انجام داد تا معامله‌گران عجول را پیاده کند، اما با شدوی بلند و جذب سفارش نهنگ‌ها سریع به محدوده ورود برگشت!',
+          '🔋 نتیجه رادار: کلک انجام شده و ارز در حال جمع کردن انرژی برای شروع حرکت اصلی است.',
+          '🟢 فرمان لحظه‌ای: احتمال انجام حرکت اصلی پابرجاست؛ با اطمینان معامله را حفظ کنید.',
+        ].join('\n')
+      );
+    }
+
+    const tp1 = signal.targets[0];
+    const distToTp1 = Math.abs(tp1 - signal.entry);
+    const reachedNearTp1 =
+      signal.targetHits[0] == null &&
+      currentGainDist >= distToTp1 * 0.62 &&
+      currentGainDist < distToTp1;
+
+    const momentumStalling = longSide
+      ? last.close < last.open &&
+        last.macdHist < prev.macdHist &&
+        (upperWick > range * 0.4 || last.rsi < prev.rsi - 3)
+      : last.close > last.open &&
+        last.macdHist > prev.macdHist &&
+        (lowerWick > range * 0.4 || last.rsi > prev.rsi + 3);
+
+    if (reachedNearTp1 && momentumStalling) {
+      queueLiveAlert(
+        signal,
+        'TP1_WEAKNESS_WARNING',
+        [
+          '⚠️ هشدار لحظه‌ای: احتمال نرسیدن به هدف اول (TP1) روی #' + signal.symbol,
+          '💰 قیمت فعلی: ' + currentPrice + ' (سود لحظه‌ای: ' + sign + pnlPct + '%)',
+          '🔍 علت هشدار: قیمت بیش از ۶۵٪ مسیر تا هدف اول را طی کرده اما فروشندگان/خریداران مقابل ظاهر شده‌اند و شتاب حرکت کم شده است.',
+          '🛡️ فرمان لحظه‌ای برای حفظ سود: منتظر لمس دقیق TP1 نمانید! همین الان ۵۰٪ سود را دستی سیو کنید و حد ضرر مابقی را روی نقطه ورود بگذارید.',
+        ].join('\n')
+      );
+    }
+
+    const adverseDist = longSide
+      ? signal.entry - currentPrice
+      : currentPrice - signal.entry;
+    const inDangerZone =
+      signal.targetHits[0] == null &&
+      adverseDist >= signal.initialRisk * 0.45 &&
+      adverseDist < signal.initialRisk * 0.92;
+
+    const structureBrokenAgainstUs = longSide
+      ? last.close < last.ema20 &&
+        prev.close < prev.ema20 &&
+        last.close < last.open &&
+        last.rsi < 40 &&
+        lowerWick < range * 0.25
+      : last.close > last.ema20 &&
+        prev.close > prev.ema20 &&
+        last.close > last.open &&
+        last.rsi > 60 &&
+        upperWick < range * 0.25;
+
+    if (inDangerZone && structureBrokenAgainstUs) {
+      queueLiveAlert(
+        signal,
+        'EMERGENCY_EXIT_WARNING',
+        [
+          '🛑 فرمان خروج اضطراری (محافظت از سرمایه) روی #' + signal.symbol,
+          '📉 قیمت فعلی: ' + currentPrice + ' (' + sign + pnlPct + '%) | جهت سیگنال: ' + signal.side,
+          '⚠️ علت هشدار: ساختار ۱۵ دقیقه بدون زدن شدوی برگشتی شکسته شده و حرکت اصلی تضعیف شده است. احتمال لمس حد ضرر (' + signal.stop + ') بالا رفته است.',
+          '🚨 فرمان لحظه‌ای: برای اینکه بیشتر ضرر نکنید، منتظر خوردن استاپ‌لاس کامل نمانید و همین الان با ضرر کوچک خارج شوید.',
+          '₿ وضعیت بیت‌کوین: ' + (btcDeep?.regimeFa ?? '—') + ' — ' + (btcDeep?.nextMoveForecast ?? ''),
+        ].join('\n')
+      );
+    }
+  } catch (error) {
+    console.warn('[LIVE RADAR]', signal.symbol, error.message);
+  }
 }
 
 function trackingNeeded(signal) {
@@ -424,9 +591,10 @@ function trackingNeeded(signal) {
   );
 }
 
-async function updateOne(signal, nowSeconds) {
+async function updateOne(signal, nowSeconds, btcDeep) {
   if (!trackingNeeded(signal)) return;
 
+  const prevStatus = signal.status;
   const closedEnd = Math.floor(nowSeconds / MINUTE) * MINUTE;
 
   for (let page = 0; page < EVALUATION.maxPagesPerSignalPerRun; page++) {
@@ -450,7 +618,7 @@ async function updateOne(signal, nowSeconds) {
       } else if (signal.entryTime && from >= signal.observeUntil) {
         signal.observationComplete = true;
       }
-      return;
+      break;
     }
 
     const raw = await requestGate('candlesticks', {
@@ -474,7 +642,6 @@ async function updateOne(signal, nowSeconds) {
           time: new Date(time * 1000).toISOString(),
           checkedAt: new Date().toISOString(),
         };
-        // Never skip missing candles and infer a win.
         return;
       }
 
@@ -482,8 +649,25 @@ async function updateOne(signal, nowSeconds) {
       signal.nextMinute = time + MINUTE;
       signal.dataIssue = null;
 
-      if (!trackingNeeded(signal)) return;
+      if (!trackingNeeded(signal)) break;
     }
+  }
+
+  if (prevStatus === 'PENDING_ENTRY' && signal.status === 'OPEN') {
+    queueLiveAlert(
+      signal,
+      'ENTRY_ACTIVATED',
+      [
+        '🎯 نقطه ورود فعال شد: معامله #' + signal.symbol + ' (' + signal.side + ') باز شد!',
+        '💵 قیمت ورود: ' + signal.entry + ' | 🛑 حد ضرر: ' + signal.stop,
+        '🎯 اهداف: ' + signal.targets.join(' -> '),
+        '📡 رادار زنده فعال است؛ هرگونه کلک بازارگردان، ضعف در تارگت اول یا دستور خروج اضطراری فوراً اعلام خواهد شد.',
+      ].join('\n')
+    );
+  }
+
+  if (signal.status === 'OPEN') {
+    await evaluateLiveSignalHealth(signal, nowSeconds, btcDeep);
   }
 
   if (trackingNeeded(signal) && signal.nextMinute < closedEnd) {
@@ -497,9 +681,17 @@ async function updateOne(signal, nowSeconds) {
 export async function updateTrackedSignals(state) {
   const nowSeconds = Date.now() / 1000;
 
+  const hasActiveOpenSignals = Object.values(state.signals).some(
+    s => s.status === 'OPEN' || s.status === 'PENDING_ENTRY'
+  );
+
+  const btcDeep = hasActiveOpenSignals
+    ? await analyzeBtcDeep(nowSeconds)
+    : null;
+
   for (const signal of Object.values(state.signals)) {
     try {
-      await updateOne(signal, nowSeconds);
+      await updateOne(signal, nowSeconds, btcDeep);
     } catch (error) {
       signal.dataIssue = {
         type: 'FETCH_ERROR',
@@ -509,19 +701,18 @@ export async function updateTrackedSignals(state) {
       console.error('[TRACKER]', signal.symbol, error.message);
     }
 
-    // Persist progress locally after each signal.
     await saveSignalState(state);
   }
 }
 
 export function resultMessage(signal) {
   const lines = [
-    '📋 نتیجه فرضی سیگنال Gate',
+    '📋 نتیجه نهایی سیگنال Gate',
     signal.symbol + ' | ' + signal.side + ' | ' + signal.id.slice(0, 12),
   ];
 
   if (signal.status === 'EXPIRED_NO_ENTRY') {
-    lines.push('منقضی بدون ورود فرضی؛ برد یا باخت محسوب نمی‌شود.');
+    lines.push('⏳ منقضی بدون ورود (قیمت در زمان معتبر به محدوده ورود نرسید و سیگنال لغو شد).');
   } else if (signal.status === 'AMBIGUOUS') {
     lines.push(
       'نتیجه مبهم: ترتیب لمس سطوح در کندل یک‌دقیقه‌ای مشخص نیست.',
@@ -531,7 +722,7 @@ export function resultMessage(signal) {
     const sign = signal.netPct >= 0 ? '+' : '';
 
     lines.push(
-      'نتیجه خالص تخمینی: ' + sign + signal.netPct.toFixed(3) + '%',
+      'نتیجه خالص تخمینی (بدون اهرم): ' + sign + signal.netPct.toFixed(3) + '%',
       'نتیجه برحسب ریسک اولیه: ' + signal.netR.toFixed(2) + 'R',
       'علت پایان: ' + signal.exitReason,
       'اهداف ثبت‌شده: ' + signal.targetHits
@@ -539,11 +730,6 @@ export function resultMessage(signal) {
         .join(' | ')
     );
   }
-
-  lines.push(
-    'ارزیابی فرضی بدون اهرم؛ شامل هزینه تخمینی و بدون فاندینگ.',
-    'این نتیجه سود واقعی حساب LBank نیست.'
-  );
 
   return lines.join('\n');
 }
@@ -600,7 +786,6 @@ function periodReport(signals, days, now) {
       (averageNet == null ? '—' : averageNet.toFixed(3) + '%'),
     'امید ریاضی مشاهده‌شده: ' +
       (averageR == null ? '—' : averageR.toFixed(3) + 'R'),
-
     'ضریب سود با اندازه اسمی برابر: ' + factor,
   ];
 
@@ -617,8 +802,7 @@ function periodReport(signals, days, now) {
   lines.push(
     'پایش ۴۸ساعته تکمیل‌شده: ' + observed.length,
     'میانگین عبور از آخرین هدف در پایش ۴۸ساعته: ' +
-      (averageBeyond == null ? '—' : averageBeyond.toFixed(3) + '%'),
-    'این عبور ممکن است پس از خروج/حد ضرر رخ داده باشد و سود معامله نیست.'
+      (averageBeyond == null ? '—' : averageBeyond.toFixed(3) + '%')
   );
 
   for (const side of ['LONG', 'SHORT']) {
@@ -647,9 +831,8 @@ export function performanceMessages(state, now = Date.now()) {
 
   if (!groups.size) {
     return [
-      '📊 گزارش عملکرد فرضی Gate\n' +
-      'هنوز سیگنال با ارسال تأییدشده برای ارزیابی ثبت نشده است.\n' +
-      'ارزیابی از زمان نصب این نسخه آغاز می‌شود؛ گذشته بازسازی نشده است.',
+      '📊 گزارش عملکرد Gate\n' +
+      'هنوز سیگنال با ارسال تأییدشده برای ارزیابی ثبت نشده است.',
     ];
   }
 
@@ -657,29 +840,15 @@ export function performanceMessages(state, now = Date.now()) {
 
   for (const [version, group] of groups) {
     messages.push([
-      '📊 گزارش عملکرد فرضی Gate',
-
-'نسخه: ' + version,
+      '📊 گزارش عملکرد سیستم هوشمند Gate',
+      'نسخه: ' + version,
       periodReport(group, 7, now),
       '━━━━━━━━━━━━━━━━━━',
       periodReport(group, 30, now),
       '━━━━━━━━━━━━━━━━━━',
       'اختلال/عقب‌ماندگی داده در این نسخه: ' +
         group.filter(s => s.dataIssue).length,
-      'برد و باخت فقط بین معاملات بسته‌شده غیرمبهم محاسبه شده است.',
-      'حذف موارد مبهم می‌تواند بر نرخ برد اثر بگذارد؛ تعدادشان را بررسی کن.',
-      'حد ضرر ثابت؛ خروج پله‌ای؛ هزینه تخمینی؛ بدون فاندینگ و اهرم.',
-      'این درصدها بازده حساب نیستند. داده Gate، نه اجرای واقعی LBank.',
     ].join('\n'));
-  }
-
-  const unknown = signals.filter(s => s.status === 'DELIVERY_UNKNOWN').length;
-
-  if (unknown) {
-    messages.push(
-      '⚠️ ارسال نامشخص: ' + unknown +
-      ' مورد؛ برای جلوگیری از آمار ساختگی وارد ارزیابی نشده‌اند.'
-    );
   }
 
   return messages;
