@@ -8,7 +8,7 @@ import {
   requireArray,
 } from '../services/gate.js';
 
-export const STRATEGY_VERSION = 'gate-structural-ls-v2-smartmoney';
+export const STRATEGY_VERSION = 'gate-structural-ls-v3-pro';
 
 export const CONFIG = Object.freeze({
   MODE: 'BALANCED',
@@ -19,7 +19,7 @@ export const CONFIG = Object.freeze({
   SCAN_LIMIT: 0,
   TOP_COUNT: 5,
 
-  // بهینه‌سازی امتیازها برای جلوگیری از رد شدن موقعیت‌های ناب
+  // امتیازهای بهینه‌شده برای شکار موقعیت‌های اول حرکت
   MIN_LONG_SCORE: 65,
   MIN_LONG_SCORE_NEUTRAL: 70,
   MIN_LONG_SCORE_BEARISH: 78,
@@ -57,12 +57,12 @@ export const CONFIG = Object.freeze({
   MAX_STOP_ATR: 4.5,
   MAX_STOP_PCT: 5.5,
 
-  // جلوگیری از ورود دیرهنگام (کاهش فاصله مجاز از میانگین)
+  // جلوگیری از ورود دیرهنگام در سقف قیمت
   MAX_DISTANCE_EMA_ATR: 1.6,
   MAX_TRIGGER_DRIFT_ATR: 0.85,
   MAX_TRIGGER_DRIFT_PCT: 2.2,
 
-  // اصلاح محدوده ورود برای جلوگیری از سوختن سیگنال‌ها در بازبینی نهایی
+  // محدوده ورود استاندارد برای جلوگیری از سوختن سیگنال در لحظه آخر
   ENTRY_ZONE_ATR: 0.45,
   MAX_ENTRY_ZONE_PCT: 0.8,
   ENTRY_VALID_MINUTES: 30,
@@ -308,7 +308,6 @@ function engulfing(candles, longSide) {
 
 function rejectionPattern(candles, longSide) {
   const last = candles.at(-1);
-  const body = Math.abs(last.close - last.open);
   const range = last.high - last.low;
 
   if (!positive(range)) return false;
@@ -407,7 +406,7 @@ function riskReward(longSide, entry, stop, target) {
   return reward / risk;
 }
 
-// ==================== Direction analysis (UPGRADED BRAIN) ====================
+// ==================== Direction analysis (UPGRADED BRAIN V3) ====================
 
 function analyze(market, c15, c4, context, side) {
   const longSide = side === 'LONG';
@@ -442,10 +441,7 @@ function analyze(market, c15, c4, context, side) {
     return fail('BAD_PRICE_OR_INDICATOR');
   }
 
-  // =========================================================================
-  // ارتقای ۱: تشخیص هوشمند روند ۴ ساعته (حذف شرط کندِ EMA200 که باعث ورود در سقف می‌شد)
-  // اجازه ورود در ابتدای شکل‌گیری روند (EMA20 > EMA50) یا برگشت از کف با RSI مناسب
-  // =========================================================================
+  // ۱. تشخیص هوشمند روند ۴ ساعته (حذف شرط کندِ EMA200 که باعث ورود در سقف می‌شد)
   const macroAligned = longSide
     ? (trend.close > trend.ema50 && trend.ema20 >= trend.ema50 * 0.995) ||
       (trend.close > trend.ema20 && trend.rsi > prevTrend.rsi && trend.rsi < 65)
@@ -492,9 +488,7 @@ function analyze(market, c15, c4, context, side) {
     return fail('FUNDING_CROWDED');
   }
 
-  // =========================================================================
-  // ارتقای ۲: تعریف ۳ ستاپ ورود در کف/اول حرکت (به جای ورود دیرهنگام)
-  // =========================================================================
+  // ۲. تعریف ستاپ‌های ورود در کف و اول حرکت (Smart Money Setups)
   const swingWindow = c15.slice(-30, -1);
   const swingLow = Math.min(...swingWindow.map(c => c.low));
   const swingHigh = Math.max(...swingWindow.map(c => c.high));
@@ -507,7 +501,7 @@ function analyze(market, c15, c4, context, side) {
   const engulfCandle = engulfing(c15, longSide);
   const hasVolume = last.volumeRatio != null && last.volumeRatio >= 1.25;
 
-  // ستاپ طلایی ۱: شکار استاپ‌هانت و نقدینگی (Liquidity Sweep) - ورود در کف یا سقف مطلق!
+  // ستاپ ۱: شکار استاپ‌هانت و نقدینگی (Liquidity Sweep) - ورود در کف یا سقف مطلق!
   const liquiditySweep = longSide
     ? (last.low < minorLow || previous.low < minorLow) &&
       last.close > minorLow &&
@@ -520,7 +514,6 @@ function analyze(market, c15, c4, context, side) {
       (rejectCandle || engulfCandle || last.close < last.open) &&
       (hasVolume || previous.volumeRatio >= 1.3);
 
-  // بررسی اینکه اگر حمایت اصلی شکسته شده و استاپ‌هانت نبوده (کندل زیرش بسته شده)، رد شود
   const hardBreakdown = longSide
     ? last.close < swingLow - atr * 0.2
     : last.close > swingHigh + atr * 0.2;
@@ -529,13 +522,12 @@ function analyze(market, c15, c4, context, side) {
     return fail(longSide ? 'SUPPORT_BROKEN' : 'RESISTANCE_BROKEN');
   }
 
-  // فیلتر ضدِ تعقیب قیمت (فقط زمانی اعمال می‌شود که استاپ‌هانت نباشد)
   const distanceFromEma = longSide ? price - last.ema20 : last.ema20 - price;
   if (!liquiditySweep && distanceFromEma > atr * CONFIG.MAX_DISTANCE_EMA_ATR) {
     return fail('PRICE_CHASING');
   }
 
-  // ستاپ طلایی ۲: پولبک دقیق به EMA20 یا ساختار (Smart Pullback)
+  // ستاپ ۲: پولبک دقیق به EMA20 یا ساختار (Smart Pullback)
   const nearStructure = longSide
     ? Math.abs(last.low - swingLow) <= atr * 0.65 && last.close > swingLow
     : Math.abs(last.high - swingHigh) <= atr * 0.65 && last.close < swingHigh;
@@ -561,7 +553,7 @@ function analyze(market, c15, c4, context, side) {
   const pullback =
     correction && any([nearStructure, emaTouch]) && directionalCandle;
 
-  // ستاپ طلایی ۳: شکست فشردگی و بازآزمایی در ابتدای حرکت (Breakout Retest / Squeeze Ignition)
+  // ستاپ ۳: شکست مقاومت/حمایت و پولبک (Breakout Retest)
   const beforeBreak = c15.slice(-25, -2);
   const breakLevel = longSide
     ? Math.max(...beforeBreak.map(candle => candle.high))
@@ -579,7 +571,7 @@ function analyze(market, c15, c4, context, side) {
         last.close < breakLevel &&
         breakLevel - price <= atr * 1.1);
 
-  // استارت پامپ از حالت فشرده (قبل از اینکه قیمت بیش از 1.2 برابر ATR دور شود)
+  // ستاپ ۴: استارت پامپ از حالت فشرده (Squeeze Ignition - قبل از دور شدن قیمت)
   const boxRange = minorHigh - minorLow;
   const tightSqueeze = boxRange <= atr * 2.8;
   const earlyIgnition =
@@ -624,9 +616,7 @@ function analyze(market, c15, c4, context, side) {
     return fail('NO_15M_TRIGGER');
   }
 
-  // =========================================================================
-  // ارتقای ۳: تعیین دقیق استاپ‌لاس و محدوده ورود (Entry Zone) ضدِ خطا
-  // =========================================================================
+  // ۳. تعیین استاپ‌لاس و محدوده ورود (Entry Zone)
   let stopStructure;
   if (liquiditySweep) {
     stopStructure = longSide
@@ -645,7 +635,6 @@ function analyze(market, c15, c4, context, side) {
   const stop =
     stopStructure + (longSide ? -1 : 1) * atr * CONFIG.STOP_ATR_BUFFER;
 
-  // محاسبه هوشمند محدوده ورود (کشیده شده به سمت نقطه پولبک برای ورود بهتر)
   const zoneWidth = Math.min(
     atr * CONFIG.ENTRY_ZONE_ATR,
     (price * CONFIG.MAX_ENTRY_ZONE_PCT) / 100
@@ -663,8 +652,7 @@ function analyze(market, c15, c4, context, side) {
     ? price + zoneWidth * 0.35
     : Math.max(pullbackAnchor, price + zoneWidth * 0.6);
 
-  const entry = price; // محاسبه ریسک به ریوارد بر اساس قیمت لحظه‌ای واقعی
-
+  const entry = price;
   const risk = longSide ? entry - stop : stop - entry;
   const invalidStop = longSide ? stop >= entryLow : stop <= entryHigh;
 
@@ -683,7 +671,6 @@ function analyze(market, c15, c4, context, side) {
 
   let zones = targetZones(c15, c4, entry, atr, longSide);
 
-  // اگر ارز در کف یا سقف جدید باشد و پیوت نزدیک نباشد، تارگت‌های ساختاری بر اساس ATR می‌سازیم
   if (zones.length === 0) {
     const dir = longSide ? 1 : -1;
     zones = [
@@ -758,7 +745,9 @@ function analyze(market, c15, c4, context, side) {
     return fail('COUNTER_BTC_WEAK_SETUP');
   }
 
-  // امتیازدهی هوشمند به ستاپ‌های ورود در کف و اول حرکت
+  // =========================================================================
+  // ۴. امتیازدهی + موتور شکارچی پامپ‌های SSV (Short/Long Squeeze Detector)
+  // =========================================================================
   const emaAligned = longSide
     ? trend.ema20 > trend.ema50
     : trend.ema20 < trend.ema50;
@@ -767,8 +756,8 @@ function analyze(market, c15, c4, context, side) {
     12 + (emaAligned ? 10 : 5) + (trend.adx >= 18 && strength ? 8 : 0);
 
   let setupScore = 18;
-  if (liquiditySweep) setupScore = 28; // بالاترین امتیاز برای شکار استاپ‌هانت در کف/سقف
-  else if (earlyIgnition) setupScore = 26; // امتیاز بالا برای شکار اولِ پامپ
+  if (liquiditySweep) setupScore = 28;
+  else if (earlyIgnition) setupScore = 26;
   else if (retest) setupScore = 24;
   else if (nearStructure && emaTouch) setupScore = 22;
 
@@ -789,6 +778,12 @@ function analyze(market, c15, c4, context, side) {
 
   const rrScore = rr1 >= 1.8 ? 6 : rr1 >= 1.3 ? 4 : 2;
 
+  // تشخیص تله بازارگردان (مشابه پامپ ۴۰ ساعته SSV):
+  // اگر سیگنال خرید (LONG) است ولی مردم دارند Short می‌گیرند (فاندینگ منفی است) -> سوخت موشک!
+  const isSqueezeFuel =
+    (longSide && funding < -0.00005) || (!longSide && funding > 0.00025);
+  const squeezeBonus = isSqueezeFuel ? 10 : 0;
+
   let required;
   if (longSide) {
     if (oppositeBTC) required = CONFIG.MIN_LONG_SCORE_BEARISH;
@@ -808,6 +803,11 @@ function analyze(market, c15, c4, context, side) {
   const direction = longSide ? 'صعودی' : 'نزولی';
 
   const triggerReasons = [
+    isSqueezeFuel
+      ? longSide
+        ? '🔥 سوخت شورت‌اسکوییز (تله بازارگردان)'
+        : '🔥 سوخت لانگ‌اسکوییز (لیکوییدیتی سنگین)'
+      : null,
     liquiditySweep ? 'جمع‌آوری نقدینگی (Stop Hunt)' : null,
     earlyIgnition ? 'انفجار حجم از فشردگی' : null,
     rejectCandle ? 'شدو برگشتی قوی ' + direction : null,
@@ -845,7 +845,12 @@ function analyze(market, c15, c4, context, side) {
       : 'هم‌جهت با ساختار ۴ ساعته ' + direction;
 
   const score =
-    trendScore + setupScore + triggerScore + volumeScore + rrScore;
+    trendScore +
+    setupScore +
+    triggerScore +
+    volumeScore +
+    rrScore +
+    squeezeBonus;
 
   return {
     symbol: market.symbol,
@@ -915,6 +920,7 @@ function analyze(market, c15, c4, context, side) {
       candleVolume: volumeScore,
       liveFlow: 0,
       firstTargetRR: rrScore,
+      squeezeBonus,
     },
 
     costAssumptions: {
