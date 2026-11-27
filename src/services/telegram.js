@@ -5,25 +5,14 @@ const TIMEOUT_MS = 15000;
 
 function getCredentials() {
   let token = process.env.TELEGRAM_BOT_TOKEN;
-
-  if (!token) {
-    token = process.env.TELEGRAM_TOKEN;
-  }
-
+  if (!token) token = process.env.TELEGRAM_TOKEN;
   const chatId = process.env.TELEGRAM_CHAT_ID;
-
-  return {
-    token,
-    chatId,
-  };
+  return { token, chatId };
 }
 
 export function telegramConfigured() {
   const credentials = getCredentials();
-
-  return Boolean(
-    credentials.token && credentials.chatId
-  );
+  return Boolean(credentials.token && credentials.chatId);
 }
 
 function splitMessage(text) {
@@ -39,22 +28,14 @@ function splitMessage(text) {
         pieces.push(piece);
         piece = '';
       }
-
       piece += character;
     }
-
     pieces.push(piece);
 
     for (const part of pieces) {
-      const combined = current
-        ? current + '\n' + part
-        : part;
-
+      const combined = current ? current + '\n' + part : part;
       if (combined.length > MAX_LENGTH) {
-        if (current) {
-          chunks.push(current);
-        }
-
+        if (current) chunks.push(current);
         current = part;
       } else {
         current = combined;
@@ -62,37 +43,21 @@ function splitMessage(text) {
     }
   }
 
-  if (current) {
-    chunks.push(current);
-  }
-
+  if (current) chunks.push(current);
   return chunks;
 }
 
-export async function sendTelegram(text) {
+// قابلیت ریپلای خودکار روی پیام اصلی سیگنال (replyToMessageId) اضافه شد
+export async function sendTelegram(text, replyToMessageId = null) {
   const { token, chatId } = getCredentials();
 
-  if (!token) {
-    return {
-      sent: false,
-      reason: 'MISSING_CREDENTIALS',
-    };
-  }
-
-  if (!chatId) {
-    return {
-      sent: false,
-      reason: 'MISSING_CREDENTIALS',
-    };
+  if (!token || !chatId) {
+    return { sent: false, reason: 'MISSING_CREDENTIALS' };
   }
 
   const chunks = splitMessage(text);
-
   if (chunks.length === 0) {
-    return {
-      sent: false,
-      reason: 'EMPTY_MESSAGE',
-    };
+    return { sent: false, reason: 'EMPTY_MESSAGE' };
   }
 
   const messageIds = [];
@@ -100,69 +65,51 @@ export async function sendTelegram(text) {
 
   for (let index = 0; index < chunks.length; index++) {
     let response;
+    const payload = {
+      chat_id: chatId,
+      text: chunks[index],
+      disable_web_page_preview: true,
+    };
+
+    if (index === 0 && Number.isFinite(replyToMessageId)) {
+      payload.reply_to_message_id = replyToMessageId;
+      payload.allow_sending_without_reply = true;
+    }
 
     try {
       response = await fetch(
         'https://api.telegram.org/bot' + token + '/sendMessage',
         {
           method: 'POST',
-
-          headers: {
-            'Content-Type': 'application/json',
-          },
-
-          body: JSON.stringify({
-            chat_id: chatId,
-            text: chunks[index],
-            disable_web_page_preview: true,
-          }),
-
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
           signal: AbortSignal.timeout(TIMEOUT_MS),
         }
       );
     } catch {
       throw new Error(
-        'Telegram network/timeout on part ' +
-        (index + 1) +
-        '; delivery uncertain'
+        'Telegram network/timeout on part ' + (index + 1) + '; delivery uncertain'
       );
     }
 
     let data = null;
-
     try {
       data = await response.json();
     } catch {
       data = null;
     }
 
-    let accepted = false;
-
-    if (response.ok && data != null) {
-      accepted = data.ok === true;
-    }
-
+    const accepted = response.ok && data != null && data.ok === true;
     if (!accepted) {
-      let description =
-        'Telegram HTTP ' + response.status +
-        ', part ' + (index + 1);
-
-      if (
-        data != null &&
-        typeof data.description === 'string'
-      ) {
+      let description = 'Telegram HTTP ' + response.status + ', part ' + (index + 1);
+      if (data != null && typeof data.description === 'string') {
         description = data.description;
       }
-
       throw new Error(description);
     }
 
     const messageId = data.result?.message_id;
-
-    messageIds.push(
-      Number.isFinite(messageId) ? messageId : null
-    );
-
+    messageIds.push(Number.isFinite(messageId) ? messageId : null);
     confirmedAt = new Date().toISOString();
 
     if (index < chunks.length - 1) {
@@ -179,112 +126,77 @@ export async function sendTelegram(text) {
 }
 
 function formatPrice(value) {
-  if (!Number.isFinite(value)) return '—';
-  if (!(value > 0)) return '—';
-
+  if (!Number.isFinite(value) || !(value > 0)) return '—';
   return Number(value.toPrecision(8)).toString();
 }
 
 function formatNumber(value, digits = 2) {
   if (!Number.isFinite(value)) return '—';
-
   return value.toFixed(digits);
 }
 
 function formatDirectionalPercent(side, entry, exit) {
-  if (!Number.isFinite(entry)) return '—';
-  if (!Number.isFinite(exit)) return '—';
-  if (!(entry > 0)) return '—';
-  if (!(exit > 0)) return '—';
-
-  const difference = side === 'LONG'
-    ? exit - entry
-    : entry - exit;
-
+  if (!Number.isFinite(entry) || !Number.isFinite(exit) || !(entry > 0) || !(exit > 0)) {
+    return '—';
+  }
+  const difference = side === 'LONG' ? exit - entry : entry - exit;
   const value = (difference / entry) * 100;
   const sign = value >= 0 ? '+' : '';
-
   return sign + value.toFixed(2) + '%';
 }
 
 export function signalMessage(item, id, regime) {
   const isLong = item.side === 'LONG';
+  const referenceEntry = isLong ? item.entryHigh : item.entryLow;
+  const targets = Array.isArray(item.takeProfits) ? item.takeProfits : [];
 
-  const referenceEntry = isLong
-    ? item.entryHigh
-    : item.entryLow;
-
-  const targets = Array.isArray(item.takeProfits)
-    ? item.takeProfits
-    : [];
-
-  const targetLines = targets.map((target, idx) => {
-    const icon = idx === targets.length - 1 ? '🚀' : '✅';
-    return (
-      icon +
-      ' هدف ' +
-      target.level +
-      ' (TP' +
-      target.level +
-      '): ' +
-      formatPrice(target.price) +
+  const t1 = targets[0]
+    ? '🎯 TP1: ' +
+      formatPrice(targets[0].price) +
       ' (' +
-      formatDirectionalPercent(item.side, referenceEntry, target.price) +
+      formatDirectionalPercent(item.side, referenceEntry, targets[0].price) +
       ')'
-    );
-  });
+    : '';
+  const t2 = targets[1]
+    ? '🎯 TP2: ' +
+      formatPrice(targets[1].price) +
+      ' (' +
+      formatDirectionalPercent(item.side, referenceEntry, targets[1].price) +
+      ')'
+    : '';
+  const t3 = targets[2]
+    ? '🚀 TP3: ' +
+      formatPrice(targets[2].price) +
+      ' (' +
+      formatDirectionalPercent(item.side, referenceEntry, targets[2].price) +
+      ')'
+    : '';
 
-  const reasons = Array.isArray(item.reasons)
-    ? item.reasons.slice(0, 3).join(' • ')
-    : '—';
-
-  const regimeNames = {
-    BULLISH: 'صعودی 🟢',
-    BEARISH: 'نزولی 🔴',
-    NEUTRAL: 'خنثی ⚖️',
-    UNKNOWN: 'نامشخص',
-  };
-
-  const setupNames = {
-    LiquiditySweep: 'شکار نقدینگی و استاپ‌هانت (Liquidity Sweep)',
-    EarlyIgnition: 'انفجار حجم از فشردگی (Early Ignition)',
-    BreakoutRetest: 'شکست ساختار و پولبک (Breakout Retest)',
-    BreakdownRetest: 'شکست حمایت و پولبک (Breakdown Retest)',
-    Pullback: 'پولبک هوشمند به سطح کلیدی (Smart Pullback)',
-  };
-
-  const regimeText = regimeNames[regime] ?? String(regime);
-  const setupText = setupNames[item.setup] ?? item.setup ?? 'ساختاری';
-  const icon = isLong ? '🟢 LONG (خرید)' : '🔴 SHORT (فروش)';
+  const icon = isLong ? '🟢 LONG' : '🔴 SHORT';
   const grade = item.grade ?? (item.score >= 82 ? 'A+' : 'A');
+  const ai = item.liveInsight;
 
   const lines = [
-    '🚨 سیگنال VIP شکارچی هوشمند | #' + item.symbol,
-    '📊 جهت معامله: ' + icon,
-    '⭐ درجه کیفی: ' + grade + ' (امتیاز: ' + formatNumber(item.score, 0) + '/100) | رژیم BTC: ' + regimeText,
-    '🧩 ستاپ ورود: ' + setupText,
+    icon + ' | #' + item.symbol + ' | درجه: ' + grade + ' (' + formatNumber(item.score, 0) + '/100)',
+    ai ? '📌 ' + ai.entryInstruction : '📌 ورود در محدوده مشخص‌شده',
     '━━━━━━━━━━━━━━━━━━',
-    '🎯 محدوده ورود (Entry Zone): ' + formatPrice(item.entryLow) + ' تا ' + formatPrice(item.entryHigh),
-    '💵 قیمت لحظه‌ای بازار: ' + formatPrice(item.lastCheckedPrice ?? item.price),
-    '🛑 حد ضرر (Stop Loss): ' +
+    '🎯 ورود: ' +
+      formatPrice(item.entryLow) +
+      ' تا ' +
+      formatPrice(item.entryHigh) +
+      ' (فعلی: ' +
+      formatPrice(item.lastCheckedPrice ?? item.price) +
+      ')',
+    '🛑 حد ضرر: ' +
       formatPrice(item.stopLoss) +
       ' (' +
       formatDirectionalPercent(item.side, referenceEntry, item.stopLoss) +
       ')',
-    '━━━━━━━━━━━━━━━━━━',
-    '🎯 اهداف قیمتی (حمایت و مقاومت‌های ماژور):',
-    ...(targetLines.length > 0 ? targetLines : ['• نامشخص']),
-    '⚖️ نسبت ریسک به ریوارد خالص: TP1 (' +
-      formatNumber(item.riskRewardToTp1) +
-      'R) | TP2 (' +
-      formatNumber(item.riskRewardToTp2 ?? item.rr) +
-      'R)',
-    '📌 دلایل تایید: ' + reasons,
+    [t1, t2].filter(Boolean).join(' | '),
+    [t3, '⚖️ ریوارد: ' + formatNumber(item.riskRewardToTp2 ?? item.riskRewardToTp1) + 'R']
+      .filter(Boolean)
+      .join(' | '),
   ];
 
-  if (item.riskNote) {
-    lines.push('⚠️ نکته مدیریت ریسک: ' + item.riskNote);
-  }
-
-  return lines.join('\n');
+  return lines.filter(Boolean).join('\n');
 }
