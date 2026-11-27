@@ -1,12 +1,12 @@
 {
-  "updatedAt": "2026-11-27T17:53:35.737Z",
+  "updatedAt": "2026-11-27T17:57:28.576Z",
   "strategyVersion": "gate-structural-ls-v7-forensic-pro",
   "marketRegime": "BEARISH",
   "btcIntel": {
     "regime": "BEARISH",
     "regimeFa": "نزولی (Bearish)",
     "rsi4h": 45.9,
-    "rsi15m": 33.1,
+    "rsi15m": 35.7,
     "adx4h": 15.9,
     "nextMoveForecast": "⚖️ روند کلی نزولی است اما شتاب ریزش کم شده و احتمال ورود به فاز نوسان خنثی (رِنج) وجود دارد."
   },
@@ -19,9 +19,9 @@
     "candidates": 0,
     "longCandidates": 0,
     "shortCandidates": 0,
-    "durationMs": 18956,
+    "durationMs": 19114,
     "newSignalsSent": 0,
-    "liveRadarUpdatesSent": 0,
+    "liveRadarUpdatesSent": 2,
     "trackedRecords": 416
   },
   "rankedCandidates": [],
@@ -29,7 +29,8 @@
   "filterStats": {
     "LONG": {
       "COIN_4H_TREND": 48,
-      "NO_VALID_SETUP": 19,
+      "NO_VALID_SETUP": 17,
+      "PRICE_MOVED_AWAY_FROM_TRIGGER": 2,
       "RSI_OVERBOUGHT": 4,
       "SUPPORT_BROKEN": 1,
       "BAD_RISK": 1
@@ -37,10 +38,9 @@
     "SHORT": {
       "RSI_OVERSOLD": 20,
       "COIN_4H_TREND": 27,
-      "NO_VALID_SETUP": 21,
-      "PRICE_CHASING": 3,
-      "FUNDING_CROWDED": 1,
-      "PRICE_MOVED_AWAY_FROM_TRIGGER": 1
+      "PRICE_MOVED_AWAY_FROM_TRIGGER": 16,
+      "NO_VALID_SETUP": 9,
+      "FUNDING_CROWDED": 1
     },
     "GLOBAL": {
       "INSUFFICIENT_CANDLES": 1
