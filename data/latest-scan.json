@@ -1,27 +1,27 @@
 {
-  "updatedAt": "2026-11-27T18:00:20.596Z",
+  "updatedAt": "2026-11-27T18:03:48.450Z",
   "strategyVersion": "gate-structural-ls-v7-forensic-pro",
   "marketRegime": "BEARISH",
   "btcIntel": {
     "regime": "BEARISH",
     "regimeFa": "نزولی (Bearish)",
     "rsi4h": 45.9,
-    "rsi15m": 39.1,
+    "rsi15m": 37.8,
     "adx4h": 15.9,
     "nextMoveForecast": "⚖️ روند کلی نزولی است اما شتاب ریزش کم شده و احتمال ورود به فاز نوسان خنثی (رِنج) وجود دارد."
   },
   "stats": {
     "active": 970,
-    "liquid": 74,
-    "scanned": 74,
-    "success": 74,
+    "liquid": 73,
+    "scanned": 73,
+    "success": 73,
     "failed": 0,
     "candidates": 0,
     "longCandidates": 0,
     "shortCandidates": 0,
-    "durationMs": 19110,
+    "durationMs": 19130,
     "newSignalsSent": 0,
-    "liveRadarUpdatesSent": 2,
+    "liveRadarUpdatesSent": 8,
     "trackedRecords": 416
   },
   "rankedCandidates": [],
@@ -40,21 +40,37 @@
         "firstTargetRR": 4,
         "squeezeBonus": 10
       }
+    },
+    {
+      "symbol": "FET_USDT",
+      "side": "LONG",
+      "score": 70,
+      "required": 84,
+      "scoreBreakdown": {
+        "trend": 25,
+        "setup": 18,
+        "trigger": 20,
+        "candleVolume": 3,
+        "liveFlow": 0,
+        "firstTargetRR": 4,
+        "squeezeBonus": 0
+      }
     }
   ],
   "filterStats": {
     "LONG": {
       "COIN_4H_TREND": 48,
-      "NO_VALID_SETUP": 18,
+      "NO_VALID_SETUP": 17,
       "RSI_OVERBOUGHT": 4,
-      "BAD_RISK": 2,
-      "SCORE_LOW": 1
+      "SCORE_LOW": 2,
+      "BAD_RISK": 1
     },
     "SHORT": {
-      "NO_VALID_SETUP": 33,
-      "COIN_4H_TREND": 27,
+      "NO_VALID_SETUP": 31,
+      "COIN_4H_TREND": 26,
       "RSI_OVERSOLD": 11,
-      "FUNDING_CROWDED": 2
+      "FUNDING_CROWDED": 2,
+      "PRICE_CHASING": 2
     },
     "GLOBAL": {
       "INSUFFICIENT_CANDLES": 1
