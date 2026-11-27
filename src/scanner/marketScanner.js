@@ -31,7 +31,7 @@ export const CONFIG = Object.freeze({
   MIN_INTRABAR_ELAPSED_SECONDS: 300,
   MIN_QUOTE_VOLUME_24H: 1500000,
   SCAN_LIMIT: 0,
-  TOP_COUNT: 1,
+  TOP_COUNT: 50,
   MIN_LONG_SCORE: 78,
   MIN_LONG_SCORE_NEUTRAL: 80,
   MIN_LONG_SCORE_BEARISH: 88,
@@ -721,20 +721,19 @@ export async function scanGateMarkets() {
 
   candidates.sort((a, b) => (b.score !== a.score ? b.score - a.score : b.quoteVolume24h - a.quoteVolume24h));
   candidates = candidates.map((c, i) => ({ ...c, rank: i + 1 }));
-  const sniperSelected = candidates.slice(0, CONFIG.TOP_COUNT);
 
   return {
     success: context.regime !== 'UNKNOWN' && (markets.length === 0 || failed < markets.length),
     exchange: 'GATE.IO', market: 'USDT PERPETUAL', strategyVersion: STRATEGY_VERSION, strategyConfig: CONFIG,
     marketRegime: context.regime, btcIntel: context.btcIntel, scannedAt: new Date().toISOString(),
-    candidates: sniperSelected, rankedCandidates: sniperSelected, filterStats: context.rejectStats,
+    candidates: candidates.slice(0, CONFIG.TOP_COUNT), rankedCandidates: candidates, filterStats: context.rejectStats,
     nearMisses: context.nearMisses.sort((a, b) => b.score - a.score).slice(0, 5),
     stats: {
       active: active.length, liquid: liquid.length, scanned: markets.length, success: markets.length - failed,
-      failed, candidates: sniperSelected.length,
-      longCandidates: sniperSelected.filter(c => c.side === 'LONG').length,
-      shortCandidates: sniperSelected.filter(c => c.side === 'SHORT').length,
+      failed, candidates: candidates.length,
+      longCandidates: candidates.filter(c => c.side === 'LONG').length,
+      shortCandidates: candidates.filter(c => c.side === 'SHORT').length,
       durationMs: Date.now() - started,
     },
   };
-}
+      }
