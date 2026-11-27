@@ -1,12 +1,12 @@
 {
-  "updatedAt": "2026-11-27T09:28:54.067Z",
+  "updatedAt": "2026-11-27T09:31:40.350Z",
   "strategyVersion": "gate-structural-ls-v6-realtime-ai",
   "marketRegime": "NEUTRAL",
   "btcIntel": {
     "regime": "NEUTRAL",
     "regimeFa": "خنثی / رِنج",
     "rsi4h": 59.5,
-    "rsi15m": 56.6,
+    "rsi15m": 56.2,
     "adx4h": 15.5,
     "nextMoveForecast": "🌱 بیت‌کوین در حال خروج از فاز خنثی و جمع کردن انرژی برای تبدیل شدن به روند صعودی است."
   },
@@ -16,13 +16,13 @@
     "scanned": 136,
     "success": 136,
     "failed": 0,
-    "candidates": 2,
-    "longCandidates": 1,
-    "shortCandidates": 1,
-    "durationMs": 34692,
-    "newSignalsSent": 0,
-    "liveRadarUpdatesSent": 0,
-    "trackedRecords": 282
+    "candidates": 4,
+    "longCandidates": 2,
+    "shortCandidates": 2,
+    "durationMs": 35143,
+    "newSignalsSent": 2,
+    "liveRadarUpdatesSent": 3,
+    "trackedRecords": 284
   },
   "rankedCandidates": [
     {
@@ -30,28 +30,28 @@
       "contract": "BZ_USDT",
       "side": "LONG",
       "setup": "LiquiditySweep",
-      "isIntrabar": true,
-      "intrabarProgressPct": 89,
+      "isIntrabar": false,
+      "intrabarProgressPct": 100,
       "strategyVersion": "gate-structural-ls-v6-realtime-ai",
       "status": "LONG_ENTRY",
       "statusLabel": "LONG LiquiditySweep",
-      "price": 92.56,
-      "entryLow": 92.47686950127967,
-      "entryHigh": 92.60849279092021,
-      "referenceEntry": 92.56,
+      "price": 92.55,
+      "entryLow": 92.46686950127925,
+      "entryHigh": 92.59849279092043,
+      "referenceEntry": 92.55,
       "entry": {
-        "low": 92.47686950127967,
-        "high": 92.60849279092021,
-        "price": 92.56
+        "low": 92.46686950127925,
+        "high": 92.59849279092043,
+        "price": 92.55
       },
-      "stopLoss": 91.97144916879942,
-      "stopLossPct": -0.64,
+      "stopLoss": 91.97144916879874,
+      "stopLossPct": -0.63,
       "tp1": 93.87,
       "tp2": 94.51,
       "tp3": 97.71,
-      "tp1Pct": 1.42,
-      "tp2Pct": 2.11,
-      "tp3Pct": 5.56,
+      "tp1Pct": 1.43,
+      "tp2Pct": 2.12,
+      "tp3Pct": 5.58,
       "takeProfits": [
         {
           "level": 1,
@@ -63,8 +63,8 @@
             "4h"
           ],
           "touches": 1,
-          "pct": 1.42,
-          "rrNet": 1.51
+          "pct": 1.43,
+          "rrNet": 1.55
         },
         {
           "level": 2,
@@ -76,8 +76,8 @@
             "4h"
           ],
           "touches": 1,
-          "pct": 2.11,
-          "rrNet": 2.36
+          "pct": 2.12,
+          "rrNet": 2.41
         },
         {
           "level": 3,
@@ -89,36 +89,36 @@
             "4h"
           ],
           "touches": 1,
-          "pct": 5.56,
-          "rrNet": 6.6
+          "pct": 5.58,
+          "rrNet": 6.7
         }
       ],
       "targetCount": 3,
-      "riskRewardToTp1": 1.51,
-      "riskRewardToTp2": 2.36,
-      "rr": 2.36,
-      "rsi15": 52.5,
+      "riskRewardToTp1": 1.55,
+      "riskRewardToTp2": 2.41,
+      "rr": 2.41,
+      "rsi15": 51.6,
       "rsi4h": 69.2,
       "adx4h": 25,
-      "volumeRatio15m": 1.6,
+      "volumeRatio15m": 1.43,
       "fundingRate": 0,
       "isSqueezeFuel": false,
-      "change24h": 2.79,
-      "quoteVolume24h": 6048118,
+      "change24h": 2.91,
+      "quoteVolume24h": 6053066,
       "triggerCandleTime": "2026-11-27T09:15:00.000Z",
-      "analyzedAt": "2026-11-27T09:28:19.459Z",
+      "analyzedAt": "2026-11-27T09:31:04.167Z",
       "validUntil": "2026-11-27T10:00:00.000Z",
       "riskNote": null,
       "reasons": [
         "شکار استاپ‌ها در کف ماژور و ورود پول هوشمند",
-        "⚡ شکار زنده در کندل جاری ۱۵ دقیقه + جمع‌آوری نقدینگی (Stop Hunt)",
-        "شتاب حجم 1.6 برابر میانگین"
+        "جمع‌آوری نقدینگی (Stop Hunt) + شدو برگشتی قوی صعودی",
+        "شتاب حجم 1.4 برابر میانگین"
       ],
       "historyBehavior": {
         "resiliencePct": 72,
         "beta": 0.4,
-        "independentScore": 8,
-        "recentRelStrength": 1.27,
+        "independentScore": 10,
+        "recentRelStrength": 1.41,
         "whenBtcBullish": "هم‌سو و پایدار با رشد BTC (ضریب 0.4)",
         "whenBtcBearish": "مقاوم و ضدریزش (در 72٪ ریزش‌های گذشته BTC حمایت خود را حفظ کرده)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
@@ -127,7 +127,7 @@
         "regime": "NEUTRAL",
         "regimeFa": "خنثی / رِنج",
         "rsi4h": 59.5,
-        "rsi15m": 56.6,
+        "rsi15m": 56.2,
         "adx4h": 15.5,
         "nextMoveForecast": "🌱 بیت‌کوین در حال خروج از فاز خنثی و جمع کردن انرژی برای تبدیل شدن به روند صعودی است."
       },
@@ -158,7 +158,7 @@
         "buySharePct": null,
         "sellSharePct": null,
         "netDelta": 0,
-        "windowEnd": "2026-11-27T09:28:00.000Z"
+        "windowEnd": "2026-11-27T09:31:00.000Z"
       },
       "volume": {
         "recent3m": {
@@ -171,7 +171,7 @@
           "buySharePct": null,
           "sellSharePct": null,
           "netDelta": 0,
-          "windowEnd": "2026-11-27T09:28:00.000Z"
+          "windowEnd": "2026-11-27T09:31:00.000Z"
         }
       },
       "dataQuality": {
@@ -181,109 +181,109 @@
       "liveInsight": {
         "confidencePct": 90,
         "manipulationStatus": "✅ کلک بازارگردان (Stop Hunt) انجام شده؛ استاپ‌های خرد جمع‌آوری شده و قیمت به داخل ساختار برگشته است.",
-        "movePhase": "⚡ [شکار لحظه‌ای در کندل جاری - دقیقه 13 از ۱۵] 🔋 در حال جمع کردن انرژی در کف/سقف برای پرتاب حرکت اصلی",
+        "movePhase": "🔒 [تأییدشده با کلوز کندل ۱۵ دقیقه] 🔋 در حال جمع کردن انرژی در کف/سقف برای پرتاب حرکت اصلی",
         "entryInstruction": "🎯 دستور ورود: سفارش خود را در محدوده ورود قرار دهید و حد ضرر را دقیق تنظیم کنید.",
-        "targetProjection": "🔥 ظرفیت بالای ادامه حرکت: به دلیل قدرت روند و تله فاندینگ، در صورت شکست TP2 پتانسیل حرکت فراتر از TP3 وجود دارد."
+        "targetProjection": "📊 مسیر تا اهداف اول و دوم باز است؛ سیو سود پله‌ای در هر تارگت توصیه می‌شود."
       },
       "lastCheckedPrice": 92.56,
-      "priceCheckedAt": "2026-11-27T09:28:53.021Z",
+      "priceCheckedAt": "2026-11-27T09:31:38.510Z",
       "rank": 1
     },
     {
-      "symbol": "NG_USDT",
-      "contract": "NG_USDT",
+      "symbol": "AMD_USDT",
+      "contract": "AMD_USDT",
       "side": "SHORT",
-      "setup": "Pullback",
+      "setup": "LiquiditySweep",
       "isIntrabar": false,
       "intrabarProgressPct": 100,
       "strategyVersion": "gate-structural-ls-v6-realtime-ai",
       "status": "SHORT_ENTRY",
-      "statusLabel": "SHORT Pullback",
-      "price": 3.588,
-      "entryLow": 3.586166270132859,
-      "entryHigh": 3.5932392281918313,
-      "referenceEntry": 3.588,
+      "statusLabel": "SHORT LiquiditySweep",
+      "price": 434.23,
+      "entryLow": 433.7828935635363,
+      "entryHigh": 434.996468176795,
+      "referenceEntry": 434.23,
       "entry": {
-        "low": 3.586166270132859,
-        "high": 3.5932392281918313,
-        "price": 3.588
+        "low": 433.7828935635363,
+        "high": 434.996468176795,
+        "price": 434.23
       },
-      "stopLoss": 3.606239228191831,
-      "stopLossPct": -0.51,
-      "tp1": 3.534,
-      "tp2": 3.486,
-      "tp3": 3.455,
-      "tp1Pct": 1.51,
-      "tp2Pct": 2.84,
-      "tp3Pct": 3.71,
+      "stopLoss": 437.637446961325,
+      "stopLossPct": -0.78,
+      "tp1": 419.6,
+      "tp2": 410.09,
+      "tp3": 406.7,
+      "tp1Pct": 3.37,
+      "tp2Pct": 5.56,
+      "tp3Pct": 6.34,
       "takeProfits": [
         {
           "level": 1,
-          "price": 3.534,
-          "zoneLow": 3.526,
-          "zoneHigh": 3.534,
-          "source": "MAJOR_PIVOT_SUPPORT",
-          "timeframes": [
-            "4h"
-          ],
-          "touches": 2,
-          "pct": 1.51,
-          "rrNet": 1.93
-        },
-        {
-          "level": 2,
-          "price": 3.486,
-          "zoneLow": 3.486,
-          "zoneHigh": 3.486,
+          "price": 419.6,
+          "zoneLow": 419.6,
+          "zoneHigh": 419.6,
           "source": "MAJOR_PIVOT_SUPPORT",
           "timeframes": [
             "4h"
           ],
           "touches": 1,
-          "pct": 2.84,
-          "rrNet": 3.87
+          "pct": 3.37,
+          "rrNet": 3.31
+        },
+        {
+          "level": 2,
+          "price": 410.09,
+          "zoneLow": 408.52,
+          "zoneHigh": 410.09,
+          "source": "MAJOR_PIVOT_SUPPORT",
+          "timeframes": [
+            "15m"
+          ],
+          "touches": 2,
+          "pct": 5.56,
+          "rrNet": 5.58
         },
         {
           "level": 3,
-          "price": 3.455,
-          "zoneLow": 3.446,
-          "zoneHigh": 3.455,
+          "price": 406.7,
+          "zoneLow": 406.41,
+          "zoneHigh": 406.7,
           "source": "MAJOR_PIVOT_SUPPORT",
           "timeframes": [
-            "4h"
+            "15m"
           ],
-          "touches": 2,
-          "pct": 3.71,
-          "rrNet": 5.13
+          "touches": 3,
+          "pct": 6.34,
+          "rrNet": 6.39
         }
       ],
       "targetCount": 3,
-      "riskRewardToTp1": 1.93,
-      "riskRewardToTp2": 3.87,
-      "rr": 3.87,
-      "rsi15": 44.2,
-      "rsi4h": 44.3,
-      "adx4h": 16.7,
-      "volumeRatio15m": 1.43,
+      "riskRewardToTp1": 3.31,
+      "riskRewardToTp2": 5.58,
+      "rr": 5.58,
+      "rsi15": 67.8,
+      "rsi4h": 50.4,
+      "adx4h": 30.3,
+      "volumeRatio15m": 1.03,
       "fundingRate": 0,
       "isSqueezeFuel": false,
-      "change24h": -1.29,
-      "quoteVolume24h": 2240747,
-      "triggerCandleTime": "2026-11-27T09:00:00.000Z",
-      "analyzedAt": "2026-11-27T09:28:19.459Z",
-      "validUntil": "2026-11-27T09:45:00.000Z",
+      "change24h": 6.05,
+      "quoteVolume24h": 2301610,
+      "triggerCandleTime": "2026-11-27T09:15:00.000Z",
+      "analyzedAt": "2026-11-27T09:31:04.167Z",
+      "validUntil": "2026-11-27T10:00:00.000Z",
       "riskNote": null,
       "reasons": [
-        "پولبک هوشمند به مقاومت بزرگ",
-        "کندل پوشای نزولی + چرخش نزولی RSI",
-        "شتاب حجم 1.4 برابر میانگین"
+        "شکار استاپ‌ها در سقف ماژور و توزیع نهنگ‌ها",
+        "جمع‌آوری نقدینگی (Stop Hunt) + شدو برگشتی قوی نزولی",
+        "هم‌جهت با ساختار ۴ ساعته نزولی"
       ],
       "historyBehavior": {
-        "resiliencePct": 19,
-        "beta": 0.4,
-        "independentScore": 17,
-        "recentRelStrength": -2.78,
-        "whenBtcBullish": "هم‌سو و پایدار با رشد BTC (ضریب 0.4)",
+        "resiliencePct": 46,
+        "beta": 1.52,
+        "independentScore": 20,
+        "recentRelStrength": 4.56,
+        "whenBtcBullish": "شتاب‌گیرنده قوی (اهرم 1.52 برابر نسبت به صعود BTC)",
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
@@ -291,17 +291,346 @@
         "regime": "NEUTRAL",
         "regimeFa": "خنثی / رِنج",
         "rsi4h": 59.5,
-        "rsi15m": 56.6,
+        "rsi15m": 56.2,
         "adx4h": 15.5,
         "nextMoveForecast": "🌱 بیت‌کوین در حال خروج از فاز خنثی و جمع کردن انرژی برای تبدیل شدن به روند صعودی است."
       },
-      "score": 74,
-      "rankScore": 74,
+      "score": 92,
+      "rankScore": 92,
+      "scoreBreakdown": {
+        "trend": 30,
+        "setup": 28,
+        "trigger": 25,
+        "candleVolume": 3,
+        "liveFlow": 0,
+        "firstTargetRR": 6,
+        "squeezeBonus": 0
+      },
+      "costAssumptions": {
+        "feeRatePerSide": 0.0006,
+        "slippageRatePerSide": 0.0003,
+        "fundingIncludedInRR": false
+      },
+      "grade": "A+",
+      "recent3m": {
+        "available": true,
+        "sampleComplete": true,
+        "sampleTruncated": false,
+        "tradesObserved": 0,
+        "buyNotional": 0,
+        "sellNotional": 0,
+        "buySharePct": null,
+        "sellSharePct": null,
+        "netDelta": 0,
+        "windowEnd": "2026-11-27T09:31:00.000Z"
+      },
+      "volume": {
+        "recent3m": {
+          "available": true,
+          "sampleComplete": true,
+          "sampleTruncated": false,
+          "tradesObserved": 0,
+          "buyNotional": 0,
+          "sellNotional": 0,
+          "buySharePct": null,
+          "sellSharePct": null,
+          "netDelta": 0,
+          "windowEnd": "2026-11-27T09:31:00.000Z"
+        }
+      },
+      "dataQuality": {
+        "recent3mComplete": true
+      },
+      "tradesObserved": 0,
+      "liveInsight": {
+        "confidencePct": 87,
+        "manipulationStatus": "✅ کلک بازارگردان (Stop Hunt) انجام شده؛ استاپ‌های خرد جمع‌آوری شده و قیمت به داخل ساختار برگشته است.",
+        "movePhase": "🔒 [تأییدشده با کلوز کندل ۱۵ دقیقه] 🔋 در حال جمع کردن انرژی در کف/سقف برای پرتاب حرکت اصلی",
+        "entryInstruction": "🎯 دستور ورود: سفارش خود را در محدوده ورود قرار دهید و حد ضرر را دقیق تنظیم کنید.",
+        "targetProjection": "📊 مسیر تا اهداف اول و دوم باز است؛ سیو سود پله‌ای در هر تارگت توصیه می‌شود."
+      },
+      "lastCheckedPrice": 434.3,
+      "priceCheckedAt": "2026-11-27T09:31:38.510Z",
+      "rank": 2
+    },
+    {
+      "symbol": "ORCL_USDT",
+      "contract": "ORCL_USDT",
+      "side": "SHORT",
+      "setup": "LiquiditySweep",
+      "isIntrabar": false,
+      "intrabarProgressPct": 100,
+      "strategyVersion": "gate-structural-ls-v6-realtime-ai",
+      "status": "SHORT_ENTRY",
+      "statusLabel": "SHORT LiquiditySweep",
+      "price": 109.65,
+      "entryLow": 109.59970729312451,
+      "entryHigh": 109.73621606892942,
+      "referenceEntry": 109.65,
+      "entry": {
+        "low": 109.59970729312451,
+        "high": 109.73621606892942,
+        "price": 109.65
+      },
+      "stopLoss": 109.93369344821569,
+      "stopLossPct": -0.26,
+      "tp1": 108.63,
+      "tp2": 105.84,
+      "tp3": 103.71,
+      "tp1Pct": 0.93,
+      "tp2Pct": 3.47,
+      "tp3Pct": 5.42,
+      "takeProfits": [
+        {
+          "level": 1,
+          "price": 108.63,
+          "zoneLow": 108.5,
+          "zoneHigh": 108.63,
+          "source": "MAJOR_PIVOT_SUPPORT",
+          "timeframes": [
+            "15m"
+          ],
+          "touches": 2,
+          "pct": 0.93,
+          "rrNet": 1.71
+        },
+        {
+          "level": 2,
+          "price": 105.84,
+          "zoneLow": 105.84,
+          "zoneHigh": 105.84,
+          "source": "MAJOR_PIVOT_SUPPORT",
+          "timeframes": [
+            "15m"
+          ],
+          "touches": 1,
+          "pct": 3.47,
+          "rrNet": 7.51
+        },
+        {
+          "level": 3,
+          "price": 103.71,
+          "zoneLow": 103.58,
+          "zoneHigh": 103.71,
+          "source": "MAJOR_PIVOT_SUPPORT",
+          "timeframes": [
+            "4h",
+            "15m"
+          ],
+          "touches": 2,
+          "pct": 5.42,
+          "rrNet": 11.94
+        }
+      ],
+      "targetCount": 3,
+      "riskRewardToTp1": 1.71,
+      "riskRewardToTp2": 7.51,
+      "rr": 7.51,
+      "rsi15": 67.7,
+      "rsi4h": 55,
+      "adx4h": 22,
+      "volumeRatio15m": 1.26,
+      "fundingRate": 0.0000154,
+      "isSqueezeFuel": false,
+      "change24h": 3.71,
+      "quoteVolume24h": 1730690,
+      "triggerCandleTime": "2026-11-27T09:15:00.000Z",
+      "analyzedAt": "2026-11-27T09:31:04.167Z",
+      "validUntil": "2026-11-27T10:00:00.000Z",
+      "riskNote": null,
+      "reasons": [
+        "شکار استاپ‌ها در سقف ماژور و توزیع نهنگ‌ها",
+        "جمع‌آوری نقدینگی (Stop Hunt) + شدو برگشتی قوی نزولی",
+        "شتاب حجم 1.3 برابر میانگین"
+      ],
+      "historyBehavior": {
+        "resiliencePct": 43,
+        "beta": 1.06,
+        "independentScore": 10,
+        "recentRelStrength": 2.18,
+        "whenBtcBullish": "هم‌سو و پایدار با رشد BTC (ضریب 1.06)",
+        "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
+        "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
+      },
+      "btcIntel": {
+        "regime": "NEUTRAL",
+        "regimeFa": "خنثی / رِنج",
+        "rsi4h": 59.5,
+        "rsi15m": 56.2,
+        "adx4h": 15.5,
+        "nextMoveForecast": "🌱 بیت‌کوین در حال خروج از فاز خنثی و جمع کردن انرژی برای تبدیل شدن به روند صعودی است."
+      },
+      "score": 82,
+      "rankScore": 82,
       "scoreBreakdown": {
         "trend": 22,
-        "setup": 18,
+        "setup": 28,
         "trigger": 20,
         "candleVolume": 8,
+        "liveFlow": 0,
+        "firstTargetRR": 4,
+        "squeezeBonus": 0
+      },
+      "costAssumptions": {
+        "feeRatePerSide": 0.0006,
+        "slippageRatePerSide": 0.0003,
+        "fundingIncludedInRR": false
+      },
+      "grade": "A+",
+      "recent3m": {
+        "available": true,
+        "sampleComplete": true,
+        "sampleTruncated": false,
+        "tradesObserved": 0,
+        "buyNotional": 0,
+        "sellNotional": 0,
+        "buySharePct": null,
+        "sellSharePct": null,
+        "netDelta": 0,
+        "windowEnd": "2026-11-27T09:31:00.000Z"
+      },
+      "volume": {
+        "recent3m": {
+          "available": true,
+          "sampleComplete": true,
+          "sampleTruncated": false,
+          "tradesObserved": 0,
+          "buyNotional": 0,
+          "sellNotional": 0,
+          "buySharePct": null,
+          "sellSharePct": null,
+          "netDelta": 0,
+          "windowEnd": "2026-11-27T09:31:00.000Z"
+        }
+      },
+      "dataQuality": {
+        "recent3mComplete": true
+      },
+      "tradesObserved": 0,
+      "liveInsight": {
+        "confidencePct": 78,
+        "manipulationStatus": "✅ کلک بازارگردان (Stop Hunt) انجام شده؛ استاپ‌های خرد جمع‌آوری شده و قیمت به داخل ساختار برگشته است.",
+        "movePhase": "🔒 [تأییدشده با کلوز کندل ۱۵ دقیقه] 🔋 در حال جمع کردن انرژی در کف/سقف برای پرتاب حرکت اصلی",
+        "entryInstruction": "🎯 دستور ورود: سفارش خود را در محدوده ورود قرار دهید و حد ضرر را دقیق تنظیم کنید.",
+        "targetProjection": "📊 مسیر تا اهداف اول و دوم باز است؛ سیو سود پله‌ای در هر تارگت توصیه می‌شود."
+      },
+      "lastCheckedPrice": 109.65,
+      "priceCheckedAt": "2026-11-27T09:31:38.510Z",
+      "rank": 3
+    },
+    {
+      "symbol": "CL_USDT",
+      "contract": "CL_USDT",
+      "side": "LONG",
+      "setup": "Pullback",
+      "isIntrabar": false,
+      "intrabarProgressPct": 100,
+      "strategyVersion": "gate-structural-ls-v6-realtime-ai",
+      "status": "LONG_ENTRY",
+      "statusLabel": "LONG Pullback",
+      "price": 86.08,
+      "entryLow": 86.0015028599372,
+      "entryHigh": 86.12578999836997,
+      "referenceEntry": 86.08,
+      "entry": {
+        "low": 86.0015028599372,
+        "high": 86.12578999836997,
+        "price": 86.08
+      },
+      "stopLoss": 85.49917143322867,
+      "stopLossPct": -0.67,
+      "tp1": 87.72,
+      "tp2": 88.13,
+      "tp3": 91.58,
+      "tp1Pct": 1.91,
+      "tp2Pct": 2.38,
+      "tp3Pct": 6.39,
+      "takeProfits": [
+        {
+          "level": 1,
+          "price": 87.72,
+          "zoneLow": 87.72,
+          "zoneHigh": 87.72,
+          "source": "MAJOR_PIVOT_RESISTANCE",
+          "timeframes": [
+            "4h"
+          ],
+          "touches": 1,
+          "pct": 1.91,
+          "rrNet": 2.02
+        },
+        {
+          "level": 2,
+          "price": 88.13,
+          "zoneLow": 88.13,
+          "zoneHigh": 88.24,
+          "source": "MAJOR_PIVOT_RESISTANCE",
+          "timeframes": [
+            "4h"
+          ],
+          "touches": 2,
+          "pct": 2.38,
+          "rrNet": 2.57
+        },
+        {
+          "level": 3,
+          "price": 91.58,
+          "zoneLow": 91.58,
+          "zoneHigh": 91.58,
+          "source": "MAJOR_PIVOT_RESISTANCE",
+          "timeframes": [
+            "4h"
+          ],
+          "touches": 1,
+          "pct": 6.39,
+          "rrNet": 7.26
+        }
+      ],
+      "targetCount": 3,
+      "riskRewardToTp1": 2.02,
+      "riskRewardToTp2": 2.57,
+      "rr": 2.57,
+      "rsi15": 52.8,
+      "rsi4h": 69.6,
+      "adx4h": 23.9,
+      "volumeRatio15m": 0.96,
+      "fundingRate": 0,
+      "isSqueezeFuel": false,
+      "change24h": 3.28,
+      "quoteVolume24h": 9802334,
+      "triggerCandleTime": "2026-11-27T09:15:00.000Z",
+      "analyzedAt": "2026-11-27T09:31:04.167Z",
+      "validUntil": "2026-11-27T10:00:00.000Z",
+      "riskNote": null,
+      "reasons": [
+        "پولبک هوشمند به حمایت بزرگ",
+        "کندل پوشای صعودی + چرخش صعودی RSI",
+        "هم‌جهت با ساختار ۴ ساعته صعودی"
+      ],
+      "historyBehavior": {
+        "resiliencePct": 67,
+        "beta": 0.4,
+        "independentScore": 13,
+        "recentRelStrength": 1.71,
+        "whenBtcBullish": "هم‌سو و پایدار با رشد BTC (ضریب 0.4)",
+        "whenBtcBearish": "مقاوم و ضدریزش (در 67٪ ریزش‌های گذشته BTC حمایت خود را حفظ کرده)",
+        "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
+      },
+      "btcIntel": {
+        "regime": "NEUTRAL",
+        "regimeFa": "خنثی / رِنج",
+        "rsi4h": 59.5,
+        "rsi15m": 56.2,
+        "adx4h": 15.5,
+        "nextMoveForecast": "🌱 بیت‌کوین در حال خروج از فاز خنثی و جمع کردن انرژی برای تبدیل شدن به روند صعودی است."
+      },
+      "score": 81,
+      "rankScore": 81,
+      "scoreBreakdown": {
+        "trend": 30,
+        "setup": 22,
+        "trigger": 20,
+        "candleVolume": 3,
         "liveFlow": 0,
         "firstTargetRR": 6,
         "squeezeBonus": 0
@@ -322,7 +651,7 @@
         "buySharePct": null,
         "sellSharePct": null,
         "netDelta": 0,
-        "windowEnd": "2026-11-27T09:28:00.000Z"
+        "windowEnd": "2026-11-27T09:31:00.000Z"
       },
       "volume": {
         "recent3m": {
@@ -335,7 +664,7 @@
           "buySharePct": null,
           "sellSharePct": null,
           "netDelta": 0,
-          "windowEnd": "2026-11-27T09:28:00.000Z"
+          "windowEnd": "2026-11-27T09:31:00.000Z"
         }
       },
       "dataQuality": {
@@ -343,27 +672,27 @@
       },
       "tradesObserved": 0,
       "liveInsight": {
-        "confidencePct": 70,
+        "confidencePct": 77,
         "manipulationStatus": "🔍 در فاز اصلاح طبیعی (Pullback)؛ احتمال نوسان و شدوهای فریبنده در محدوده ورود وجود دارد.",
         "movePhase": "🔒 [تأییدشده با کلوز کندل ۱۵ دقیقه] ⏳ در حال ساختن کف/سقف محلی و جذب سفارشات",
         "entryInstruction": "🎯 دستور ورود: سفارش خود را در محدوده ورود قرار دهید و حد ضرر را دقیق تنظیم کنید.",
         "targetProjection": "📊 مسیر تا اهداف اول و دوم باز است؛ سیو سود پله‌ای در هر تارگت توصیه می‌شود."
       },
-      "lastCheckedPrice": 3.588,
-      "priceCheckedAt": "2026-11-27T09:28:53.021Z",
-      "rank": 2
+      "lastCheckedPrice": 86.08,
+      "priceCheckedAt": "2026-11-27T09:31:38.510Z",
+      "rank": 4
     }
   ],
   "nearMisses": [
     {
-      "symbol": "TRX_USDT",
+      "symbol": "BTC_USDT",
       "side": "LONG",
-      "score": 56,
+      "score": 59,
       "required": 70,
       "scoreBreakdown": {
         "trend": 17,
         "setup": 18,
-        "trigger": 12,
+        "trigger": 15,
         "candleVolume": 3,
         "liveFlow": 0,
         "firstTargetRR": 6,
@@ -371,39 +700,86 @@
       }
     },
     {
-      "symbol": "APT_USDT",
-      "side": "LONG",
-      "score": 56,
+      "symbol": "SAMSUNG_USDT",
+      "side": "SHORT",
+      "score": 57,
       "required": 70,
       "scoreBreakdown": {
-        "trend": 25,
+        "trend": 22,
         "setup": 18,
         "trigger": 8,
         "candleVolume": 3,
         "liveFlow": 0,
+        "firstTargetRR": 6,
+        "squeezeBonus": 0
+      }
+    },
+    {
+      "symbol": "JCT_USDT",
+      "side": "SHORT",
+      "score": 56,
+      "required": 70,
+      "scoreBreakdown": {
+        "trend": 22,
+        "setup": 18,
+        "trigger": 7,
+        "candleVolume": 3,
+        "liveFlow": 0,
+        "firstTargetRR": 6,
+        "squeezeBonus": 0
+      }
+    },
+    {
+      "symbol": "TAO_USDT",
+      "side": "LONG",
+      "score": 52,
+      "required": 70,
+      "scoreBreakdown": {
+        "trend": 17,
+        "setup": 18,
+        "trigger": 12,
+        "candleVolume": 3,
+        "liveFlow": 0,
         "firstTargetRR": 2,
+        "squeezeBonus": 0
+      }
+    },
+    {
+      "symbol": "ETH_USDT",
+      "side": "LONG",
+      "score": 51,
+      "required": 70,
+      "scoreBreakdown": {
+        "trend": 17,
+        "setup": 18,
+        "trigger": 7,
+        "candleVolume": 3,
+        "liveFlow": 0,
+        "firstTargetRR": 6,
         "squeezeBonus": 0
       }
     }
   ],
   "filterStats": {
     "LONG": {
-      "NO_VALID_SETUP": 44,
       "COIN_4H_TREND": 52,
-      "RSI_OVERBOUGHT": 24,
+      "RSI_OVERBOUGHT": 17,
+      "SCORE_LOW": 3,
+      "NO_VALID_SETUP": 50,
+      "PRICE_CHASING": 6,
       "NO_15M_TRIGGER": 2,
-      "PRICE_CHASING": 8,
-      "PRICE_MOVED_AWAY_FROM_TRIGGER": 3,
-      "SCORE_LOW": 2
+      "BAD_RISK": 1,
+      "PRICE_MOVED_AWAY_FROM_TRIGGER": 1,
+      "PRICE_LEFT_ENTRY_ZONE": 1
     },
     "SHORT": {
       "COIN_4H_TREND": 100,
-      "NO_VALID_SETUP": 22,
-      "PRICE_CHASING": 3,
+      "NO_VALID_SETUP": 24,
       "RSI_OVERSOLD": 3,
-      "PRICE_MOVED_AWAY_FROM_TRIGGER": 3,
-      "NO_15M_TRIGGER": 2,
-      "RESISTANCE_BROKEN": 1
+      "FUNDING_CROWDED": 1,
+      "RESISTANCE_BROKEN": 1,
+      "SCORE_LOW": 2,
+      "PRICE_CHASING": 2
     },
     "GLOBAL": {
       "INSUFFICIENT_CANDLES": 1
