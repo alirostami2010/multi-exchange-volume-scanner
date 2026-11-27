@@ -1,4 +1,6 @@
 import 'dotenv/config';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 
 import {
   scanGateMarkets,
@@ -33,6 +35,7 @@ import {
 } from './tracking/symbolStats.js';
 
 const FINAL_STATUSES = ['CLOSED', 'AMBIGUOUS', 'EXPIRED_NO_ENTRY'];
+const DASHBOARD_FILE = path.resolve(process.cwd(), 'data', 'latest-scan.json');
 
 function needsResultNotification(signal) {
   return (
@@ -42,7 +45,6 @@ function needsResultNotification(signal) {
   );
 }
 
-// ساخت کپسول فشرده و ۳ ثانیه‌ای از تمام تحلیل‌های هوش مصنوعی، بیت‌کوین و رفتار تاریخی
 function buildCompactAiCapsule(candidate) {
   const ai = candidate.liveInsight;
   const hb = candidate.historyBehavior;
@@ -76,7 +78,6 @@ function buildCompactAiCapsule(candidate) {
   return lines.join('\n');
 }
 
-// ارسال تمام آپدیت‌های لحظه‌ای رادار با ریپلای مستقیم روی پیام سیگنال اصلی
 async function notifyLiveRadarUpdates(state) {
   if (!telegramConfigured()) return 0;
 
@@ -93,6 +94,12 @@ async function notifyLiveRadarUpdates(state) {
         const delivery = await sendTelegram(alert.text, replyId);
         if (delivery.sent) {
           liveSent++;
+          signal.alertHistory ??= [];
+          signal.alertHistory.push({
+            key: alert.key,
+            text: alert.text,
+            time: new Date().toISOString(),
+          });
         } else {
           remainingAlerts.push(alert);
         }
@@ -109,14 +116,12 @@ async function notifyLiveRadarUpdates(state) {
   return liveSent;
 }
 
-// ارسال نتیجه نهایی با ریپلای مستقیم روی پیام سیگنال اصلی
 async function notifyResults(state) {
   if (!telegramConfigured()) return;
 
   for (const signal of Object.values(state.signals)) {
     if (!needsResultNotification(signal)) continue;
 
-    // اگر سیگنالی اصلاً وارد محدوده ورود نشده و منقضی شده، کانال را شلوغ نکن
     if (signal.status === 'EXPIRED_NO_ENTRY') {
       signal.resultNotified = true;
       signal.resultNotifiedAt = new Date().toISOString();
@@ -178,6 +183,31 @@ function candidateIsFresh(candidate) {
   );
 }
 
+// ذخیره اطلاعات کامل رادار و اسکن برای نمایش در داشبورد وب رایگان
+async function saveDashboardData(output, state, sentCount, liveRadarSent) {
+  try {
+    await fs.mkdir(path.dirname(DASHBOARD_FILE), { recursive: true });
+    const payload = {
+      updatedAt: new Date().toISOString(),
+      strategyVersion: STRATEGY_VERSION,
+      marketRegime: output.marketRegime,
+      btcIntel: output.btcIntel ?? null,
+      stats: {
+        ...output.stats,
+        newSignalsSent: sentCount,
+        liveRadarUpdatesSent: liveRadarSent,
+        trackedRecords: Object.keys(state.signals).length,
+      },
+      rankedCandidates: output.rankedCandidates ?? [],
+      nearMisses: output.nearMisses ?? [],
+      filterStats: output.filterStats ?? {},
+    };
+    await fs.writeFile(DASHBOARD_FILE, JSON.stringify(payload, null, 2), 'utf8');
+  } catch (error) {
+    console.error('[DASHBOARD JSON]', error.message);
+  }
+}
+
 async function main() {
   const state = await loadSignalState();
 
@@ -209,7 +239,6 @@ async function main() {
   if (!telegramConfigured()) {
     console.warn('[TELEGRAM] Missing credentials; no issued signals registered.');
   } else if (output.success) {
-    // بدون هیچ محدودیتی (حذف TOP_COUNT)، تمام سیگنال‌های تاییدشده ارسال می‌شوند
     for (const candidate of output.rankedCandidates) {
       if (!canRegister(state, candidate, strategy)) continue;
       if (!candidateIsFresh(candidate)) continue;
@@ -217,6 +246,14 @@ async function main() {
       const history = symbolHistoryLine(symbolStats(state, candidate.symbol));
       const aiCapsule = buildCompactAiCapsule(candidate);
       const signal = createSignal(candidate, strategy, CONFIG);
+
+      // ذخیره اطلاعات هوش مصنوعی داخل سیگنال برای نمایش در داشبورد وب
+      signal.liveInsight = candidate.liveInsight ?? null;
+      signal.btcIntel = candidate.btcIntel ?? null;
+      signal.reasons = candidate.reasons ?? [];
+      signal.grade = candidate.grade ?? 'A';
+      signal.isIntrabar = candidate.isIntrabar ?? false;
+
       state.signals[signal.id] = signal;
       await saveSignalState(state);
 
@@ -250,6 +287,7 @@ async function main() {
   }
 
   await saveSignalState(state);
+  await saveDashboardData(output, state, sentCount, liveRadarSent);
 
   console.log(
     '[SCANNER RESULT]',
