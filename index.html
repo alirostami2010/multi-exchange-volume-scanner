@@ -3,74 +3,111 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>رادار هوشمند شکارچی بازار | AI Crypto Scanner</title>
+  <title>ترمینال هوشمند شکارچی بازار | Gate.io AI Radar</title>
   <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;600;700;800&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --bg: #07090e;
-      --card: rgba(17, 22, 34, 0.85);
+      --bg: #06080d;
+      --card: rgba(15, 20, 32, 0.92);
+      --row-hover: rgba(30, 41, 59, 0.75);
       --border: rgba(255, 255, 255, 0.08);
       --text: #f1f5f9;
       --muted: #94a3b8;
       --long: #10b981;
-      --long-bg: rgba(16, 185, 129, 0.12);
+      --long-bg: rgba(16, 185, 129, 0.13);
       --short: #f43f5e;
-      --short-bg: rgba(244, 63, 94, 0.12);
+      --short-bg: rgba(244, 63, 94, 0.13);
       --accent: #6366f1;
       --warn: #f59e0b;
+      --warn-bg: rgba(245, 158, 11, 0.14);
     }
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Vazirmatn', sans-serif; }
-    body { background: radial-gradient(circle at top right, #111827, var(--bg) 60%); color: var(--text); min-height: 100vh; padding: 16px; }
-    .container { max-width: 1380px; margin: 0 auto; }
-    .header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 16px; background: var(--card); border: 1px solid var(--border); padding: 18px 24px; border-radius: 18px; backdrop-filter: blur(12px); margin-bottom: 18px; }
-    .brand { display: flex; align-items: center; gap: 12px; }
-    .pulse { width: 12px; height: 12px; background: var(--long); border-radius: 50%; box-shadow: 0 0 12px var(--long); animation: blink 1.8s infinite; }
-    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
-    .brand h1 { font-size: 1.25rem; font-weight: 800; background: linear-gradient(90deg, #fff, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-    .meta-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 0.85rem; color: var(--muted); }
-    .btn { background: rgba(99, 102, 241, 0.15); color: #a5b4fc; border: 1px solid rgba(99, 102, 241, 0.35); padding: 8px 14px; border-radius: 10px; cursor: pointer; font-weight: 600; transition: 0.2s; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; font-size: 0.82rem; }
+    body { background: radial-gradient(circle at top right, #111827, var(--bg) 65%); color: var(--text); min-height: 100vh; padding: 14px; }
+    .container { max-width: 1400px; margin: 0 auto; }
+
+    /* Header & BTC Banner */
+    .header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 14px; background: var(--card); border: 1px solid var(--border); padding: 14px 20px; border-radius: 16px; margin-bottom: 14px; }
+    .brand { display: flex; align-items: center; gap: 10px; }
+    .pulse { width: 11px; height: 11px; background: var(--long); border-radius: 50%; box-shadow: 0 0 12px var(--long); animation: blink 1.8s infinite; }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+    .brand h1 { font-size: 1.15rem; font-weight: 800; color: #fff; }
+    .meta-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 0.82rem; color: var(--muted); }
+    .btn { background: rgba(99, 102, 241, 0.15); color: #c7d2fe; border: 1px solid rgba(99, 102, 241, 0.35); padding: 7px 13px; border-radius: 9px; cursor: pointer; font-weight: 600; transition: 0.18s; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; font-size: 0.8rem; }
     .btn:hover { background: var(--accent); color: #fff; }
-    .btc-banner { background: linear-gradient(135deg, rgba(30, 41, 59, 0.85), rgba(15, 23, 42, 0.95)); border: 1px solid rgba(99, 102, 241, 0.25); border-radius: 18px; padding: 18px 22px; margin-bottom: 18px; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; align-items: center; }
-    .btc-status { display: flex; flex-direction: column; gap: 6px; }
-    .btc-title { font-size: 0.85rem; color: var(--muted); }
-    .btc-value { font-size: 1.15rem; font-weight: 800; display: flex; align-items: center; gap: 8px; }
-    .btc-forecast { grid-column: 1 / -1; background: rgba(255, 255, 255, 0.04); padding: 12px 16px; border-radius: 12px; font-size: 0.9rem; border-right: 4px solid var(--accent); line-height: 1.7; }
-    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 18px; }
-    .stat-card { background: var(--card); border: 1px solid var(--border); padding: 14px 18px; border-radius: 14px; }
-    .stat-label { font-size: 0.78rem; color: var(--muted); margin-bottom: 6px; }
-    .stat-num { font-size: 1.35rem; font-weight: 800; }
-    .controls { display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; align-items: center; margin-bottom: 18px; }
-    .tabs { display: flex; flex-wrap: wrap; gap: 8px; }
-    .tab { background: var(--card); border: 1px solid var(--border); color: var(--muted); padding: 9px 15px; border-radius: 12px; cursor: pointer; font-size: 0.85rem; font-weight: 600; transition: 0.2s; }
-    .tab.active { background: var(--accent); color: #fff; border-color: var(--accent); box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35); }
-    .search-box { background: var(--card); border: 1px solid var(--border); color: #fff; padding: 9px 16px; border-radius: 12px; min-width: 240px; font-size: 0.88rem; outline: none; }
+    .btn-ghost { background: rgba(255, 255, 255, 0.04); color: var(--muted); border: 1px solid var(--border); }
+    .btn-ghost:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+
+    .btc-banner { background: linear-gradient(135deg, rgba(23, 33, 53, 0.9), rgba(12, 18, 30, 0.95)); border: 1px solid rgba(99, 102, 241, 0.28); border-radius: 16px; padding: 14px 18px; margin-bottom: 14px; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; }
+    .btc-top { display: flex; flex-wrap: wrap; align-items: center; gap: 18px; font-size: 0.88rem; }
+    .btc-forecast { width: 100%; background: rgba(255, 255, 255, 0.03); padding: 9px 14px; border-radius: 10px; font-size: 0.84rem; border-right: 3px solid var(--accent); color: #e2e8f0; }
+
+    /* Stats */
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 10px; margin-bottom: 14px; }
+    .stat-card { background: var(--card); border: 1px solid var(--border); padding: 12px 15px; border-radius: 13px; }
+    .stat-label { font-size: 0.75rem; color: var(--muted); margin-bottom: 4px; }
+    .stat-num { font-size: 1.25rem; font-weight: 800; }
+
+    /* Controls & Tabs */
+    .controls { display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; align-items: center; background: var(--card); border: 1px solid var(--border); padding: 12px 14px; border-radius: 14px; margin-bottom: 14px; }
+    .tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+    .tab { background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border); color: var(--muted); padding: 7px 13px; border-radius: 10px; cursor: pointer; font-size: 0.82rem; font-weight: 600; transition: 0.18s; }
+    .tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .right-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .search-box { background: rgba(0, 0, 0, 0.35); border: 1px solid var(--border); color: #fff; padding: 7px 12px; border-radius: 9px; min-width: 200px; font-size: 0.82rem; outline: none; }
     .search-box:focus { border-color: var(--accent); }
-    .signals-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 18px; }
-    .card { background: var(--card); border: 1px solid var(--border); border-radius: 20px; padding: 20px; display: flex; flex-direction: column; gap: 14px; transition: 0.25s; position: relative; overflow: hidden; }
-    .card:hover { transform: translateY(-3px); border-color: rgba(255, 255, 255, 0.2); }
-    .card.long { border-top: 4px solid var(--long); }
-    .card.short { border-top: 4px solid var(--short); }
-    .card-top { display: flex; justify-content: space-between; align-items: center; }
-    .symbol { font-size: 1.25rem; font-weight: 800; letter-spacing: 0.5px; }
-    .badges { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-    .badge { padding: 4px 10px; border-radius: 8px; font-size: 0.76rem; font-weight: 700; }
+
+    /* Compact 1-Line List & Accordion */
+    .list-container { display: flex; flex-direction: column; gap: 8px; }
+    .sig-row { background: var(--card); border: 1px solid var(--border); border-radius: 13px; overflow: hidden; transition: 0.2s; }
+    .sig-row.long { border-right: 4px solid var(--long); }
+    .sig-row.short { border-right: 4px solid var(--short); }
+    .sig-row.has-alert { border-color: rgba(245, 158, 11, 0.45); }
+
+    .sig-summary { display: grid; grid-template-columns: 155px 95px 115px 1.2fr 1.1fr 1.2fr 125px; align-items: center; gap: 10px; padding: 11px 15px; cursor: pointer; user-select: none; font-size: 0.84rem; transition: background 0.15s; }
+    .sig-summary:hover { background: var(--row-hover); }
+
+    .col-sym { font-weight: 800; font-size: 0.98rem; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+    .badge { padding: 3px 8px; border-radius: 6px; font-size: 0.73rem; font-weight: 700; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
     .badge.long { background: var(--long-bg); color: var(--long); }
     .badge.short { background: var(--short-bg); color: var(--short); }
-    .badge.grade { background: rgba(245, 158, 11, 0.15); color: var(--warn); }
+    .badge.grade { background: var(--warn-bg); color: var(--warn); }
     .badge.setup { background: rgba(99, 102, 241, 0.15); color: #a5b4fc; }
-    .alert-banner { background: rgba(245, 158, 11, 0.14); border: 1px solid rgba(245, 158, 11, 0.4); color: #fde68a; padding: 10px 12px; border-radius: 12px; font-size: 0.82rem; line-height: 1.6; white-space: pre-line; }
-    .price-box { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; background: rgba(0, 0, 0, 0.28); padding: 12px; border-radius: 14px; font-size: 0.85rem; }
-    .price-item span { display: block; font-size: 0.74rem; color: var(--muted); margin-bottom: 2px; }
-    .price-item strong { font-size: 0.95rem; direction: ltr; display: inline-block; }
-    .targets-list { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; text-align: center; }
-    .tp-box { background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border); padding: 8px 6px; border-radius: 10px; font-size: 0.8rem; }
-    .tp-box.hit { background: var(--long-bg); border-color: var(--long); color: var(--long); }
-    .tp-box small { display: block; color: var(--muted); font-size: 0.7rem; }
-    .ai-box { background: rgba(99, 102, 241, 0.07); border: 1px solid rgba(99, 102, 241, 0.2); border-radius: 14px; padding: 12px 14px; font-size: 0.82rem; line-height: 1.75; color: #e2e8f0; }
-    .ai-box div { margin-bottom: 4px; }
-    .card-actions { display: flex; justify-content: space-between; gap: 8px; margin-top: auto; padding-top: 6px; }
-    .empty { grid-column: 1 / -1; text-align: center; padding: 60px 20px; color: var(--muted); background: var(--card); border-radius: 18px; border: 1px dashed var(--border); }
-    @media (max-width: 600px) { .signals-grid { grid-template-columns: 1fr; } }
+    .badge.ok { background: var(--long-bg); color: var(--long); }
+    .badge.cancel { background: rgba(148, 163, 184, 0.15); color: var(--muted); }
+
+    .mono { direction: ltr; display: inline-block; font-weight: 700; color: #e2e8f0; }
+    .muted-label { color: var(--muted); font-size: 0.74rem; margin-left: 4px; }
+    .toggle-btn { justify-self: end; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border); color: #cbd5e1; padding: 5px 10px; border-radius: 8px; font-size: 0.76rem; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
+    .sig-row.open .toggle-btn { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+    /* Accordion Details Body */
+    .sig-details { display: none; padding: 16px; border-top: 1px solid var(--border); background: rgba(7, 10, 18, 0.65); }
+    .sig-row.open .sig-details { display: block; }
+
+    .details-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
+    .box { background: rgba(255, 255, 255, 0.025); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; font-size: 0.82rem; line-height: 1.75; }
+    .box-title { font-weight: 700; color: #a5b4fc; margin-bottom: 8px; font-size: 0.84rem; display: flex; justify-content: space-between; }
+
+    .tp-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 8px; text-align: center; }
+    .tp-item { background: rgba(0, 0, 0, 0.3); border: 1px solid var(--border); padding: 8px 6px; border-radius: 9px; }
+    .tp-item.hit { background: var(--long-bg); border-color: var(--long); color: var(--long); }
+    .tp-item small { display: block; font-size: 0.7rem; color: var(--muted); }
+
+    .alert-box { background: var(--warn-bg); border: 1px solid rgba(245, 158, 11, 0.4); color: #fde68a; padding: 10px 12px; border-radius: 10px; margin-bottom: 12px; font-size: 0.82rem; white-space: pre-line; line-height: 1.65; }
+
+    /* Daily History Group */
+    .day-group { margin-bottom: 18px; border: 1px solid var(--border); border-radius: 16px; overflow: hidden; background: rgba(11, 15, 25, 0.6); }
+    .day-header { background: rgba(30, 41, 59, 0.65); padding: 12px 18px; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; border-bottom: 1px solid var(--border); }
+    .day-title { font-weight: 800; font-size: 0.96rem; color: #fff; display: flex; align-items: center; gap: 8px; }
+    .day-stats { display: flex; flex-wrap: wrap; gap: 10px; font-size: 0.8rem; }
+    .day-body { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+
+    .empty { text-align: center; padding: 45px 20px; color: var(--muted); background: var(--card); border-radius: 14px; border: 1px dashed var(--border); }
+
+    @media (max-width: 980px) {
+      .sig-summary { grid-template-columns: 1fr 1fr; gap: 8px; }
+      .toggle-btn { grid-column: 1 / -1; justify-self: stretch; justify-content: center; }
+    }
   </style>
 </head>
 <body>
@@ -78,73 +115,75 @@
     <header class="header">
       <div class="brand">
         <div class="pulse"></div>
-        <h1>رادار هوش مصنوعی شکارچی بازار (Gate.io VIP)</h1>
+        <h1>ترمینال هوشمند شکارچی بازار (Gate.io VIP Radar)</h1>
       </div>
       <div class="meta-bar">
-        <span id="lastUpdate">در حال دریافت اطلاعات...</span>
-        <button class="btn" onclick="loadAllData()">🔄 بروزرسانی فوری</button>
+        <span id="lastUpdate">در حال همگام‌سازی...</span>
+        <button class="btn" onclick="loadAllData()">🔄 بروزرسانی</button>
       </div>
     </header>
 
-    <section class="btc-banner" id="btcBanner">
-      <div class="btc-status">
-        <span class="btc-title">وضعیت فعلی بیت‌کوین (BTC Regime)</span>
-        <div class="btc-value" id="btcRegimeText">در حال بررسی...</div>
-      </div>
-      <div class="btc-status">
-        <span class="btc-title">شاخص‌های قدرت بیت‌کوین</span>
-        <div class="btc-value" id="btcMetrics" style="font-size:0.95rem">RSI 4H: — | RSI 15m: — | ADX: —</div>
+    <section class="btc-banner">
+      <div class="btc-top">
+        <div>وضعیت بیت‌کوین: <strong id="btcRegimeText">—</strong></div>
+        <div id="btcMetrics" style="color:var(--muted)">RSI 4H: — | RSI 15m: — | ADX: —</div>
       </div>
       <div class="btc-forecast" id="btcForecast">
-        🧠 <strong>پیش‌بینی حرکت بعدی بیت‌کوین:</strong> در حال بارگذاری تحلیل...
+        🧠 <strong>پیش‌بینی حرکت بعدی بیت‌کوین:</strong> در حال دریافت تحلیل...
       </div>
     </section>
 
     <section class="stats-grid">
       <div class="stat-card">
-        <div class="stat-label">سیگنال‌های فعال / باز</div>
+        <div class="stat-label">📡 سیگنال‌های فعال (در جریان)</div>
         <div class="stat-num" id="statActive">0</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">سیگنال‌های اسکن آخر</div>
-        <div class="stat-num" id="statLatest">0</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">هشدارهای زنده رادار</div>
+        <div class="stat-label">🚨 دارای هشدار زنده رادار</div>
         <div class="stat-num" id="statAlerts" style="color:var(--warn)">0</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">نرخ برد (معاملات بسته‌شده)</div>
-        <div class="stat-num" id="statWinRate" style="color:var(--long)">—</div>
+        <div class="stat-label">✅ به هدف رسیده (آرشیو)</div>
+        <div class="stat-num" id="statWins" style="color:var(--long)">0</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">ارزهای پرحجم اسکن‌شده</div>
-        <div class="stat-num" id="statScanned">0</div>
+        <div class="stat-label">🛑 حد ضرر / خروج اضطراری</div>
+        <div class="stat-num" id="statLosses" style="color:var(--short)">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">🚫 کنسل / منقضی بدون ورود</div>
+        <div class="stat-num" id="statCanceled" style="color:var(--muted)">0</div>
       </div>
     </section>
 
     <div class="controls">
       <div class="tabs">
-        <button class="tab active" onclick="setFilter('ACTIVE', this)">📡 سیگنال‌های فعال و جدید</button>
-        <button class="tab" onclick="setFilter('RADAR_ALERTS', this)">🚨 دارای هشدار فوری رادار</button>
+        <button class="tab active" onclick="setFilter('ACTIVE', this)">📡 سیگنال‌های فعال (تا تعیین تکلیف)</button>
+        <button class="tab" onclick="setFilter('DAILY_HISTORY', this)">📅 نتایج روزانه (تعیین‌تکلیف‌شده)</button>
+        <button class="tab" onclick="setFilter('RADAR_ALERTS', this)">🚨 هشدارهای فوری رادار</button>
         <button class="tab" onclick="setFilter('GRADE_A_PLUS', this)">⭐ فقط درجه A+</button>
-        <button class="tab" onclick="setFilter('LONG', this)">🟢 فقط LONG</button>
-        <button class="tab" onclick="setFilter('SHORT', this)">🔴 فقط SHORT</button>
         <button class="tab" onclick="setFilter('NEAR_MISS', this)">👀 در آستانه سیگنال</button>
-        <button class="tab" onclick="setFilter('CLOSED', this)">📊 تاریخچه و نتایج</button>
       </div>
-      <input type="text" id="searchInput" class="search-box" placeholder="🔍 جستجوی نام ارز (مثلاً SSV)..." oninput="renderCards()" />
+
+      <div class="right-tools">
+        <button class="btn btn-ghost" onclick="expandAll()">📂 باز کردن جزئیات همه</button>
+        <button class="btn btn-ghost" onclick="collapseAll()">📁 بستن همه (تک‌خطی)</button>
+        <input type="text" id="searchInput" class="search-box" placeholder="🔍 نام ارز (مثلاً SSV)..." oninput="renderView()" />
+      </div>
     </div>
 
-    <main class="signals-grid" id="cardsGrid">
-      <div class="empty">در حال بارگذاری اطلاعات از مخزن...</div>
-    </main>
+    <main id="mainView"></main>
   </div>
 
   <script>
+    const STORAGE_KEY = 'GATE_VIP_PERSISTENT_SIGNALS_V1';
     let latestScan = null;
     let signalState = null;
     let currentFilter = 'ACTIVE';
+    let expandedIds = new Set();
+    let expandAllMode = false;
+
+    const FINAL_STATUSES = ['CLOSED', 'EXPIRED_NO_ENTRY', 'AMBIGUOUS', 'CANCELED'];
 
     function fmtPrice(v) {
       const n = Number(v);
@@ -152,21 +191,57 @@
       return Number(n.toPrecision(7)).toString();
     }
 
-    function timeAgo(iso) {
-      if (!iso) return '—';
-      const diff = Math.floor((Date.now() - Date.parse(iso)) / 60000);
-      if (diff < 1) return 'همین الان';
-      if (diff < 60) return diff + ' دقیقه پیش';
-      const h = Math.floor(diff / 60);
-      if (h < 24) return h + ' ساعت پیش';
-      return Math.floor(h / 24) + ' روز پیش';
+    function fmtPct(side, entry, target) {
+      const e = Number(entry);
+      const t = Number(target);
+      if (!Number.isFinite(e) || !Number.isFinite(t) || e <= 0) return '';
+      const diff = side === 'LONG' ? ((t - e) / e) * 100 : ((e - t) / e) * 100;
+      return (diff >= 0 ? '+' : '') + diff.toFixed(2) + '%';
     }
 
-    function setFilter(f, btn) {
-      currentFilter = f;
-      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-      if (btn) btn.classList.add('active');
-      renderCards();
+    function formatDuration(startIso, endIso) {
+      const s = Date.parse(startIso);
+      const e = endIso ? Date.parse(endIso) : Date.now();
+      if (!Number.isFinite(s) || !Number.isFinite(e) || e <= s) return 'کمتر از ۱ دقیقه';
+      const totalMin = Math.floor((e - s) / 60000);
+      if (totalMin < 60) return totalMin + ' دقیقه';
+      const h = Math.floor(totalMin / 60);
+      const m = totalMin % 60;
+      if (h < 24) return h + ' ساعت' + (m > 0 ? ' و ' + m + ' دقیقه' : '');
+      const d = Math.floor(h / 24);
+      const rh = h % 24;
+      return d + ' روز' + (rh > 0 ? ' و ' + rh + ' ساعت' : '');
+    }
+
+    function formatPersianDate(isoString) {
+      const d = isoString ? new Date(isoString) : new Date();
+      if (Number.isNaN(d.getTime())) return 'نامشخص';
+      try {
+        const fa = new Intl.DateTimeFormat('fa-IR', {
+          weekday: 'long',
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+        }).format(d);
+        const en = d.toISOString().slice(0, 10);
+        return `${fa} (${en})`;
+      } catch {
+        return d.toISOString().slice(0, 10);
+      }
+    }
+
+    function loadLocalCache() {
+      try {
+        return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+      } catch {
+        return {};
+      }
+    }
+
+    function saveLocalCache(cache) {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(cache));
+      } catch {}
     }
 
     async function fetchJsonSafe(url) {
@@ -177,6 +252,427 @@
       } catch {
         return null;
       }
+    }
+
+    // ادغام هوشمند: هیچ سیگنالی تا تعیین تکلیف نهایی حذف نمی‌شود
+    function buildUnifiedSignalList() {
+      const cache = loadLocalCache();
+      const now = Date.now();
+
+      // ۱. دریافت سیگنال‌های ثبت‌شده در بک‌اند (signal-state.json)
+      if (signalState?.signals) {
+        for (const s of Object.values(signalState.signals)) {
+          const key = s.id || (s.symbol + '_' + s.side + '_' + s.triggerCandleTime);
+          cache[key] = {
+            ...(cache[key] || {}),
+            uid: key,
+            symbol: s.symbol,
+            side: s.side,
+            status: s.status,
+            score: s.score ?? cache[key]?.score ?? 75,
+            grade: s.grade ?? (s.score >= 82 ? 'A+' : 'A'),
+            setup: s.setup ?? cache[key]?.setup ?? 'ساختاری',
+            entryLow: s.entryLow ?? s.entry,
+            entryHigh: s.entryHigh ?? s.entry,
+            entry: s.entry,
+            currentPrice: s.lastCheckedPrice ?? cache[key]?.currentPrice ?? s.entry,
+            stopLoss: s.stop,
+            targets: s.targets ?? [],
+            targetHits: s.targetHits ?? [null, null, null],
+            createdAt: s.sentAt || s.createdAt || cache[key]?.createdAt,
+            entryTime: s.entryTime ?? null,
+            exitTime: s.exitTime ?? null,
+            validUntil: s.validUntil,
+            netPct: s.netPct,
+            netR: s.netR,
+            exitReason: s.exitReason,
+            liveInsight: s.liveInsight ?? cache[key]?.liveInsight ?? null,
+            historyBehavior: s.historyBehavior ?? cache[key]?.historyBehavior ?? null,
+            reasons: s.reasons?.length ? s.reasons : (cache[key]?.reasons ?? []),
+            alertHistory: s.alertHistory ?? cache[key]?.alertHistory ?? [],
+            liveAlertsSent: s.liveAlertsSent ?? cache[key]?.liveAlertsSent ?? {},
+          };
+        }
+      }
+
+      // ۲. دریافت سیگنال‌های اسکن جاری (latest-scan.json) و حفظ آن‌ها تا تعیین تکلیف
+      if (latestScan?.rankedCandidates) {
+        for (const c of latestScan.rankedCandidates) {
+          const existingActive = Object.values(cache).find(
+            x => x.symbol === c.symbol && x.side === c.side && !FINAL_STATUSES.includes(x.status)
+          );
+
+          const key = existingActive
+            ? existingActive.uid
+            : (c.symbol + '_' + c.side + '_' + c.triggerCandleTime);
+
+          const prev = cache[key] || {};
+          cache[key] = {
+            ...prev,
+            uid: key,
+            symbol: c.symbol,
+            side: c.side,
+            status: prev.status && FINAL_STATUSES.includes(prev.status) ? prev.status : (prev.status || 'PENDING_ENTRY'),
+            score: c.score ?? prev.score ?? 75,
+            grade: c.grade ?? (c.score >= 82 ? 'A+' : 'A'),
+            setup: c.setup ?? prev.setup ?? 'ساختاری',
+            entryLow: c.entryLow,
+            entryHigh: c.entryHigh,
+            entry: c.referenceEntry ?? (c.side === 'LONG' ? c.entryHigh : c.entryLow),
+            currentPrice: c.lastCheckedPrice ?? c.price,
+            stopLoss: c.stopLoss,
+            targets: (c.takeProfits || []).map(t => t.price),
+            targetHits: prev.targetHits ?? [null, null, null],
+            createdAt: prev.createdAt || c.analyzedAt || new Date().toISOString(),
+            validUntil: c.validUntil || prev.validUntil,
+            liveInsight: c.liveInsight ?? prev.liveInsight,
+            historyBehavior: c.historyBehavior ?? prev.historyBehavior,
+            reasons: c.reasons ?? prev.reasons ?? [],
+            alertHistory: prev.alertHistory ?? [],
+            liveAlertsSent: prev.liveAlertsSent ?? {},
+          };
+        }
+      }
+
+      // ۳. بررسی خودکار سیگنال‌های کش‌شده که زمان ورودشان منقضی شده و در بک‌اند ثبت نشده‌اند
+      for (const item of Object.values(cache)) {
+        if (!FINAL_STATUSES.includes(item.status)) {
+          const exp = Date.parse(item.validUntil);
+          if (item.status === 'PENDING_ENTRY' && Number.isFinite(exp) && now > exp + 120000 && !item.entryTime) {
+            item.status = 'EXPIRED_NO_ENTRY';
+            item.exitTime = item.validUntil;
+            item.exitReason = 'EXPIRED_NO_ENTRY';
+          }
+        }
+      }
+
+      saveLocalCache(cache);
+
+      return Object.values(cache).sort(
+        (a, b) => Date.parse(b.exitTime || b.createdAt || 0) - Date.parse(a.exitTime || a.createdAt || 0)
+      );
+    }
+
+    function getResolutionSummary(item) {
+      const hits = (item.targetHits || [])
+        .map((t, i) => (t ? 'TP' + (i + 1) : null))
+        .filter(Boolean);
+
+      const highestTp = hits.length > 0 ? hits.join(' ، ') : 'بدون هدف';
+      const duration = formatDuration(item.entryTime || item.createdAt, item.exitTime);
+
+      if (item.status === 'EXPIRED_NO_ENTRY' || item.exitReason === 'EXPIRED_NO_ENTRY') {
+        return {
+          isFinal: true,
+          outcomeType: 'CANCELED',
+          badgeHtml: '<span class="badge cancel">🚫 کنسل (منقضی بدون ورود)</span>',
+          detailText: `قیمت در مهلت تعیین‌شده وارد محدوده ورود نشد و سیگنال پس از ${duration} لغو گردید.`,
+          duration,
+          highestTp: '—',
+        };
+      }
+
+      if (item.status === 'AMBIGUOUS') {
+        return {
+          isFinal: true,
+          outcomeType: 'AMBIGUOUS',
+          badgeHtml: '<span class="badge cancel">⚖️ مبهم در کندل ۱ دقیقه</span>',
+          detailText: `لمس همزمان سطوح در یک کندل؛ مدت زمان: ${duration}`,
+          duration,
+          highestTp,
+        };
+      }
+
+      if (item.status === 'CLOSED') {
+        const net = Number(item.netPct ?? 0);
+        const sign = net >= 0 ? '+' : '';
+        if (item.exitReason === 'ALL_TARGETS') {
+          return {
+            isFinal: true,
+            outcomeType: 'WIN',
+            badgeHtml: `<span class="badge ok">🚀 فول تارگت (${sign}${net.toFixed(2)}%)</span>`,
+            detailText: `تمام اهداف (${highestTp}) با موفقیت طی مدت ${duration} زده شد!`,
+            duration,
+            highestTp,
+          };
+        }
+        if (hits.length > 0 && net >= 0) {
+          return {
+            isFinal: true,
+            outcomeType: 'WIN',
+            badgeHtml: `<span class="badge ok">✅ سودده (${highestTp} | ${sign}${net.toFixed(2)}%)</span>`,
+            detailText: `رسیدن به ${highestTp} و بسته شدن معامله پس از ${duration}`,
+            duration,
+            highestTp,
+          };
+        }
+        return {
+          isFinal: true,
+          outcomeType: 'LOSS',
+          badgeHtml: `<span class="badge short">🛑 حد ضرر (${sign}${net.toFixed(2)}%)</span>`,
+          detailText: `برخورد با حد ضرر (${item.exitReason || 'STOP'}) پس از ${duration} | اهداف لمس‌شده قبل از خروج: ${highestTp}`,
+          duration,
+          highestTp,
+        };
+      }
+
+      // هنوز فعال است
+      const activeDuration = formatDuration(item.createdAt, null);
+      if (item.status === 'OPEN') {
+        return {
+          isFinal: false,
+          outcomeType: 'ACTIVE_OPEN',
+          badgeHtml: `<span class="badge ok">📡 معامله باز (${hits.length ? highestTp + ' ✓' : 'در جریان'})</span>`,
+          detailText: `در حال رصد لحظه‌ای (مدت سپری‌شده: ${activeDuration})`,
+          duration: activeDuration,
+          highestTp,
+        };
+      }
+
+      return {
+        isFinal: false,
+        outcomeType: 'ACTIVE_PENDING',
+        badgeHtml: `<span class="badge setup">⏳ منتظر ورود (${activeDuration})</span>`,
+        detailText: `منتظر رسیدن قیمت به محدوده ورود`,
+        duration: activeDuration,
+        highestTp: '—',
+      };
+    }
+
+    function toggleRow(uid, event) {
+      if (event) event.stopPropagation();
+      if (expandedIds.has(uid)) {
+        expandedIds.delete(uid);
+      } else {
+        expandedIds.add(uid);
+      }
+      const el = document.getElementById('row_' + uid);
+      if (el) el.classList.toggle('open');
+    }
+
+    function expandAll() {
+      expandAllMode = true;
+      document.querySelectorAll('.sig-row').forEach(el => {
+        el.classList.add('open');
+        const id = el.id.replace('row_', '');
+        expandedIds.add(id);
+      });
+    }
+
+    function collapseAll() {
+      expandAllMode = false;
+      expandedIds.clear();
+      document.querySelectorAll('.sig-row').forEach(el => el.classList.remove('open'));
+    }
+
+    function setFilter(f, btn) {
+      currentFilter = f;
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      if (btn) btn.classList.add('active');
+      renderView();
+    }
+
+    function renderSignalRowHtml(item) {
+      const isLong = item.side === 'LONG';
+      const res = getResolutionSummary(item);
+      const isOpen = expandAllMode || expandedIds.has(item.uid);
+      const hasAlert = Object.keys(item.liveAlertsSent || {}).length > 0;
+      const latestAlert = item.alertHistory?.at(-1)?.text;
+      const tp1 = item.targets?.[0];
+      const ai = item.liveInsight;
+      const hb = item.historyBehavior;
+
+      return `
+        <div class="sig-row ${isLong ? 'long' : 'short'} ${hasAlert ? 'has-alert' : ''} ${isOpen ? 'open' : ''}" id="row_${item.uid}">
+          <!-- سطر تک‌خطی خلاصه -->
+          <div class="sig-summary" onclick="toggleRow('${item.uid}', event)">
+            <div class="col-sym">
+              <span>#${item.symbol}</span>
+              ${hasAlert ? '<span title="دارای پیام رادار زنده">🚨</span>' : ''}
+            </div>
+
+            <div>
+              <span class="badge ${isLong ? 'long' : 'short'}">${isLong ? '🟢 LONG' : '🔴 SHORT'}</span>
+            </div>
+
+            <div>
+              <span class="badge grade">${item.grade} (${Math.round(item.score)})</span>
+            </div>
+
+            <div>
+              <span class="muted-label">ورود:</span>
+              <span class="mono">${fmtPrice(item.entryLow)} - ${fmtPrice(item.entryHigh)}</span>
+            </div>
+
+            <div>
+              <span class="muted-label">TP1:</span>
+              <span class="mono">${fmtPrice(tp1)}</span>
+              <span style="font-size:0.75rem; color:var(--long)">(${fmtPct(item.side, item.entry, tp1)})</span>
+            </div>
+
+            <div>
+              ${res.badgeHtml}
+            </div>
+
+            <button class="toggle-btn" onclick="toggleRow('${item.uid}', event)">
+              <span>جزئیات بیشتر</span>
+              <span>🔽</span>
+            </button>
+          </div>
+
+          <!-- بخش آبشاری جزئیات کامل -->
+          <div class="sig-details">
+            ${latestAlert ? `<div class="alert-box">${latestAlert}</div>` : ''}
+
+            <div class="details-grid">
+              <div class="box">
+                <div class="box-title">
+                  <span>🎯 سطوح ورود، حد ضرر و اهداف ماژور</span>
+                  <span>ستاپ: ${item.setup}</span>
+                </div>
+                <div>• <strong>محدوده ورود:</strong> <span class="mono">${fmtPrice(item.entryLow)}</span> تا <span class="mono">${fmtPrice(item.entryHigh)}</span></div>
+                <div>• <strong>حد ضرر (Stop Loss):</strong> <span class="mono" style="color:var(--short)">${fmtPrice(item.stopLoss)} (${fmtPct(item.side, item.entry, item.stopLoss)})</span></div>
+                <div>• <strong>وضعیت و زمان نتیجه:</strong> ${res.detailText}</div>
+
+                <div class="tp-grid">
+                  ${(item.targets || []).map((t, i) => `
+                    <div class="tp-item ${item.targetHits?.[i] ? 'hit' : ''}">
+                      <small>هدف ${i + 1} (TP${i + 1}) ${item.targetHits?.[i] ? '✓' : ''}</small>
+                      <div class="mono">${fmtPrice(t)}</div>
+                      <small style="color:var(--long)">${fmtPct(item.side, item.entry, t)}</small>
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+
+              <div class="box">
+                <div class="box-title">
+                  <span>🧠 رادار هوش مصنوعی و رفتار تاریخی ارز</span>
+                  <span>⏱ مدت: ${res.duration}</span>
+                </div>
+                ${item.reasons?.length ? `<div>• <strong>چرایی سیگنال:</strong> ${item.reasons.join(' • ')}</div>` : ''}
+                ${ai?.manipulationStatus ? `<div>• <strong>بررسی کلک بازارگردان:</strong> ${ai.manipulationStatus}</div>` : ''}
+                ${ai?.entryInstruction ? `<div>• <strong>فرمان رادار:</strong> ${ai.entryInstruction}</div>` : ''}
+                ${hb ? `<div>• <strong>رفتار نسبت به BTC:</strong> مقاومت در ریزش ${hb.resiliencePct}% | شتاب در صعود ${hb.beta}x | ${hb.whenBtcNeutral || ''}</div>` : ''}
+
+                <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+                  <a class="btn" target="_blank" href="https://www.gate.io/futures/USDT/${item.symbol}">📊 باز کردن چارت Gate.io</a>
+                  <a class="btn btn-ghost" target="_blank" href="https://www.tradingview.com/chart/?symbol=GATEIO:${item.symbol.replace('_', '')}.P">📈 چارت TradingView</a>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderView() {
+      const container = document.getElementById('mainView');
+      const query = document.getElementById('searchInput').value.trim().toUpperCase();
+      const all = buildUnifiedSignalList();
+
+      const activeList = all.filter(s => !FINAL_STATUSES.includes(s.status));
+      const resolvedList = all.filter(s => FINAL_STATUSES.includes(s.status));
+
+      // بروزرسانی کارت‌های آمار بالا
+      document.getElementById('statActive').textContent = activeList.length;
+      document.getElementById('statAlerts').textContent = activeList.filter(
+        s => Object.keys(s.liveAlertsSent || {}).length > 0
+      ).length;
+      document.getElementById('statWins').textContent = resolvedList.filter(
+        s => s.status === 'CLOSED' && Number(s.netPct) > 0
+      ).length;
+      document.getElementById('statLosses').textContent = resolvedList.filter(
+        s => s.status === 'CLOSED' && Number(s.netPct) < 0
+      ).length;
+      document.getElementById('statCanceled').textContent = resolvedList.filter(
+        s => s.status === 'EXPIRED_NO_ENTRY' || s.exitReason === 'EXPIRED_NO_ENTRY'
+      ).length;
+
+      // تب در آستانه سیگنال
+      if (currentFilter === 'NEAR_MISS') {
+        const misses = (latestScan?.nearMisses || []).filter(m => !query || m.symbol.includes(query));
+        if (!misses.length) {
+          container.innerHTML = '<div class="empty">در اسکن آخر ارزی در لیست «در آستانه سیگنال» نبوده است.</div>';
+          return;
+        }
+        container.innerHTML = `<div class="list-container">${misses.map(m => `
+          <div class="sig-row ${m.side === 'LONG' ? 'long' : 'short'}">
+            <div class="sig-summary">
+              <div class="col-sym">#${m.symbol}</div>
+              <div><span class="badge ${m.side === 'LONG' ? 'long' : 'short'}">${m.side}</span></div>
+              <div><span class="badge grade">امتیاز ${m.score} از ${m.required}</span></div>
+              <div style="grid-column: span 3; color:var(--muted);">فقط ${m.required - m.score} امتیاز تا صدور سیگنال فاصله دارد (آماده جهش)</div>
+              <a class="btn" target="_blank" href="https://www.gate.io/futures/USDT/${m.symbol}">📈 چارت</a>
+            </div>
+          </div>
+        `).join('')}</div>`;
+        return;
+      }
+
+      // تب نتایج دسته‌بندی‌شده روزانه
+      if (currentFilter === 'DAILY_HISTORY') {
+        const filteredResolved = resolvedList.filter(s => !query || s.symbol.toUpperCase().includes(query));
+        if (!filteredResolved.length) {
+          container.innerHTML = '<div class="empty">هنوز سیگنالی به پایان کار (هدف، حد ضرر یا انقضا) نرسیده است. تا زمانی که تکلیف سیگنال‌ها مشخص نشود، در تب «سیگنال‌های فعال» باقی می‌مانند.</div>';
+          return;
+        }
+
+        // گروه‌بندی بر اساس روز (YYYY-MM-DD)
+        const groups = new Map();
+        for (const item of filteredResolved) {
+          const dateKey = (item.exitTime || item.createdAt || new Date().toISOString()).slice(0, 10);
+          if (!groups.has(dateKey)) groups.set(dateKey, []);
+          groups.get(dateKey).push(item);
+        }
+
+        let html = '';
+        for (const [dateKey, items] of groups.entries()) {
+          const wins = items.filter(x => x.status === 'CLOSED' && Number(x.netPct) > 0).length;
+          const losses = items.filter(x => x.status === 'CLOSED' && Number(x.netPct) < 0).length;
+          const canceled = items.filter(x => x.status === 'EXPIRED_NO_ENTRY' || x.exitReason === 'EXPIRED_NO_ENTRY').length;
+          const netSum = items
+            .filter(x => x.status === 'CLOSED' && Number.isFinite(x.netPct))
+            .reduce((s, x) => s + Number(x.netPct), 0);
+          const sign = netSum >= 0 ? '+' : '';
+
+          html += `
+            <div class="day-group">
+              <div class="day-header">
+                <div class="day-title">📅 کارنامه روز: ${formatPersianDate(dateKey + 'T12:00:00Z')}</div>
+                <div class="day-stats">
+                  <span class="badge setup">کل: ${items.length}</span>
+                  <span class="badge ok">✅ سودده: ${wins}</span>
+                  <span class="badge short">🛑 حد ضرر: ${losses}</span>
+                  <span class="badge cancel">🚫 کنسل/بدون ورود: ${canceled}</span>
+                  <span class="badge ${netSum >= 0 ? 'ok' : 'short'}">برآیند خالص روز: ${sign}${netSum.toFixed(2)}%</span>
+                </div>
+              </div>
+              <div class="day-body">
+                ${items.map(renderSignalRowHtml).join('')}
+              </div>
+            </div>
+          `;
+        }
+        container.innerHTML = html;
+        return;
+      }
+
+      // فیلترهای مربوط به سیگنال‌های فعال
+      let list = activeList.filter(s => !query || s.symbol.toUpperCase().includes(query));
+
+      if (currentFilter === 'RADAR_ALERTS') {
+        list = list.filter(s => Object.keys(s.liveAlertsSent || {}).length > 0);
+      } else if (currentFilter === 'GRADE_A_PLUS') {
+        list = list.filter(s => s.grade === 'A+' || s.score >= 82);
+      }
+
+      if (!list.length) {
+        container.innerHTML = '<div class="empty">در حال حاضر سیگنال فعالی با این فیلتر وجود ندارد. به محض شکار موقعیت جدید در اسکن بعدی، اینجا نمایش داده می‌شود و تا تعیین تکلیف نهایی باقی می‌ماند.</div>';
+        return;
+      }
+
+      container.innerHTML = `<div class="list-container">${list.map(renderSignalRowHtml).join('')}</div>`;
     }
 
     async function loadAllData() {
@@ -190,8 +686,8 @@
 
       const updatedTime = scanData?.updatedAt || stateData?.updatedAt;
       document.getElementById('lastUpdate').textContent = updatedTime
-        ? 'آخرین بروزرسانی: ' + timeAgo(updatedTime)
-        : 'آماده دریافت داده از اولین اسکن';
+        ? 'آخرین همگام‌سازی: ' + formatDuration(updatedTime, null) + ' پیش'
+        : 'منتظر اولین اجرای اسکن';
 
       if (scanData?.btcIntel) {
         const b = scanData.btcIntel;
@@ -201,216 +697,11 @@
         document.getElementById('btcForecast').innerHTML = `🧠 <strong>پیش‌بینی حرکت بعدی بیت‌کوین:</strong> ${b.nextMoveForecast || '—'}`;
       }
 
-      updateSummaryStats();
-      renderCards();
-    }
-
-    function getUnifiedSignals() {
-      const map = new Map();
-
-      if (signalState?.signals) {
-        Object.values(signalState.signals).forEach(s => {
-          map.set(s.symbol + '_' + s.side + '_' + s.id, {
-            id: s.id,
-            symbol: s.symbol,
-            side: s.side,
-            status: s.status,
-            score: s.score ?? 75,
-            grade: s.grade ?? (s.score >= 82 ? 'A+' : 'A'),
-            setup: s.setup ?? 'ساختاری',
-            entryLow: s.entryLow ?? s.entry,
-            entryHigh: s.entryHigh ?? s.entry,
-            price: s.entry,
-            stopLoss: s.stop,
-            targets: s.targets ?? [],
-            targetHits: s.targetHits ?? [],
-            createdAt: s.sentAt || s.createdAt,
-            netPct: s.netPct,
-            netR: s.netR,
-            exitReason: s.exitReason,
-            liveInsight: s.liveInsight,
-            historyBehavior: s.historyBehavior,
-            reasons: s.reasons ?? [],
-            alertHistory: s.alertHistory ?? [],
-            liveAlertsSent: s.liveAlertsSent ?? {},
-            isIntrabar: s.isIntrabar ?? false,
-          });
-        });
-      }
-
-      if (latestScan?.rankedCandidates) {
-        latestScan.rankedCandidates.forEach(c => {
-          const alreadyOpen = Array.from(map.values()).some(
-            x => x.symbol === c.symbol && x.side === c.side && ['OPEN', 'PENDING_ENTRY'].includes(x.status)
-          );
-          if (!alreadyOpen) {
-            map.set('LIVE_' + c.symbol + '_' + c.side, {
-              id: 'NEW',
-              symbol: c.symbol,
-              side: c.side,
-              status: 'NEW_CANDIDATE',
-              score: c.score,
-              grade: c.grade ?? 'A',
-              setup: c.setup,
-              entryLow: c.entryLow,
-              entryHigh: c.entryHigh,
-              price: c.lastCheckedPrice ?? c.price,
-              stopLoss: c.stopLoss,
-              targets: (c.takeProfits || []).map(t => t.price),
-              targetHits: [null, null, null],
-              createdAt: c.analyzedAt,
-              liveInsight: c.liveInsight,
-              historyBehavior: c.historyBehavior,
-              reasons: c.reasons ?? [],
-              alertHistory: [],
-              liveAlertsSent: {},
-              isIntrabar: c.isIntrabar ?? false,
-            });
-          }
-        });
-      }
-
-      return Array.from(map.values()).sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0));
-    }
-
-    function updateSummaryStats() {
-      const all = getUnifiedSignals();
-      const active = all.filter(s => ['OPEN', 'PENDING_ENTRY', 'NEW_CANDIDATE'].includes(s.status));
-      const alertsCount = active.filter(s => Object.keys(s.liveAlertsSent || {}).length > 0).length;
-      const closed = all.filter(s => s.status === 'CLOSED' && Number.isFinite(s.netPct));
-      const wins = closed.filter(s => s.netPct > 0);
-
-      document.getElementById('statActive').textContent = active.length;
-      document.getElementById('statLatest').textContent = latestScan?.rankedCandidates?.length ?? 0;
-      document.getElementById('statAlerts').textContent = alertsCount;
-      document.getElementById('statScanned').textContent = latestScan?.stats?.scanned ?? 152;
-      document.getElementById('statWinRate').textContent = closed.length > 0
-        ? Math.round((wins.length / closed.length) * 100) + '% (' + wins.length + '/' + closed.length + ')'
-        : 'در حال ثبت';
-    }
-
-    function renderCards() {
-      const grid = document.getElementById('cardsGrid');
-      const query = document.getElementById('searchInput').value.trim().toUpperCase();
-
-      if (currentFilter === 'NEAR_MISS') {
-        const misses = (latestScan?.nearMisses || []).filter(m => !query || m.symbol.includes(query));
-        if (misses.length === 0) {
-          grid.innerHTML = '<div class="empty">در اسکن آخر ارزی در لیست «در آستانه سیگنال» قرار نگرفته است.</div>';
-          return;
-        }
-        grid.innerHTML = misses.map(m => `
-          <div class="card ${m.side === 'LONG' ? 'long' : 'short'}">
-            <div class="card-top">
-              <div class="symbol">#${m.symbol}</div>
-              <div class="badges">
-                <span class="badge ${m.side === 'LONG' ? 'long' : 'short'}">${m.side}</span>
-                <span class="badge grade">امتیاز: ${m.score} از ${m.required}</span>
-              </div>
-            </div>
-            <div class="ai-box">
-              👀 <strong>در آستانه صدور سیگنال:</strong> این ارز تمام فیلترهای اولیه را رد کرده و فقط ${m.required - m.score} امتیاز برای صدور سیگنال کم داشته است. چارت آن را زیر نظر بگیرید!
-            </div>
-            <div class="card-actions">
-              <a class="btn" target="_blank" href="https://www.gate.io/futures/USDT/${m.symbol}">📈 چارت Gate.io</a>
-            </div>
-          </div>
-        `).join('');
-        return;
-      }
-
-      let list = getUnifiedSignals();
-
-      if (query) list = list.filter(s => s.symbol.toUpperCase().includes(query));
-
-      if (currentFilter === 'ACTIVE') {
-        list = list.filter(s => ['OPEN', 'PENDING_ENTRY', 'NEW_CANDIDATE'].includes(s.status));
-      } else if (currentFilter === 'RADAR_ALERTS') {
-        list = list.filter(s => Object.keys(s.liveAlertsSent || {}).length > 0 && s.status === 'OPEN');
-      } else if (currentFilter === 'GRADE_A_PLUS') {
-        list = list.filter(s => (s.grade === 'A+' || s.score >= 82) && ['OPEN', 'PENDING_ENTRY', 'NEW_CANDIDATE'].includes(s.status));
-      } else if (currentFilter === 'LONG') {
-        list = list.filter(s => s.side === 'LONG' && ['OPEN', 'PENDING_ENTRY', 'NEW_CANDIDATE'].includes(s.status));
-      } else if (currentFilter === 'SHORT') {
-        list = list.filter(s => s.side === 'SHORT' && ['OPEN', 'PENDING_ENTRY', 'NEW_CANDIDATE'].includes(s.status));
-      } else if (currentFilter === 'CLOSED') {
-        list = list.filter(s => s.status === 'CLOSED');
-      }
-
-      if (list.length === 0) {
-        grid.innerHTML = '<div class="empty">هیچ سیگنالی با این فیلتر یافت نشد.</div>';
-        return;
-      }
-
-      grid.innerHTML = list.map(item => {
-        const isLong = item.side === 'LONG';
-        const statusMap = {
-          NEW_CANDIDATE: '🔥 سیگنال جدید',
-          PENDING_ENTRY: '⏳ منتظر ورود',
-          OPEN: '📡 معامله باز (تحت رصد رادار)',
-          CLOSED: item.netPct >= 0 ? `✅ بسته شده (+${Number(item.netPct).toFixed(2)}%)` : `🛑 بسته شده (${Number(item.netPct).toFixed(2)}%)`,
-        };
-
-        const latestAlert = item.alertHistory?.at(-1)?.text;
-        const ai = item.liveInsight;
-        const hb = item.historyBehavior;
-
-        return `
-          <div class="card ${isLong ? 'long' : 'short'}">
-            <div class="card-top">
-              <div class="symbol">#${item.symbol}</div>
-              <div class="badges">
-                <span class="badge ${isLong ? 'long' : 'short'}">${isLong ? '🟢 LONG' : '🔴 SHORT'}</span>
-                <span class="badge grade">درجه ${item.grade} (${Math.round(item.score)})</span>
-                <span class="badge setup">${item.setup}</span>
-              </div>
-            </div>
-
-            <div style="font-size:0.78rem; color:var(--muted); display:flex; justify-content:space-between;">
-              <span>وضعیت: <strong style="color:#fff">${statusMap[item.status] || item.status}</strong></span>
-              <span>🕒 ${timeAgo(item.createdAt)}</span>
-            </div>
-
-            ${latestAlert ? `<div class="alert-banner">${latestAlert}</div>` : ''}
-
-            <div class="price-box">
-              <div class="price-item">
-                <span>🎯 محدوده ورود (Entry)</span>
-                <strong>${fmtPrice(item.entryLow)} - ${fmtPrice(item.entryHigh)}</strong>
-              </div>
-              <div class="price-item">
-                <span>🛑 حد ضرر (Stop Loss)</span>
-                <strong style="color:var(--short)">${fmtPrice(item.stopLoss)}</strong>
-              </div>
-            </div>
-
-            <div class="targets-list">
-              ${(item.targets || []).map((tp, idx) => `
-                <div class="tp-box ${item.targetHits?.[idx] ? 'hit' : ''}">
-                  <small>هدف ${idx + 1} ${item.targetHits?.[idx] ? '✓' : ''}</small>
-                  <strong>${fmtPrice(tp)}</strong>
-                </div>
-              `).join('')}
-            </div>
-
-            <div class="ai-box">
-              ${item.reasons?.length ? `<div>📌 <strong>دلایل تایید:</strong> ${item.reasons.join(' • ')}</div>` : ''}
-              ${ai?.manipulationStatus ? `<div>🪤 <strong>وضعیت کلک:</strong> ${ai.manipulationStatus}</div>` : ''}
-              ${ai?.entryInstruction ? `<div>⚡ <strong>فرمان لحظه‌ای:</strong> ${ai.entryInstruction}</div>` : ''}
-              ${hb ? `<div>📜 <strong>رفتار تاریخی:</strong> مقاومت در ریزش ${hb.resiliencePct}% | شتاب صعود ${hb.beta}x</div>` : ''}
-            </div>
-
-            <div class="card-actions">
-              <a class="btn" target="_blank" href="https://www.gate.io/futures/USDT/${item.symbol}">📊 چارت زنده Gate.io</a>
-              <a class="btn" target="_blank" href="https://www.tradingview.com/chart/?symbol=GATEIO:${item.symbol.replace('_', '')}.P">📈 TradingView</a>
-            </div>
-          </div>
-        `;
-      }).join('');
+      renderView();
     }
 
     loadAllData();
-    setInterval(loadAllData, 30000);
+    setInterval(loadAllData, 25000);
   </script>
 </body>
 </html>
