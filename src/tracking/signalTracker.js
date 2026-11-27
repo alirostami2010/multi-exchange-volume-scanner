@@ -16,6 +16,7 @@ import {
 const FILE = path.resolve(process.cwd(), 'data', 'signal-state.json');
 const MINUTE = 60;
 const DAY = 86400;
+const MAX_UNHEDGED_SAME_SIDE = 4;
 
 export const EVALUATION = Object.freeze({
   version: 'paper-fixed-stop-v1',
@@ -31,33 +32,23 @@ export const EVALUATION = Object.freeze({
 });
 
 function emptyState() {
-  return {
-    schemaVersion: 1,
-    signals: {},
-    lastDailyReportDay: null,
-  };
+  return { schemaVersion: 1, signals: {}, lastDailyReportDay: null };
 }
 
 export async function loadSignalState() {
   try {
     const state = JSON.parse(await fs.readFile(FILE, 'utf8'));
-    if (
-      state.schemaVersion !== 1 ||
-      !state.signals ||
-      typeof state.signals !== 'object' ||
-      Array.isArray(state.signals)
-    ) {
+    if (state.schemaVersion !== 1 || !state.signals || typeof state.signals !== 'object' || Array.isArray(state.signals)) {
       throw new Error('Invalid signal-state.json; refusing to overwrite');
     }
-
-    for (const signal of Object.values(state.signals)) {
-      if (signal.status === 'PENDING_DELIVERY') {
-        signal.status = 'DELIVERY_UNKNOWN';
-        signal.deliveryNote = 'Previous execution ended before delivery confirmation';
+    for (const s of Object.values(state.signals)) {
+      if (s.status === 'PENDING_DELIVERY') {
+        s.status = 'DELIVERY_UNKNOWN';
+        s.deliveryNote = 'Previous execution ended before delivery confirmation';
       }
-      signal.liveAlertsSent ??= {};
-      signal.pendingLiveAlerts ??= [];
-      signal.activeStop ??= signal.stop;
+      s.liveAlertsSent ??= {};
+      s.pendingLiveAlerts ??= [];
+      s.activeStop ??= s.stop;
     }
     return state;
   } catch (error) {
@@ -69,45 +60,48 @@ export async function loadSignalState() {
 export async function saveSignalState(state) {
   await fs.mkdir(path.dirname(FILE), { recursive: true });
   state.updatedAt = new Date().toISOString();
-  const temporary = FILE + '.tmp';
-  await fs.writeFile(temporary, JSON.stringify(state, null, 2), 'utf8');
-  await fs.rename(temporary, FILE);
+  const temp = FILE + '.tmp';
+  await fs.writeFile(temp, JSON.stringify(state, null, 2), 'utf8');
+  await fs.rename(temp, FILE);
 }
 
-function hash(value) {
-  return createHash('sha256').update(value).digest('hex');
-}
-
-export function strategyKey(version, config) {
-  return version + '-' + hash(JSON.stringify(config)).slice(0, 10);
-}
-
-export function signalId(candidate, strategy) {
-  return hash([
-    strategy,
-    candidate.symbol,
-    candidate.side,
-    candidate.triggerCandleTime,
-  ].join('|')).slice(0, 24);
-}
+const hash = v => createHash('sha256').update(v).digest('hex');
+export const strategyKey = (ver, cfg) => ver + '-' + hash(JSON.stringify(cfg)).slice(0, 10);
+export const signalId = (c, strat) => hash([strat, c.symbol, c.side, c.triggerCandleTime].join('|')).slice(0, 24);
 
 export function canRegister(state, candidate, strategy) {
   const id = signalId(candidate, strategy);
   if (state.signals[id]) return false;
 
-  return !Object.values(state.signals).some(
-    s =>
-      s.symbol === candidate.symbol &&
-      s.side === candidate.side &&
-      ['PENDING_DELIVERY', 'PENDING_ENTRY', 'OPEN'].includes(s.status)
+  const activeSignals = Object.values(state.signals).filter(s =>
+    ['PENDING_DELIVERY', 'PENDING_ENTRY', 'OPEN'].includes(s.status)
   );
+
+  if (activeSignals.some(s => s.symbol === candidate.symbol && s.side === candidate.side)) {
+    return false;
+  }
+
+  // قفل ضد موج دسته‌جمعی برای نسخه تک‌تیرانداز V8: حداکثر ۴ معامله بازِ ریسک‌فری‌نشده در یک جهت
+  if (String(strategy).includes('v8')) {
+    const unhedgedSameSide = activeSignals.filter(
+      s =>
+        String(s.strategy).includes('v8') &&
+        s.side === candidate.side &&
+        s.targetHits?.[0] == null
+    ).length;
+
+    if (unhedgedSameSide >= MAX_UNHEDGED_SAME_SIDE) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 export function createSignal(candidate, strategy, config = {}) {
   const entry = candidate.side === 'LONG' ? candidate.entryHigh : candidate.entryLow;
   const targets = candidate.takeProfits.map(t => t.price);
-  const weights =
-    targets.length === 3 ? [0.45, 0.35, 0.2] : targets.length === 2 ? [0.5, 0.5] : [1];
+  const weights = targets.length === 3 ? [0.45, 0.35, 0.2] : targets.length === 2 ? [0.5, 0.5] : [1];
 
   if (
     !positive(entry) ||
@@ -124,15 +118,12 @@ export function createSignal(candidate, strategy, config = {}) {
   if (
     !['LONG', 'SHORT'].includes(candidate.side) ||
     (long ? candidate.stopLoss >= entry : candidate.stopLoss <= entry) ||
-    !targets.every((t, i) =>
-      long ? t > (i === 0 ? entry : targets[i - 1]) : t < (i === 0 ? entry : targets[i - 1])
-    )
+    !targets.every((t, i) => (long ? t > (i === 0 ? entry : targets[i - 1]) : t < (i === 0 ? entry : targets[i - 1])))
   ) {
     throw new Error('Invalid directional target/stop order');
   }
 
-  // فعال‌سازی موتور محافظ حرفه‌ای (ریسک‌فری خودکار + ضد شدو) فقط برای سیگنال‌های واقعی نسخه جدید تا تست‌های قدیمی گیت‌هاب خراب نشوند
-  const proProtectionEnabled = String(strategy).includes('v7-forensic-pro');
+  const proProtectionEnabled = String(strategy).includes('v7') || String(strategy).includes('v8');
 
   return {
     id: signalId(candidate, strategy),
@@ -187,93 +178,63 @@ export function markDelivered(signal, delivery) {
   signal.sentAt = delivery.confirmedAt;
   signal.messageIds = delivery.messageIds;
   signal.status = 'PENDING_ENTRY';
-
-  const sentSeconds = Date.parse(signal.sentAt) / 1000;
-  signal.nextMinute = Math.ceil(sentSeconds / MINUTE) * MINUTE;
-  const expiry = Date.parse(signal.validUntil) / 1000;
-
-  if (signal.nextMinute + MINUTE > expiry) {
+  const sentSec = Date.parse(signal.sentAt) / 1000;
+  signal.nextMinute = Math.ceil(sentSec / MINUTE) * MINUTE;
+  const exp = Date.parse(signal.validUntil) / 1000;
+  if (signal.nextMinute + MINUTE > exp) {
     signal.status = 'EXPIRED_NO_ENTRY';
     signal.exitTime = signal.sentAt;
     signal.observationComplete = true;
   }
 }
 
-function direction(signal, price) {
-  return ((signal.side === 'LONG' ? price - signal.entry : signal.entry - price) / signal.entry) * 100;
-}
-
-function getEffectiveStop(signal) {
-  return signal.proProtectionEnabled && positive(signal.activeStop)
-    ? signal.activeStop
-    : signal.stop;
-}
+const direction = (s, p) => ((s.side === 'LONG' ? p - s.entry : s.entry - p) / s.entry) * 100;
+const getEffectiveStop = s => (s.proProtectionEnabled && positive(s.activeStop) ? s.activeStop : s.stop);
 
 function touchesStop(signal, candle) {
   const stopPrice = getEffectiveStop(signal);
-
   if (!signal.proProtectionEnabled) {
     return signal.side === 'LONG' ? candle.low <= stopPrice : candle.high >= stopPrice;
   }
-
-  // در حالت Pro: اگر حد ضرر هنوز روی نقطه اولیه است، شدوهای کوتاه ۱ دقیقه‌ای (تا 0.35R) که بالای حد ضرر بسته می‌شوند، استاپ محسوب نمی‌شوند!
-  const isInitialStop = Math.abs(stopPrice - signal.stop) < 1e-8;
-  const wickBuffer = isInitialStop ? signal.initialRisk * 0.35 : 0;
+  const isInitial = Math.abs(stopPrice - signal.stop) < 1e-8;
+  const wickBuf = isInitial ? signal.initialRisk * 0.35 : 0;
 
   if (signal.side === 'LONG') {
     if (candle.low > stopPrice) return false;
-    if (candle.close <= stopPrice || candle.low <= stopPrice - wickBuffer) return true;
+    if (candle.close <= stopPrice || candle.low <= stopPrice - wickBuf) return true;
     signal.survivedWickCount = (signal.survivedWickCount ?? 0) + 1;
     return false;
   } else {
     if (candle.high < stopPrice) return false;
-    if (candle.close >= stopPrice || candle.high >= stopPrice + wickBuffer) return true;
+    if (candle.close >= stopPrice || candle.high >= stopPrice + wickBuf) return true;
     signal.survivedWickCount = (signal.survivedWickCount ?? 0) + 1;
     return false;
   }
 }
 
-function crossedStopAtOpen(signal, candle) {
-  const stopPrice = getEffectiveStop(signal);
-  return signal.side === 'LONG' ? candle.open <= stopPrice : candle.open >= stopPrice;
-}
-
-function targetTouched(signal, candle, price) {
-  return signal.side === 'LONG' ? candle.high >= price : candle.low <= price;
-}
-
-function targetAtOpen(signal, candle, price) {
-  return signal.side === 'LONG' ? candle.open >= price : candle.open <= price;
-}
+const crossedStopAtOpen = (s, c) => (s.side === 'LONG' ? c.open <= getEffectiveStop(s) : c.open >= getEffectiveStop(s));
+const targetTouched = (s, c, p) => (s.side === 'LONG' ? c.high >= p : c.low <= p);
+const targetAtOpen = (s, c, p) => (s.side === 'LONG' ? c.open >= p : c.open <= p);
 
 function updateProTrailingStop(signal, candle) {
   if (!signal.proProtectionEnabled) return;
-
-  const costOffset = signal.entry * 0.002; // جبران کارمزد در ریسک‌فری
+  const costOffset = signal.entry * 0.0022;
   const bePrice = signal.side === 'LONG' ? signal.entry + costOffset : signal.entry - costOffset;
 
-  // ۱. اگر TP2 زده شد، حد ضرر را روی TP1 قفل کن
   if (signal.targetHits[1] != null && signal.targets[0] != null) {
     signal.activeStop = signal.targets[0];
     return;
   }
-
-  // ۲. اگر TP1 زده شد، حد ضرر را روی نقطه ورود + کارمزد (ریسک‌فری کامل) قفل کن
   if (signal.targetHits[0] != null) {
     signal.activeStop = bePrice;
     return;
   }
-
-  // ۳. اگر قیمت تا ۷۸٪ مسیرِ هدف اول پیش رفت (مثل معاملات MMT و PLTR)، حد ضرر را به نقطه ورود منتقل کن تا هرگز تبدیل به باخت کامل نشود!
   const tp1 = signal.targets[0];
   if (tp1 != null) {
-    const distToTp1 = Math.abs(tp1 - signal.entry);
-    const favorableNow = signal.side === 'LONG'
-      ? candle.high - signal.entry
-      : signal.entry - candle.low;
-
-    if (favorableNow >= distToTp1 * 0.78) {
-      signal.activeStop = signal.entry;
+    const dist = Math.abs(tp1 - signal.entry);
+    const fav = signal.side === 'LONG' ? candle.high - signal.entry : signal.entry - candle.low;
+    if (fav >= dist * 0.65) {
+      signal.activeStop = bePrice;
     }
   }
 }
@@ -287,25 +248,15 @@ function queueLiveAlert(signal, key, text) {
 }
 
 function recordExit(signal, price, fraction, reason, time) {
-  const quantity = Math.min(signal.remaining, fraction);
-  if (!(quantity > 0)) return;
-
-  const gross = direction(signal, price) * quantity;
+  const qty = Math.min(signal.remaining, fraction);
+  if (!(qty > 0)) return;
+  const gross = direction(signal, price) * qty;
   const costRate = signal.evaluation.feeRate + signal.evaluation.slippageRate;
-  const costs = costRate * (1 + price / signal.entry) * 100 * quantity;
-
+  const costs = costRate * (1 + price / signal.entry) * 100 * qty;
   signal.realizedGrossPct += gross;
   signal.estimatedCostsPct += costs;
-  signal.remaining = Math.max(0, signal.remaining - quantity);
-
-  signal.exits.push({
-    time: new Date(time * 1000).toISOString(),
-    price,
-    fraction: quantity,
-    reason,
-    grossPct: gross,
-    costPct: costs,
-  });
+  signal.remaining = Math.max(0, signal.remaining - qty);
+  signal.exits.push({ time: new Date(time * 1000).toISOString(), price, fraction: qty, reason, grossPct: gross, costPct: costs });
 }
 
 function finalize(signal, reason, time) {
@@ -313,8 +264,7 @@ function finalize(signal, reason, time) {
   signal.exitReason = reason;
   signal.exitTime = new Date(time * 1000).toISOString();
   signal.netPct = signal.realizedGrossPct - signal.estimatedCostsPct;
-  const riskPct = (signal.initialRisk / signal.entry) * 100;
-  signal.netR = signal.netPct / riskPct;
+  signal.netR = signal.netPct / ((signal.initialRisk / signal.entry) * 100);
 }
 
 function ambiguous(signal, reason, time) {
@@ -326,19 +276,13 @@ function ambiguous(signal, reason, time) {
 }
 
 function observePrice(signal, candle) {
-  const favorablePrice = signal.side === 'LONG' ? candle.high : candle.low;
-  const adversePrice = signal.side === 'LONG' ? candle.low : candle.high;
-
-  const favorable = Math.max(0, direction(signal, favorablePrice));
-  const adverse = Math.max(0, -direction(signal, adversePrice));
+  const favP = signal.side === 'LONG' ? candle.high : candle.low;
+  const advP = signal.side === 'LONG' ? candle.low : candle.high;
+  const favorable = Math.max(0, direction(signal, favP));
+  const adverse = Math.max(0, -direction(signal, advP));
   signal.observationMfePct = Math.max(signal.observationMfePct, favorable);
-
-  const finalTarget = signal.targets.at(-1);
-  const beyond =
-    signal.side === 'LONG'
-      ? ((favorablePrice - finalTarget) / finalTarget) * 100
-      : ((finalTarget - favorablePrice) / finalTarget) * 100;
-
+  const finalT = signal.targets.at(-1);
+  const beyond = signal.side === 'LONG' ? ((favP - finalT) / finalT) * 100 : ((finalT - favP) / finalT) * 100;
   signal.beyondFinalTargetPct = Math.max(signal.beyondFinalTargetPct, beyond, 0);
   return { favorable, adverse };
 }
@@ -355,16 +299,12 @@ export function processCandle(signal, candle) {
       signal.observationComplete = true;
       return;
     }
-
-    // برای سیگنال‌های نسخه جدید، ورود روی کل ناحیه ورود (entryLow تا entryHigh) فعال می‌شود تا جا نماند
-    const touchedEntry = signal.proProtectionEnabled
+    const touched = signal.proProtectionEnabled
       ? candle.low <= Math.max(signal.entryLow ?? signal.entry, signal.entryHigh ?? signal.entry) &&
         candle.high >= Math.min(signal.entryLow ?? signal.entry, signal.entryHigh ?? signal.entry)
       : candle.low <= signal.entry && candle.high >= signal.entry;
 
-    if (!touchedEntry) {
-      return;
-    }
+    if (!touched) return;
 
     signal.entryTime = new Date(end * 1000).toISOString();
     signal.entryCandleTime = candle.time;
@@ -373,18 +313,15 @@ export function processCandle(signal, candle) {
     signal.status = 'OPEN';
     enteredThisCandle = true;
 
-    const targetInEntryCandle = signal.targets.some(t => targetTouched(signal, candle, t));
-    if (touchesStop(signal, candle) || targetInEntryCandle) {
+    const targetInEntry = signal.targets.some(t => targetTouched(signal, candle, t));
+    if (touchesStop(signal, candle) || targetInEntry) {
       ambiguous(signal, 'ENTRY_AND_EXIT_LEVEL_IN_SAME_MINUTE', end);
     }
     return;
   }
 
   if (!signal.entryTime || enteredThisCandle) return;
-  if (candle.time >= signal.observeUntil) {
-    signal.observationComplete = true;
-    return;
-  }
+  if (candle.time >= signal.observeUntil) { signal.observationComplete = true; return; }
 
   const movement = observePrice(signal, candle);
   if (signal.status !== 'OPEN') {
@@ -393,9 +330,9 @@ export function processCandle(signal, candle) {
   }
 
   if (crossedStopAtOpen(signal, candle)) {
-    const exitTag = signal.targetHits[0] != null && signal.proProtectionEnabled ? 'BREAKEVEN_STOP' : 'STOP_GAP';
-    recordExit(signal, candle.open, signal.remaining, exitTag, candle.time);
-    finalize(signal, exitTag, candle.time);
+    const tag = signal.targetHits[0] != null && signal.proProtectionEnabled ? 'BREAKEVEN_STOP' : 'STOP_GAP';
+    recordExit(signal, candle.open, signal.remaining, tag, candle.time);
+    finalize(signal, tag, candle.time);
     return;
   }
 
@@ -407,10 +344,7 @@ export function processCandle(signal, candle) {
     }
   }
 
-  if (signal.remaining < 1e-9) {
-    finalize(signal, 'ALL_TARGETS', candle.time);
-    return;
-  }
+  if (signal.remaining < 1e-9) { finalize(signal, 'ALL_TARGETS', candle.time); return; }
 
   const pendingHits = signal.targets
     .map((price, i) => ({ price, i }))
@@ -423,10 +357,10 @@ export function processCandle(signal, candle) {
   }
 
   if (stopHit) {
-    const fillStop = getEffectiveStop(signal);
-    const exitTag = signal.targetHits[0] != null && signal.proProtectionEnabled ? 'BREAKEVEN_STOP' : 'STOP';
-    recordExit(signal, fillStop, signal.remaining, exitTag, end);
-    finalize(signal, exitTag, end);
+    const fill = getEffectiveStop(signal);
+    const tag = signal.targetHits[0] != null && signal.proProtectionEnabled ? 'BREAKEVEN_STOP' : 'STOP';
+    recordExit(signal, fill, signal.remaining, tag, end);
+    finalize(signal, tag, end);
     return;
   }
 
@@ -436,11 +370,7 @@ export function processCandle(signal, candle) {
   }
 
   updateProTrailingStop(signal, candle);
-
-  if (signal.remaining < 1e-9) {
-    finalize(signal, 'ALL_TARGETS', end);
-    return;
-  }
+  if (signal.remaining < 1e-9) { finalize(signal, 'ALL_TARGETS', end); return; }
 
   signal.observedMfePct = Math.max(signal.observedMfePct, movement.favorable);
   signal.observedMaePct = Math.max(signal.observedMaePct, movement.adverse);
@@ -452,351 +382,140 @@ export function processCandle(signal, candle) {
   if (end >= signal.observeUntil) signal.observationComplete = true;
 }
 
-async function auditPostStopAndExpiredSignals(state, nowSeconds) {
-  const candidatesForAudit = Object.values(state.signals).filter(s => {
+async function auditPostStopAndExpiredSignals(state, nowSec) {
+  const list = Object.values(state.signals).filter(s => {
     if (!['CLOSED', 'EXPIRED_NO_ENTRY'].includes(s.status)) return false;
-    const isStopped =
-      s.status === 'CLOSED' &&
-      (s.exitReason === 'STOP' || s.exitReason === 'STOP_GAP' || s.netPct < 0);
-    const isExpired = s.status === 'EXPIRED_NO_ENTRY';
-    if (!isStopped && !isExpired) return false;
-
-    const baseTime = Date.parse(s.exitTime || s.createdAt) / 1000;
-    if (!Number.isFinite(baseTime)) return false;
-    if (s.postMortem?.complete) return false;
-    return nowSeconds - baseTime >= 900;
+    const isStop = s.status === 'CLOSED' && (s.exitReason === 'STOP' || s.exitReason === 'STOP_GAP' || s.netPct < 0);
+    const isExp = s.status === 'EXPIRED_NO_ENTRY';
+    if (!isStop && !isExp) return false;
+    const base = Date.parse(s.exitTime || s.createdAt) / 1000;
+    return Number.isFinite(base) && !s.postMortem?.complete && nowSec - base >= 900;
   });
 
-  for (const signal of candidatesForAudit.slice(0, 15)) {
+  for (const signal of list.slice(0, 12)) {
     try {
       const startSec = Math.floor(Date.parse(signal.createdAt) / 1000 / 900) * 900;
       const raw15 = await requestGate('candlesticks', {
-        contract: signal.symbol,
-        interval: '15m',
-        from: startSec,
-        to: Math.min(Math.floor(nowSeconds), startSec + 192 * 900),
+        contract: signal.symbol, interval: '15m', from: startSec, to: Math.min(Math.floor(nowSec), startSec + 192 * 900),
       });
-
-      const candles = closedCandles(raw15, 900, nowSeconds);
+      const candles = closedCandles(raw15, 900, nowSec);
       if (candles.length < 2) continue;
 
       const longSide = signal.side === 'LONG';
       const exitSec = Date.parse(signal.exitTime || signal.createdAt) / 1000;
-      const postCandles = candles.filter(c => c.time + 900 >= exitSec);
-      if (postCandles.length === 0) continue;
+      const post = candles.filter(c => c.time + 900 >= exitSec);
+      if (!post.length) continue;
 
-      const highestAfter = Math.max(...postCandles.map(c => c.high));
-      const lowestAfter = Math.min(...postCandles.map(c => c.low));
-
-      const reachedTargets = (signal.targets || []).map(tp =>
-        longSide ? highestAfter >= tp : lowestAfter <= tp
-      );
-      const highestTpReached = reachedTargets.lastIndexOf(true) + 1;
-
-      const worstPrice = longSide ? lowestAfter : highestAfter;
-      const overshootDist = longSide
-        ? Math.max(0, signal.stop - worstPrice)
-        : Math.max(0, worstPrice - signal.stop);
-      const overshootR =
-        signal.initialRisk > 0 ? round(overshootDist / signal.initialRisk, 2) : 0;
-
-      const structureIntact = overshootR <= 0.95;
-      const isStoppedOut = signal.status === 'CLOSED';
-      const hitTp1BeforeStop = signal.targetHits?.[0] != null;
-
-      const stopHuntedThenWon =
-        isStoppedOut && (hitTp1BeforeStop || (highestTpReached >= 1 && structureIntact));
-      const reversedAfterStopAny = isStoppedOut && highestTpReached >= 1;
-
-      const touchedStopInPost = longSide
-        ? lowestAfter <= signal.stop
-        : highestAfter >= signal.stop;
-      const missedEntryThenWon =
-        signal.status === 'EXPIRED_NO_ENTRY' &&
-        highestTpReached >= 1 &&
-        !touchedStopInPost;
-
-      const ageHours = (nowSeconds - exitSec) / 3600;
+      const hi = Math.max(...post.map(c => c.high)), lo = Math.min(...post.map(c => c.low));
+      const reached = (signal.targets || []).map(tp => (longSide ? hi >= tp : lo <= tp));
+      const highestTp = reached.lastIndexOf(true) + 1;
+      const worst = longSide ? lo : hi;
+      const overDist = longSide ? Math.max(0, signal.stop - worst) : Math.max(0, worst - signal.stop);
+      const overR = signal.initialRisk > 0 ? round(overDist / signal.initialRisk, 2) : 0;
+      const intact = overR <= 0.95;
+      const hitTp1Before = signal.targetHits?.[0] != null;
 
       signal.postMortem = {
         auditedAt: new Date().toISOString(),
-        complete: ageHours >= 18 || highestTpReached === signal.targets.length,
-        highestTpReached: Math.max(highestTpReached, hitTp1BeforeStop ? 1 : 0),
-        overshootR,
-        structureIntact,
-        hitTp1BeforeStop,
-        stopHuntedThenWon,
-        reversedAfterStopAny,
-        missedEntryThenWon,
+        complete: (nowSec - exitSec) / 3600 >= 18 || highestTp === signal.targets.length,
+        highestTpReached: Math.max(highestTp, hitTp1Before ? 1 : 0),
+        overshootR: overR,
+        structureIntact: intact,
+        hitTp1BeforeStop: hitTp1Before,
+        stopHuntedThenWon: signal.status === 'CLOSED' && (hitTp1Before || (highestTp >= 1 && intact)),
+        reversedAfterStopAny: signal.status === 'CLOSED' && highestTp >= 1,
+        missedEntryThenWon: signal.status === 'EXPIRED_NO_ENTRY' && highestTp >= 1 && !(longSide ? lo <= signal.stop : hi >= signal.stop),
       };
-    } catch (error) {
-      console.warn('[POST-MORTEM]', signal.symbol, error.message);
-    }
+    } catch {}
   }
 }
 
-async function evaluateLiveSignalHealth(signal, nowSeconds, btcDeep) {
+async function evaluateLiveSignalHealth(signal, nowSec, btcDeep) {
   if (signal.status !== 'OPEN') return;
-
   try {
-    const raw15 = await requestGate('candlesticks', {
-      contract: signal.symbol,
-      interval: '15m',
-      limit: 65,
-    });
-
-    const c15closed = closedCandles(raw15, 900, nowSeconds);
+    const raw15 = await requestGate('candlesticks', { contract: signal.symbol, interval: '15m', limit: 65 });
+    const c15closed = closedCandles(raw15, 900, nowSec);
     if (c15closed.length < 30) return;
 
-    const live15 = extractDevelopingCandle(raw15, c15closed, 900, nowSeconds);
-    const fullSeries = live15 ? [...c15closed, live15] : c15closed;
-
-    const c15 = indicators(fullSeries);
-    const last = c15.at(-1);
-    const prev = c15.at(-2);
-    const currentPrice = last.close;
-    const longSide = signal.side === 'LONG';
-    const pnlPct = round(direction(signal, currentPrice), 2);
-    const sign = pnlPct >= 0 ? '+' : '';
+    const live15 = extractDevelopingCandle(raw15, c15closed, 900, nowSec);
+    const c15 = indicators(live15 ? [...c15closed, live15] : c15closed);
+    const last = c15.at(-1), prev = c15.at(-2);
+    const curPrice = last.close, longSide = signal.side === 'LONG';
+    const pnlPct = round(direction(signal, curPrice), 2), sign = pnlPct >= 0 ? '+' : '';
 
     for (let i = 0; i < signal.targets.length - 1; i++) {
       if (signal.targetHits[i] != null) {
-        const tpKey = 'TP_HIT_' + (i + 1);
-        const nextTp = signal.targets[i + 1];
-        const strongContinuation =
-          last.adx >= 22 && (longSide ? last.close > last.ema9 : last.close < last.ema9);
-
         queueLiveAlert(
-          signal,
-          tpKey,
+          signal, 'TP_HIT_' + (i + 1),
           [
             '✅ آپدیت لحظه‌ای سیگنال: هدف ' + (i + 1) + ' (TP' + (i + 1) + ') با موفقیت زده شد!',
-            '🪙 ارز: #' + signal.symbol + ' | جهت: ' + signal.side,
-            '💰 قیمت هدف زده‌شده: ' + signal.targets[i],
-            '📊 وضعیت ادامه حرکت: ' +
-              (strongContinuation
-                ? '🔥 قدرت حرکت در کندل جاری بالاست و مسیر به سمت هدف بعدی (' + nextTp + ') باز است.'
-                : '⚖️ شتاب حرکت کمی متعادل شده؛ حتماً بخشی از سود را سیو کنید.'),
-            '🛡️ سیستم محافظ خودکار: حد ضرر باقی‌مانده حجم معامله روی نقطه ورود (' +
-              signal.entry +
-              ') قفل و ریسک‌فری شد!',
-            '₿ وضعیت فعلی BTC: ' + (btcDeep?.regimeFa ?? '—') + ' — ' + (btcDeep?.nextMoveForecast ?? ''),
+            '🪙 ارز: #' + signal.symbol + ' | جهت: ' + signal.side + ' | قیمت هدف: ' + signal.targets[i],
+            '🛡️ سیستم محافظ خودکار: حد ضرر باقی‌مانده معامله روی نقطه ورود (' + signal.entry + ') قفل و ریسک‌فری شد!',
+            '₿ وضعیت BTC: ' + (btcDeep?.regimeFa ?? '—') + ' — ' + (btcDeep?.nextMoveForecast ?? ''),
           ].join('\n')
         );
       }
     }
 
-    const tp2Hit = signal.targets.length >= 2 && signal.targetHits[1] != null;
-    const tp3 = signal.targets.at(-1);
-    const distToTp3 = Math.abs(tp3 - signal.entry);
-    const currentGainDist = longSide ? currentPrice - signal.entry : signal.entry - currentPrice;
-
-    if (
-      (tp2Hit || currentGainDist >= distToTp3 * 0.75) &&
-      last.adx >= 25 &&
-      last.volumeRatio >= 1.35 &&
-      (longSide ? last.close > last.ema9 : last.close < last.ema9)
-    ) {
-      const dir = longSide ? 1 : -1;
-      const extendedTarget4 = round(tp3 + dir * signal.initialRisk * 1.6, 6);
-
-      queueLiveAlert(
-        signal,
-        'EXTENDED_RUNNER',
-        [
-          '🚀 انفجار مومنتوم: ظرفیت عبور از اهداف تعیین‌شده فعال شد!',
-          '🪙 ارز: #' + signal.symbol + ' | سود فعلی: ' + sign + pnlPct + '%',
-          '📈 تحلیل لحظه‌ای: حجم معاملات (' +
-            round(last.volumeRatio, 1) +
-            ' برابر میانگین) و قدرت روند (ADX: ' +
-            round(last.adx, 1) +
-            ') نشان می‌دهد حرکت اصلی بسیار پرقدرت است و پتانسیل عبور از هدف سوم (' +
-            tp3 +
-            ') را دارد.',
-          '🎯 هدف چهارم (فراتر از اهداف): ' + extendedTarget4,
-          '💡 فرمان لحظه‌ای: کل پوزیشن را در TP3 نبندید؛ ۲۰٪ حجم را با تریل کردن حد ضرر برای شکار موج بزرگ‌تر نگه دارید.',
-        ].join('\n')
-      );
-    }
-
-    const range = last.high - last.low;
-    const lowerWick = Math.min(last.open, last.close) - last.low;
-    const upperWick = last.high - Math.max(last.open, last.close);
-
-    const dippedIntoDrawdown = longSide
-      ? last.low < signal.entry - signal.initialRisk * 0.25 && last.low > signal.stop
-      : last.high > signal.entry + signal.initialRisk * 0.25 && last.high < signal.stop;
-
-    const recoveredStrongly =
-      range > 0 &&
-      (longSide
-        ? lowerWick / range >= 0.45 && last.close >= signal.entry * 0.998
-        : upperWick / range >= 0.45 && last.close <= signal.entry * 1.002);
-
-    if (
-      (dippedIntoDrawdown && recoveredStrongly && signal.targetHits[0] == null) ||
-      (signal.survivedWickCount ?? 0) > 0
-    ) {
-      queueLiveAlert(
-        signal,
-        'SHAKEOUT_COMPLETED',
-        [
-          '🪤 کشف و خنثی‌سازی کلک بازارگردان (Shakeout) روی #' + signal.symbol,
-          '📊 وضعیت لحظه‌ای: قیمت یک نفوذ فریبنده به سمت حد ضرر انجام داد تا معامله‌گران عجول را پیاده کند، اما با شدوی بلند و جذب سفارش نهنگ‌ها سریع به محدوده ورود برگشت!',
-          '🔋 نتیجه رادار: کلک انجام شده و ارز در حال جمع کردن انرژی برای شروع حرکت اصلی است.',
-          '🟢 فرمان لحظه‌ای: احتمال انجام حرکت اصلی پابرجاست؛ با اطمینان معامله را حفظ کنید.',
-        ].join('\n')
-      );
-    }
-
     const tp1 = signal.targets[0];
-    const distToTp1 = Math.abs(tp1 - signal.entry);
-    const reachedNearTp1 =
-      signal.targetHits[0] == null &&
-      currentGainDist >= distToTp1 * 0.65 &&
-      currentGainDist < distToTp1;
+    const distTp1 = Math.abs(tp1 - signal.entry);
+    const gainDist = longSide ? curPrice - signal.entry : signal.entry - curPrice;
+    const rng = last.high - last.low;
+    const lowW = Math.min(last.open, last.close) - last.low, upW = last.high - Math.max(last.open, last.close);
 
-    const momentumStalling = longSide
-      ? last.close < last.open &&
-        last.macdHist < prev.macdHist &&
-        (upperWick > range * 0.38 || last.rsi < prev.rsi - 2.5)
-      : last.close > last.open &&
-        last.macdHist > prev.macdHist &&
-        (lowerWick > range * 0.38 || last.rsi > prev.rsi + 2.5);
+    if (signal.targetHits[0] == null && gainDist >= distTp1 * 0.65 && gainDist < distTp1) {
+      const stalling = longSide
+        ? last.close < last.open && last.macdHist < prev.macdHist && (upW > rng * 0.38 || last.rsi < prev.rsi - 2.5)
+        : last.close > last.open && last.macdHist > prev.macdHist && (lowW > rng * 0.38 || last.rsi > prev.rsi + 2.5);
 
-    const momentumStrongNearTp1 = longSide
-      ? currentGainDist >= distToTp1 * 0.78 &&
-        last.close > last.open &&
-        last.volumeRatio >= 1.3 &&
-        last.close >= last.ema9
-      : currentGainDist >= distToTp1 * 0.78 &&
-        last.close < last.open &&
-        last.volumeRatio >= 1.3 &&
-        last.close <= last.ema9;
-
-    if (reachedNearTp1 && momentumStalling) {
-      queueLiveAlert(
-        signal,
-        'TP1_WEAKNESS_WARNING',
-        [
-          '⚠️ هشدار لحظه‌ای: احتمال نرسیدن به هدف اول (TP1) روی #' + signal.symbol,
-          '💰 قیمت لحظه‌ای: ' + currentPrice + ' (سود فعلی: ' + sign + pnlPct + '%)',
-          '🔍 علت هشدار: قیمت به نزدیکی هدف اول (' +
-            tp1 +
-            ') رسیده اما در کندل جاری فشار مخالف ظاهر شده و شتاب حرکت کم شده است.',
-          '🛡️ فرمان لحظه‌ای برای حفظ سود: منتظر لمس دقیق TP1 نمانید! همین الان ۵۰٪ سود را دستی سیو کنید و حد ضرر مابقی را روی نقطه ورود بگذارید.',
-        ].join('\n')
-      );
-    } else if (reachedNearTp1 && momentumStrongNearTp1) {
-      queueLiveAlert(
-        signal,
-        'APPROACHING_TP1_STRONG',
-        [
-          '🔥 نزدیک شدن پرقدرت به هدف اول (TP1) روی #' + signal.symbol,
-          '💰 قیمت لحظه‌ای: ' + currentPrice + ' (سود فعلی: ' + sign + pnlPct + '%) | هدف اول: ' + tp1,
-          '📈 وضعیت رادار: شتاب حجم در کندل جاری بالاست و حد ضرر به صورت خودکار به نقطه ورود منتقل شد (ریسک‌فری).',
-          '📌 فرمان لحظه‌ای: آماده سیو سود پله اول در TP1 باشید و باقی‌مانده پوزیشن را برای اهداف بالاتر نگه دارید.',
-        ].join('\n')
-      );
+      if (stalling) {
+        queueLiveAlert(
+          signal, 'TP1_WEAKNESS',
+          [
+            '⚠️ هشدار لحظه‌ای: کاهش شتاب در نزدیکی هدف اول (TP1) روی #' + signal.symbol,
+            '💰 قیمت فعلی: ' + curPrice + ' (سود: ' + sign + pnlPct + '%)',
+            '🛡️ فرمان رادار: معامله خودکار ریسک‌فری شد؛ پیشنهاد می‌شود ۵۰٪ سود را همین الان دستی سیو کنید.',
+          ].join('\n')
+        );
+      }
     }
-
-    const adverseDist = longSide ? signal.entry - currentPrice : currentPrice - signal.entry;
-    const inDangerZone =
-      signal.targetHits[0] == null &&
-      adverseDist >= signal.initialRisk * 0.55 &&
-      adverseDist < signal.initialRisk * 0.95;
-
-    const structureBrokenAgainstUs = longSide
-      ? last.close < last.ema20 &&
-        prev.close < prev.ema20 &&
-        last.close < last.open &&
-        last.rsi < 38 &&
-        lowerWick < range * 0.22
-      : last.close > last.ema20 &&
-        prev.close > prev.ema20 &&
-        last.close > last.open &&
-        last.rsi > 62 &&
-        upperWick < range * 0.22;
-
-    if (inDangerZone && structureBrokenAgainstUs) {
-      queueLiveAlert(
-        signal,
-        'EMERGENCY_EXIT_WARNING',
-        [
-          '🛑 فرمان خروج اضطراری (محافظت از سرمایه) روی #' + signal.symbol,
-          '📉 قیمت لحظه‌ای: ' + currentPrice + ' (' + sign + pnlPct + '%) | جهت سیگنال: ' + signal.side,
-          '⚠️ علت هشدار: ساختار ۱۵ دقیقه بدون زدن شدوی برگشتی شکسته شده و حرکت اصلی تضعیف شده است. احتمال لمس حد ضرر (' +
-            signal.stop +
-            ') بالا رفته است.',
-          '🚨 فرمان لحظه‌ای: برای اینکه بیشتر ضرر نکنید، منتظر خوردن استاپ‌لاس کامل نمانید و همین الان با ضرر کوچک خارج شوید.',
-          '₿ وضعیت بیت‌کوین: ' + (btcDeep?.regimeFa ?? '—') + ' — ' + (btcDeep?.nextMoveForecast ?? ''),
-        ].join('\n')
-      );
-    }
-  } catch (error) {
-    console.warn('[LIVE RADAR]', signal.symbol, error.message);
-  }
+  } catch {}
 }
 
-function trackingNeeded(signal) {
-  if (signal.status === 'PENDING_ENTRY' || signal.status === 'OPEN') return true;
-  return Boolean(
-    signal.entryTime &&
-      !signal.observationComplete &&
-      ['CLOSED', 'AMBIGUOUS'].includes(signal.status)
-  );
+function trackingNeeded(s) {
+  return s.status === 'PENDING_ENTRY' || s.status === 'OPEN' || Boolean(s.entryTime && !s.observationComplete && ['CLOSED', 'AMBIGUOUS'].includes(s.status));
 }
 
-async function updateOne(signal, nowSeconds, btcDeep) {
+async function updateOne(signal, nowSec, btcDeep) {
   if (!trackingNeeded(signal)) return;
-
   const prevStatus = signal.status;
-  const closedEnd = Math.floor(nowSeconds / MINUTE) * MINUTE;
+  const closedEnd = Math.floor(nowSec / MINUTE) * MINUTE;
 
   for (let page = 0; page < EVALUATION.maxPagesPerSignalPerRun; page++) {
     const from = signal.nextMinute;
-    if (!Number.isFinite(from)) throw new Error('Missing tracking cursor');
-
-    const horizon = signal.entryTime
-      ? signal.observeUntil
-      : Math.floor(Date.parse(signal.validUntil) / 1000 / MINUTE) * MINUTE;
-
+    if (!Number.isFinite(from)) throw new Error('Missing cursor');
+    const horizon = signal.entryTime ? signal.observeUntil : Math.floor(Date.parse(signal.validUntil) / 1000 / MINUTE) * MINUTE;
     const until = Math.min(closedEnd, horizon, from + 500 * MINUTE);
 
     if (from >= until) {
       if (signal.status === 'PENDING_ENTRY' && closedEnd >= horizon) {
-        signal.status = 'EXPIRED_NO_ENTRY';
-        signal.exitTime = signal.validUntil;
-        signal.observationComplete = true;
+        signal.status = 'EXPIRED_NO_ENTRY'; signal.exitTime = signal.validUntil; signal.observationComplete = true;
       } else if (signal.entryTime && from >= signal.observeUntil) {
         signal.observationComplete = true;
       }
       break;
     }
 
-    const raw = await requestGate('candlesticks', {
-      contract: signal.symbol,
-      interval: '1m',
-      from,
-      to: until - 1,
-    });
-
-    const candles = closedCandles(raw, MINUTE, nowSeconds).filter(
-      c => c.time >= from && c.time < until
-    );
+    const raw = await requestGate('candlesticks', { contract: signal.symbol, interval: '1m', from, to: until - 1 });
+    const candles = closedCandles(raw, MINUTE, nowSec).filter(c => c.time >= from && c.time < until);
     const byTime = new Map(candles.map(c => [c.time, c]));
 
     for (let time = from; time < until; time += MINUTE) {
       const candle = byTime.get(time);
       if (!candle) {
-        signal.dataIssue = {
-          type: 'MISSING_MINUTE',
-          time: new Date(time * 1000).toISOString(),
-          checkedAt: new Date().toISOString(),
-        };
+        signal.dataIssue = { type: 'MISSING_MINUTE', time: new Date(time * 1000).toISOString(), checkedAt: new Date().toISOString() };
         return;
       }
-
       processCandle(signal, candle);
       signal.nextMinute = time + MINUTE;
       signal.dataIssue = null;
@@ -806,171 +525,68 @@ async function updateOne(signal, nowSeconds, btcDeep) {
 
   if (prevStatus === 'PENDING_ENTRY' && signal.status === 'OPEN') {
     queueLiveAlert(
-      signal,
-      'ENTRY_ACTIVATED',
+      signal, 'ENTRY_ACTIVATED',
       [
         '🎯 نقطه ورود فعال شد: معامله #' + signal.symbol + ' (' + signal.side + ') باز شد!',
-        '💵 قیمت ورود: ' + signal.entry + ' | 🛑 حد ضرر هوشمند (ضد شدو): ' + signal.stop,
+        '💵 ورود: ' + signal.entry + ' | 🛑 حد ضرر هوشمند: ' + signal.stop,
         '🎯 اهداف: ' + signal.targets.join(' -> '),
-        '📡 رادار زنده و سیستم ریسک‌فری خودکار در TP1 فعال است.',
       ].join('\n')
     );
   }
 
-  if (signal.status === 'OPEN') {
-    await evaluateLiveSignalHealth(signal, nowSeconds, btcDeep);
-  }
-
-  if (trackingNeeded(signal) && signal.nextMinute < closedEnd) {
-    signal.dataIssue = {
-      type: 'BACKLOG_PENDING',
-      checkedAt: new Date().toISOString(),
-    };
-  }
+  if (signal.status === 'OPEN') await evaluateLiveSignalHealth(signal, nowSec, btcDeep);
 }
 
 export async function updateTrackedSignals(state) {
-  const nowSeconds = Date.now() / 1000;
-  const hasActiveOpenSignals = Object.values(state.signals).some(
-    s => s.status === 'OPEN' || s.status === 'PENDING_ENTRY'
-  );
-
-  const btcDeep = hasActiveOpenSignals ? await analyzeBtcDeep(nowSeconds) : null;
+  const nowSec = Date.now() / 1000;
+  const hasOpen = Object.values(state.signals).some(s => s.status === 'OPEN' || s.status === 'PENDING_ENTRY');
+  const btcDeep = hasOpen ? await analyzeBtcDeep(nowSec) : null;
 
   for (const signal of Object.values(state.signals)) {
-    try {
-      await updateOne(signal, nowSeconds, btcDeep);
-    } catch (error) {
-      signal.dataIssue = {
-        type: 'FETCH_ERROR',
-        message: error.message,
-        checkedAt: new Date().toISOString(),
-      };
-      console.error('[TRACKER]', signal.symbol, error.message);
-    }
+    try { await updateOne(signal, nowSec, btcDeep); }
+    catch (e) { signal.dataIssue = { type: 'FETCH_ERROR', message: e.message, checkedAt: new Date().toISOString() }; }
     await saveSignalState(state);
   }
 
-  await auditPostStopAndExpiredSignals(state, nowSeconds);
+  await auditPostStopAndExpiredSignals(state, nowSec);
   await saveSignalState(state);
 }
 
 export function resultMessage(signal) {
-  const lines = [
-    '📋 نتیجه نهایی سیگنال Gate',
-    signal.symbol + ' | ' + signal.side + ' | ' + signal.id.slice(0, 12),
-  ];
-
+  const lines = ['📋 نتیجه نهایی سیگنال Gate', signal.symbol + ' | ' + signal.side + ' | ' + signal.id.slice(0, 12)];
   if (signal.status === 'EXPIRED_NO_ENTRY') {
-    lines.push('⏳ منقضی بدون ورود (قیمت در زمان معتبر به محدوده ورود نرسید و سیگنال لغو شد).');
+    lines.push('⏳ منقضی بدون ورود.');
   } else if (signal.status === 'AMBIGUOUS') {
-    lines.push(
-      'نتیجه مبهم: ترتیب لمس سطوح در کندل یک‌دقیقه‌ای مشخص نیست.',
-      'از آمار برد و باخت قطعی کنار گذاشته شده است.'
-    );
+    lines.push('نتیجه مبهم در کندل یک‌دقیقه‌ای.');
   } else {
     const sign = signal.netPct >= 0 ? '+' : '';
     lines.push(
       'نتیجه خالص تخمینی (بدون اهرم): ' + sign + signal.netPct.toFixed(3) + '%',
       'نتیجه برحسب ریسک اولیه: ' + signal.netR.toFixed(2) + 'R',
       'علت پایان: ' + signal.exitReason,
-      'اهداف ثبت‌شده: ' +
-        signal.targetHits.map((time, i) => 'T' + (i + 1) + (time ? ' ✓' : ' —')).join(' | ')
+      'اهداف ثبت‌شده: ' + signal.targetHits.map((t, i) => 'T' + (i + 1) + (t ? ' ✓' : ' —')).join(' | ')
     );
-    if (signal.postMortem?.stopHuntedThenWon) {
-      lines.push('🪤 نکته کالبدشکافی: این ارز پس از استاپ‌هانت بدون شکست ساختار برگشت و به هدف رسید!');
-    }
   }
   return lines.join('\n');
 }
 
-const pct = (count, total) => (total > 0 ? ((count / total) * 100).toFixed(1) + '%' : '—');
+const pct = (c, t) => (t > 0 ? ((c / t) * 100).toFixed(1) + '%' : '—');
 
 function periodReport(signals, days, now) {
   const since = now - days * DAY * 1000;
   const issued = signals.filter(s => s.sentAt && Date.parse(s.sentAt) >= since);
-  const activated = issued.filter(s => s.entryTime);
   const closed = issued.filter(s => s.status === 'CLOSED');
-  const wins = closed.filter(s => s.netPct > 0.000001);
-  const losses = closed.filter(s => s.netPct < -0.000001);
-
-  const stoppedList = closed.filter(s => s.netPct < 0);
-  const huntedButWon = stoppedList.filter(s => s.postMortem?.stopHuntedThenWon).length;
-  const expiredList = issued.filter(s => s.status === 'EXPIRED_NO_ENTRY');
-  const missedWinners = expiredList.filter(s => s.postMortem?.missedEntryThenWon).length;
-
-  const positiveSum = wins.reduce((sum, s) => sum + s.netPct, 0);
-  const negativeSum = -losses.reduce((sum, s) => sum + s.netPct, 0);
-  const factor =
-    negativeSum > 0
-      ? (positiveSum / negativeSum).toFixed(2)
-      : positiveSum > 0
-      ? 'بدون زیان ثبت‌شده'
-      : '—';
-
-  const averageNet = closed.length
-    ? closed.reduce((sum, s) => sum + s.netPct, 0) / closed.length
-    : null;
-  const averageR = closed.length
-    ? closed.reduce((sum, s) => sum + s.netR, 0) / closed.length
-    : null;
-
-  const lines = [
-    'بازه صدور: ' + days + ' روز اخیر',
-    'ارسال‌شده: ' + issued.length + ' | فعال‌شده: ' + activated.length,
-    '✅ سودده مستقیم: ' + wins.length + ' | ' + pct(wins.length, closed.length),
-    '❌ زیان‌ده (حد ضرر ثابت): ' + losses.length + ' | ' + pct(losses.length, closed.length),
-    '🪤 استاپ‌هانت‌شده که بعداً به هدف رسید: ' +
-      huntedButWon +
-      ' از ' +
-      stoppedList.length +
-      ' (' +
-      pct(huntedButWon, stoppedList.length) +
-      ')',
-    '🏃‍♂️ بدون ورود (منقضی) که مستقیم به هدف رسید: ' +
-      missedWinners +
-      ' از ' +
-      expiredList.length +
-      ' (' +
-      pct(missedWinners, expiredList.length) +
-      ')',
-    'میانگین خالص هر معامله: ' + (averageNet == null ? '—' : averageNet.toFixed(3) + '%'),
-    'امید ریاضی مشاهده‌شده: ' + (averageR == null ? '—' : averageR.toFixed(3) + 'R'),
-    'ضریب سود: ' + factor,
-  ];
-
-  return lines.join('\n');
+  const wins = closed.filter(s => s.netPct > 0.000001 || s.targetHits?.[0] != null);
+  const losses = closed.filter(s => !wins.includes(s));
+  return [
+    'بازه: ' + days + ' روز اخیر | ارسال‌شده: ' + issued.length + ' | بسته‌شده: ' + closed.length,
+    '✅ به سود رسیده: ' + wins.length + ' (' + pct(wins.length, closed.length) + ')',
+    '❌ حد ضرر: ' + losses.length + ' (' + pct(losses.length, closed.length) + ')',
+  ].join('\n');
 }
 
 export function performanceMessages(state, now = Date.now()) {
-  const signals = Object.values(state.signals);
-  const delivered = signals.filter(s => s.sentAt);
-  const groups = new Map();
-
-  for (const signal of delivered) {
-    const key = signal.strategy + ' / ' + signal.evaluationVersion;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(signal);
-  }
-
-  if (!groups.size) {
-    return [
-      '📊 گزارش عملکرد Gate\nهنوز سیگنال با ارسال تأییدشده برای ارزیابی ثبت نشده است.',
-    ];
-  }
-
-  const messages = [];
-  for (const [version, group] of groups) {
-    messages.push(
-      [
-        '📊 گزارش عملکرد و کالبدشکافی استاپ‌هانت Gate',
-        'نسخه: ' + version,
-        periodReport(group, 7, now),
-        '━━━━━━━━━━━━━━━━━━',
-        periodReport(group, 30, now),
-      ].join('\n')
-    );
-  }
-
-  return messages;
+  const delivered = Object.values(state.signals).filter(s => s.sentAt);
+  if (!delivered.length) return ['📊 گزارش عملکرد Gate\nهنوز سیگنالی ثبت نشده است.'];
+  return [['📊 گزارش عملکرد سیستم هوشمند Gate', periodReport(delivered, 7, now), '━━━━━━━━━━━━━━━━━━', periodReport(delivered, 30, now)].join('\n')];
 }
