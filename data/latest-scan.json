@@ -1,12 +1,12 @@
 {
-  "updatedAt": "2026-11-27T15:31:30.996Z",
+  "updatedAt": "2026-11-27T15:34:24.085Z",
   "strategyVersion": "gate-structural-ls-v6-realtime-ai",
   "marketRegime": "NEUTRAL",
   "btcIntel": {
     "regime": "NEUTRAL",
     "regimeFa": "خنثی / رِنج",
     "rsi4h": 59.6,
-    "rsi15m": 27.9,
+    "rsi15m": 27.4,
     "adx4h": 15.5,
     "nextMoveForecast": "⏸️ بیت‌کوین کاملاً در فاز خنثی (رِنج) قرار دارد؛ بهترین زمان برای حرکت مستقل آلت‌کوین‌هاست."
   },
@@ -19,9 +19,9 @@
     "candidates": 0,
     "longCandidates": 0,
     "shortCandidates": 0,
-    "durationMs": 36556,
+    "durationMs": 36829,
     "newSignalsSent": 0,
-    "liveRadarUpdatesSent": 2,
+    "liveRadarUpdatesSent": 1,
     "trackedRecords": 409
   },
   "rankedCandidates": [],
@@ -29,7 +29,7 @@
     {
       "symbol": "AVGO_USDT",
       "side": "SHORT",
-      "score": 66,
+      "score": 68,
       "required": 70,
       "scoreBreakdown": {
         "trend": 22,
@@ -37,27 +37,30 @@
         "trigger": 12,
         "candleVolume": 12,
         "liveFlow": 0,
-        "firstTargetRR": 2,
+        "firstTargetRR": 4,
         "squeezeBonus": 0
       }
     }
   ],
   "filterStats": {
     "LONG": {
-      "NO_VALID_SETUP": 84,
+      "NO_VALID_SETUP": 83,
       "COIN_4H_TREND": 52,
       "RSI_OVERBOUGHT": 5,
       "BAD_RISK": 1,
       "BLOCKED_BY_MAJOR_4H_RESISTANCE": 1,
-      "SUPPORT_BROKEN": 2
+      "PRICE_MOVED_AWAY_FROM_TRIGGER": 2,
+      "SUPPORT_BROKEN": 1
     },
     "SHORT": {
       "COIN_4H_TREND": 104,
-      "NO_VALID_SETUP": 15,
+      "PRICE_CHASING": 5,
+      "NO_VALID_SETUP": 12,
       "RSI_OVERSOLD": 20,
       "FUNDING_CROWDED": 2,
-      "PRICE_CHASING": 3,
-      "SCORE_LOW": 1
+      "SCORE_LOW": 1,
+      "PRICE_MOVED_AWAY_FROM_TRIGGER": 1,
+      "PRICE_LEFT_ENTRY_ZONE": 1
     },
     "GLOBAL": {
       "INSUFFICIENT_CANDLES": 1
