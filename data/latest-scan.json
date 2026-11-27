@@ -1,41 +1,41 @@
 {
-  "updatedAt": "2026-11-27T14:39:16.416Z",
+  "updatedAt": "2026-11-27T14:42:34.491Z",
   "strategyVersion": "gate-structural-ls-v6-realtime-ai",
   "marketRegime": "NEUTRAL",
   "btcIntel": {
     "regime": "NEUTRAL",
     "regimeFa": "خنثی / رِنج",
     "rsi4h": 59.6,
-    "rsi15m": 19.3,
+    "rsi15m": 14.4,
     "adx4h": 15.5,
     "nextMoveForecast": "⏸️ بیت‌کوین کاملاً در فاز خنثی (رِنج) قرار دارد؛ بهترین زمان برای حرکت مستقل آلت‌کوین‌هاست."
   },
   "stats": {
     "active": 1042,
-    "liquid": 143,
-    "scanned": 143,
-    "success": 143,
+    "liquid": 144,
+    "scanned": 144,
+    "success": 144,
     "failed": 0,
     "candidates": 0,
     "longCandidates": 0,
     "shortCandidates": 0,
-    "durationMs": 35996,
+    "durationMs": 36544,
     "newSignalsSent": 0,
-    "liveRadarUpdatesSent": 10,
+    "liveRadarUpdatesSent": 5,
     "trackedRecords": 351
   },
   "rankedCandidates": [],
   "nearMisses": [
     {
-      "symbol": "SPCX_USDT",
-      "side": "SHORT",
-      "score": 65,
+      "symbol": "COHR_USDT",
+      "side": "LONG",
+      "score": 64,
       "required": 70,
       "scoreBreakdown": {
-        "trend": 30,
+        "trend": 17,
         "setup": 18,
-        "trigger": 12,
-        "candleVolume": 3,
+        "trigger": 15,
+        "candleVolume": 12,
         "liveFlow": 0,
         "firstTargetRR": 2,
         "squeezeBonus": 0
@@ -46,19 +46,22 @@
     "LONG": {
       "PRICE_MOVED_AWAY_FROM_TRIGGER": 71,
       "COIN_4H_TREND": 52,
+      "NO_15M_TRIGGER": 1,
       "RSI_OVERBOUGHT": 6,
-      "NO_VALID_SETUP": 12,
-      "SUPPORT_BROKEN": 1
+      "NO_VALID_SETUP": 11,
+      "SUPPORT_BROKEN": 1,
+      "SCORE_LOW": 1,
+      "PRICE_LEFT_ENTRY_ZONE": 1
     },
     "SHORT": {
-      "COIN_4H_TREND": 102,
-      "PRICE_MOVED_AWAY_FROM_TRIGGER": 25,
+      "COIN_4H_TREND": 103,
+      "PRICE_MOVED_AWAY_FROM_TRIGGER": 24,
+      "BLOCKED_BY_MAJOR_4H_SUPPORT": 1,
       "RSI_OVERSOLD": 9,
-      "SCORE_LOW": 1,
       "FUNDING_CROWDED": 2,
+      "NO_VALID_SETUP": 2,
       "PRICE_CHASING": 1,
-      "NO_15M_TRIGGER": 1,
-      "NO_VALID_SETUP": 1
+      "NO_15M_TRIGGER": 1
     },
     "GLOBAL": {
       "INSUFFICIENT_CANDLES": 1
