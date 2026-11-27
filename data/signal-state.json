@@ -87,7 +87,7 @@
       "triggerCandleTime": "2026-11-25T07:30:00.000Z",
       "score": 88,
       "setup": "BreakdownRetest",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-25T07:51:00.000Z",
       "exitTime": "2026-11-25T08:30:00.000Z",
       "remaining": 0,
@@ -318,7 +318,7 @@
       "triggerCandleTime": "2026-11-25T13:30:00.000Z",
       "score": 72,
       "setup": "Pullback",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-25T13:57:00.000Z",
       "exitTime": "2026-11-25T15:02:00.000Z",
       "remaining": 0,
@@ -440,7 +440,7 @@
       "triggerCandleTime": "2026-11-25T13:45:00.000Z",
       "score": 88,
       "setup": "BreakdownRetest",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-25T14:14:00.000Z",
       "exitTime": "2026-11-25T15:02:00.000Z",
       "remaining": 0,
@@ -773,7 +773,7 @@
       },
       "createdAt": "2026-11-26T09:40:27.879Z",
       "sentAt": "2026-11-26T09:40:28.384Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 0.005671407,
       "entryLow": 0.00558954,
       "entryHigh": 0.005671407,
@@ -791,21 +791,21 @@
       ],
       "targetHits": [
         "2026-11-27T01:07:00.000Z",
-        null,
-        null
+        "2026-11-27T01:38:00.000Z",
+        "2026-11-27T01:42:00.000Z"
       ],
       "validUntil": "2026-11-26T10:05:00.000Z",
       "triggerCandleTime": "2026-11-26T09:15:00.000Z",
       "score": 86,
       "setup": "Pullback",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T09:43:00.000Z",
-      "exitTime": null,
-      "remaining": 0.6,
-      "realizedGrossPct": 2.0142655958212825,
-      "estimatedCostsPct": 0.07381283903623916,
-      "netPct": null,
-      "netR": null,
+      "exitTime": "2026-11-27T01:42:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": 7.532398926756626,
+      "estimatedCostsPct": 0.18677915903408096,
+      "netPct": 7.345619767722545,
+      "netR": 1.4092198976270294,
       "exits": [
         {
           "time": "2026-11-27T01:07:00.000Z",
@@ -814,15 +814,31 @@
           "reason": "TP1",
           "grossPct": 2.0142655958212825,
           "costPct": 0.07381283903623916
+        },
+        {
+          "time": "2026-11-27T01:38:00.000Z",
+          "price": 0.006106,
+          "fraction": 0.4,
+          "reason": "TP2",
+          "grossPct": 3.065151204983176,
+          "costPct": 0.07475863608448487
+        },
+        {
+          "time": "2026-11-27T01:42:00.000Z",
+          "price": 0.006367,
+          "fraction": 0.19999999999999996,
+          "reason": "TP3",
+          "grossPct": 2.452982125952168,
+          "costPct": 0.03820768391335694
         }
       ],
-      "observedMfePct": 5.353045549367211,
+      "observedMfePct": 12.21201370312517,
       "observedMaePct": 3.7452258319672618,
-      "observationMfePct": 5.353045549367211,
-      "beyondFinalTargetPct": 0,
+      "observationMfePct": 33.98791516814082,
+      "beyondFinalTargetPct": 19.349772263232285,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "messageIds": [
         2738
       ],
@@ -833,7 +849,9 @@
         "EMERGENCY_EXIT_WARNING": "2026-11-26T15:47:54.338Z",
         "TP_HIT_1": "2026-11-27T01:07:07.777Z"
       },
-      "pendingLiveAlerts": []
+      "pendingLiveAlerts": [],
+      "exitReason": "ALL_TARGETS",
+      "resultNotifiedAt": "2026-11-27T06:13:25.984Z"
     },
     "802d11b0c78d4dfbf81cf16e": {
       "id": "802d11b0c78d4dfbf81cf16e",
@@ -927,7 +945,7 @@
       "triggerCandleTime": "2026-11-26T09:15:00.000Z",
       "score": 75,
       "setup": "Pullback",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T09:48:00.000Z",
       "exitTime": "2026-11-26T11:24:00.000Z",
       "remaining": 0,
@@ -947,7 +965,7 @@
       ],
       "observedMfePct": 0.06013759540823878,
       "observedMaePct": 1.7330548346169956,
-      "observationMfePct": 0.8172632880855485,
+      "observationMfePct": 4.841984075475525,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
@@ -1170,7 +1188,7 @@
       "triggerCandleTime": "2026-11-26T09:15:00.000Z",
       "score": 69,
       "setup": "Pullback",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T09:56:00.000Z",
       "exitTime": "2026-11-26T11:41:00.000Z",
       "remaining": 0,
@@ -1298,7 +1316,7 @@
       "triggerCandleTime": "2026-11-26T09:15:00.000Z",
       "score": 78,
       "setup": "Pullback",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T09:57:00.000Z",
       "exitTime": "2026-11-26T15:03:00.000Z",
       "remaining": 0,
@@ -1445,7 +1463,7 @@
       "triggerCandleTime": "2026-11-26T09:30:00.000Z",
       "score": 92,
       "setup": "Pullback",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T09:53:00.000Z",
       "exitTime": "2026-11-26T10:36:00.000Z",
       "remaining": 0,
@@ -1465,8 +1483,8 @@
       ],
       "observedMfePct": 1.403074843834717,
       "observedMaePct": 1.638067044640184,
-      "observationMfePct": 1.403074843834717,
-      "beyondFinalTargetPct": 0,
+      "observationMfePct": 9.956286405170351,
+      "beyondFinalTargetPct": 4.800724637681168,
       "observationComplete": false,
       "dataIssue": null,
       "resultNotified": true,
@@ -1918,7 +1936,7 @@
       "triggerCandleTime": "2026-11-26T09:45:00.000Z",
       "score": 77,
       "setup": "LiquiditySweep",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T10:08:00.000Z",
       "exitTime": "2026-11-26T11:56:00.000Z",
       "remaining": 0,
@@ -2062,7 +2080,7 @@
       "triggerCandleTime": "2026-11-26T09:45:00.000Z",
       "score": 82,
       "setup": "Pullback",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T10:13:00.000Z",
       "exitTime": "2026-11-26T11:13:00.000Z",
       "remaining": 0,
@@ -2082,8 +2100,8 @@
       ],
       "observedMfePct": 0.8778163754682282,
       "observedMaePct": 3.13857909676726,
-      "observationMfePct": 2.0086461686219095,
-      "beyondFinalTargetPct": 0,
+      "observationMfePct": 7.935754049979154,
+      "beyondFinalTargetPct": 0.6911604219716231,
       "observationComplete": false,
       "dataIssue": null,
       "resultNotified": true,
@@ -2420,7 +2438,7 @@
       "triggerCandleTime": "2026-11-26T10:30:00.000Z",
       "score": 87,
       "setup": "Pullback",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T10:54:00.000Z",
       "exitTime": "2026-11-26T11:21:00.000Z",
       "remaining": 0,
@@ -2548,7 +2566,7 @@
       "triggerCandleTime": "2026-11-26T10:30:00.000Z",
       "score": 72,
       "setup": "Pullback",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T11:06:00.000Z",
       "exitTime": "2026-11-26T20:38:00.000Z",
       "remaining": 0,
@@ -2695,7 +2713,7 @@
       "triggerCandleTime": "2026-11-26T10:30:00.000Z",
       "score": 69,
       "setup": "Pullback",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T10:51:00.000Z",
       "exitTime": "2026-11-26T12:39:00.000Z",
       "remaining": 0,
@@ -2938,7 +2956,7 @@
       "triggerCandleTime": "2026-11-26T10:30:00.000Z",
       "score": 66,
       "setup": "Pullback",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T10:54:00.000Z",
       "exitTime": "2026-11-26T17:45:00.000Z",
       "remaining": 0,
@@ -3546,7 +3564,7 @@
       "triggerCandleTime": "2026-11-26T10:45:00.000Z",
       "score": 77,
       "setup": "BreakdownRetest",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T11:05:00.000Z",
       "exitTime": "2026-11-26T11:23:00.000Z",
       "remaining": 0,
@@ -3674,7 +3692,7 @@
       "triggerCandleTime": "2026-11-26T10:45:00.000Z",
       "score": 69,
       "setup": "Pullback",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T11:05:00.000Z",
       "exitTime": "2026-11-26T11:38:00.000Z",
       "remaining": 0,
@@ -3694,7 +3712,7 @@
       ],
       "observedMfePct": 0.01923383258847748,
       "observedMaePct": 0.3844889761635488,
-      "observationMfePct": 0.30421463876636096,
+      "observationMfePct": 0.94542145266664,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
@@ -3802,7 +3820,7 @@
       "triggerCandleTime": "2026-11-26T10:45:00.000Z",
       "score": 78,
       "setup": "Pullback",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T11:07:00.000Z",
       "exitTime": "2026-11-26T13:30:00.000Z",
       "remaining": 0,
@@ -4045,7 +4063,7 @@
       "triggerCandleTime": "2026-11-26T10:45:00.000Z",
       "score": 75,
       "setup": "BreakdownRetest",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T11:09:00.000Z",
       "exitTime": "2026-11-26T11:23:00.000Z",
       "remaining": 0,
@@ -4173,7 +4191,7 @@
       "triggerCandleTime": "2026-11-26T11:15:00.000Z",
       "score": 65,
       "setup": "Pullback",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T11:35:00.000Z",
       "exitTime": "2026-11-26T13:07:00.000Z",
       "remaining": 0,
@@ -4294,19 +4312,19 @@
       ],
       "targetHits": [
         "2026-11-26T21:19:00.000Z",
-        null,
+        "2026-11-27T02:31:00.000Z",
         null
       ],
       "validUntil": "2026-11-26T12:00:00.000Z",
       "triggerCandleTime": "2026-11-26T11:15:00.000Z",
       "score": 65,
       "setup": "Pullback",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T11:34:00.000Z",
       "exitTime": null,
-      "remaining": 0.6,
-      "realizedGrossPct": 1.285180665204232,
-      "estimatedCostsPct": 0.0708433374013162,
+      "remaining": 0.19999999999999996,
+      "realizedGrossPct": 4.8174125130810115,
+      "estimatedCostsPct": 0.1396643287382271,
       "netPct": null,
       "netR": null,
       "exits": [
@@ -4317,11 +4335,19 @@
           "reason": "TP1",
           "grossPct": 1.285180665204232,
           "costPct": 0.0708433374013162
+        },
+        {
+          "time": "2026-11-27T02:31:00.000Z",
+          "price": 54.53,
+          "fraction": 0.4,
+          "reason": "TP2",
+          "grossPct": 3.5322318478767794,
+          "costPct": 0.0688209913369109
         }
       ],
-      "observedMfePct": 4.115784727477227,
+      "observedMfePct": 14.882904977783193,
       "observedMaePct": 1.5352814908510475,
-      "observationMfePct": 4.115784727477227,
+      "observationMfePct": 14.882904977783193,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
@@ -4334,7 +4360,9 @@
       "observeUntil": 1795865640,
       "liveAlertsSent": {
         "EMERGENCY_EXIT_WARNING": "2026-11-26T18:15:53.595Z",
-        "TP_HIT_1": "2026-11-26T21:20:57.064Z"
+        "TP_HIT_1": "2026-11-26T21:20:57.064Z",
+        "TP_HIT_2": "2026-11-27T06:13:04.322Z",
+        "EXTENDED_RUNNER": "2026-11-27T06:13:04.322Z"
       },
       "pendingLiveAlerts": []
     },
@@ -4430,7 +4458,7 @@
       "triggerCandleTime": "2026-11-26T11:30:00.000Z",
       "score": 98,
       "setup": "LiquiditySweep",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T12:06:00.000Z",
       "exitTime": "2026-11-26T21:07:00.000Z",
       "remaining": 0,
@@ -4561,7 +4589,7 @@
       "triggerCandleTime": "2026-11-26T11:30:00.000Z",
       "score": 85,
       "setup": "LiquiditySweep",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T11:53:00.000Z",
       "exitTime": "2026-11-27T01:11:00.000Z",
       "remaining": 0,
@@ -4824,7 +4852,7 @@
       "triggerCandleTime": "2026-11-26T11:45:00.000Z",
       "score": 92,
       "setup": "LiquiditySweep",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T12:12:00.000Z",
       "exitTime": "2026-11-26T19:40:00.000Z",
       "remaining": 0,
@@ -4929,7 +4957,7 @@
       },
       "createdAt": "2026-11-26T12:15:41.309Z",
       "sentAt": "2026-11-26T12:15:41.839Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 48.98038071880942,
       "entryLow": 48.98038071880942,
       "entryHigh": 49.06077591061241,
@@ -4954,14 +4982,14 @@
       "triggerCandleTime": "2026-11-26T12:00:00.000Z",
       "score": 94,
       "setup": "LiquiditySweep",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T12:24:00.000Z",
-      "exitTime": null,
-      "remaining": 0.6,
-      "realizedGrossPct": 0.6128010503775145,
-      "estimatedCostsPct": 0.07144847905466024,
-      "netPct": null,
-      "netR": null,
+      "exitTime": "2026-11-27T02:01:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": 0.20335654140547993,
+      "estimatedCostsPct": 0.17981697911273506,
+      "netPct": 0.02353956229274487,
+      "netR": 0.03449487553540884,
       "exits": [
         {
           "time": "2026-11-26T15:09:00.000Z",
@@ -4970,6 +4998,14 @@
           "reason": "TP1",
           "grossPct": 0.6128010503775145,
           "costPct": 0.07144847905466024
+        },
+        {
+          "time": "2026-11-27T02:01:00.000Z",
+          "price": 49.31462651768736,
+          "fraction": 0.6,
+          "reason": "STOP",
+          "grossPct": -0.4094445089720346,
+          "costPct": 0.10836850005807482
         }
       ],
       "observedMfePct": 1.674916990782765,
@@ -4978,7 +5014,7 @@
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "messageIds": [
         2794
       ],
@@ -4989,7 +5025,9 @@
         "SHAKEOUT_COMPLETED": "2026-11-26T14:48:30.824Z",
         "TP_HIT_1": "2026-11-26T15:12:32.349Z"
       },
-      "pendingLiveAlerts": []
+      "pendingLiveAlerts": [],
+      "exitReason": "STOP",
+      "resultNotifiedAt": "2026-11-27T06:13:26.210Z"
     },
     "d18d2f618b357147a7bdc3f2": {
       "id": "d18d2f618b357147a7bdc3f2",
@@ -5058,7 +5096,7 @@
       },
       "createdAt": "2026-11-26T12:15:41.840Z",
       "sentAt": "2026-11-26T12:15:42.045Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 82.27471632139985,
       "entryLow": 82.27471632139985,
       "entryHigh": 82.45191487760026,
@@ -5083,22 +5121,31 @@
       "triggerCandleTime": "2026-11-26T12:00:00.000Z",
       "score": 93,
       "setup": "LiquiditySweep",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T12:25:00.000Z",
-      "exitTime": null,
-      "remaining": 1,
-      "realizedGrossPct": 0,
-      "estimatedCostsPct": 0,
-      "netPct": null,
-      "netR": null,
-      "exits": [],
+      "exitTime": "2026-11-27T02:08:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": -1.011013482381613,
+      "estimatedCostsPct": 0.18090991213414345,
+      "netPct": -1.1919233945157566,
+      "netR": -1.1789391687517161,
+      "exits": [
+        {
+          "time": "2026-11-27T02:08:00.000Z",
+          "price": 83.10652479600043,
+          "fraction": 1,
+          "reason": "STOP",
+          "grossPct": -1.011013482381613,
+          "costPct": 0.18090991213414345
+        }
+      ],
       "observedMfePct": 2.4366128636270035,
       "observedMaePct": 0.6992229257319375,
       "observationMfePct": 2.4366128636270035,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "messageIds": [
         2795
       ],
@@ -5108,7 +5155,9 @@
       "liveAlertsSent": {
         "SHAKEOUT_COMPLETED": "2026-11-26T14:48:31.063Z"
       },
-      "pendingLiveAlerts": []
+      "pendingLiveAlerts": [],
+      "exitReason": "STOP",
+      "resultNotifiedAt": "2026-11-27T06:13:26.440Z"
     },
     "d473956c79ca49d7675c4a2c": {
       "id": "d473956c79ca49d7675c4a2c",
@@ -5177,7 +5226,7 @@
       },
       "createdAt": "2026-11-26T12:15:42.047Z",
       "sentAt": "2026-11-26T12:15:42.249Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 13.821684586013383,
       "entryLow": 13.821684586013383,
       "entryHigh": 13.84425499540563,
@@ -5202,14 +5251,14 @@
       "triggerCandleTime": "2026-11-26T12:00:00.000Z",
       "score": 92,
       "setup": "LiquiditySweep",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T12:24:00.000Z",
-      "exitTime": null,
-      "remaining": 0.19999999999999996,
-      "realizedGrossPct": 1.2831118211898038,
-      "estimatedCostsPct": 0.14284519936092918,
-      "netPct": null,
-      "netR": null,
+      "exitTime": "2026-11-27T02:08:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": 1.1498809706524695,
+      "estimatedCostsPct": 0.17896510712641278,
+      "netPct": 0.9709158635260567,
+      "netR": 1.4574940557840008,
       "exits": [
         {
           "time": "2026-11-26T15:05:00.000Z",
@@ -5226,6 +5275,14 @@
           "reason": "TP2",
           "grossPct": 0.8441361375256643,
           "costPct": 0.0712402774762269
+        },
+        {
+          "time": "2026-11-27T02:08:00.000Z",
+          "price": 13.91375832567605,
+          "fraction": 0.19999999999999996,
+          "reason": "STOP",
+          "grossPct": -0.13323085053733424,
+          "costPct": 0.03611990776548359
         }
       ],
       "observedMfePct": 2.1826904248608594,
@@ -5234,7 +5291,7 @@
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "messageIds": [
         2796
       ],
@@ -5248,7 +5305,9 @@
         "TP_HIT_2": "2026-11-26T15:12:32.831Z",
         "EXTENDED_RUNNER": "2026-11-26T15:30:23.544Z"
       },
-      "pendingLiveAlerts": []
+      "pendingLiveAlerts": [],
+      "exitReason": "STOP",
+      "resultNotifiedAt": "2026-11-27T06:13:26.747Z"
     },
     "a8d2d9b55e05a9f714ade473": {
       "id": "a8d2d9b55e05a9f714ade473",
@@ -5432,7 +5491,7 @@
       },
       "createdAt": "2026-11-26T12:15:42.457Z",
       "sentAt": "2026-11-26T12:15:42.666Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 6.6396355294205485,
       "entryLow": 6.6396355294205485,
       "entryHigh": 6.648767663850489,
@@ -5457,14 +5516,14 @@
       "triggerCandleTime": "2026-11-26T12:00:00.000Z",
       "score": 89,
       "setup": "LiquiditySweep",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T12:17:00.000Z",
-      "exitTime": null,
-      "remaining": 0.19999999999999996,
-      "realizedGrossPct": 1.7426923966493195,
-      "estimatedCostsPct": 0.1424315768430156,
-      "netPct": null,
-      "netR": null,
+      "exitTime": "2026-11-27T02:08:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": 1.589138053379372,
+      "estimatedCostsPct": 0.17856977575195856,
+      "netPct": 1.4105682776274133,
+      "netR": 1.8372235491218165,
       "exits": [
         {
           "time": "2026-11-26T15:05:00.000Z",
@@ -5481,6 +5540,14 @@
           "reason": "TP2",
           "grossPct": 0.9978591667365425,
           "costPct": 0.07110192674993712
+        },
+        {
+          "time": "2026-11-27T02:08:00.000Z",
+          "price": 6.690612773084148,
+          "fraction": 0.19999999999999996,
+          "reason": "STOP",
+          "grossPct": -0.15355434326994746,
+          "costPct": 0.03613819890894295
         }
       ],
       "observedMfePct": 2.5850143228498474,
@@ -5489,7 +5556,7 @@
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "messageIds": [
         2798
       ],
@@ -5500,7 +5567,9 @@
         "TP_HIT_1": "2026-11-26T15:05:36.816Z",
         "TP_HIT_2": "2026-11-26T15:12:33.081Z"
       },
-      "pendingLiveAlerts": []
+      "pendingLiveAlerts": [],
+      "exitReason": "STOP",
+      "resultNotifiedAt": "2026-11-27T06:13:26.967Z"
     },
     "3568e4f411ed89986ac04f54": {
       "id": "3568e4f411ed89986ac04f54",
@@ -5594,7 +5663,7 @@
       "triggerCandleTime": "2026-11-26T12:00:00.000Z",
       "score": 93,
       "setup": "LiquiditySweep",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T12:22:00.000Z",
       "exitTime": "2026-11-26T16:28:00.000Z",
       "remaining": 0,
@@ -5614,8 +5683,8 @@
       ],
       "observedMfePct": 0.1720468827059268,
       "observedMaePct": 0.24591715157518138,
-      "observationMfePct": 0.8262514581024364,
-      "beyondFinalTargetPct": 0,
+      "observationMfePct": 3.1099100222180702,
+      "beyondFinalTargetPct": 0.8054009238422274,
       "observationComplete": false,
       "dataIssue": null,
       "resultNotified": true,
@@ -5725,7 +5794,7 @@
       "triggerCandleTime": "2026-11-26T12:00:00.000Z",
       "score": 89,
       "setup": "LiquiditySweep",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T12:20:00.000Z",
       "exitTime": "2026-11-26T18:28:00.000Z",
       "remaining": 0,
@@ -5839,7 +5908,7 @@
       },
       "createdAt": "2026-11-26T12:18:50.976Z",
       "sentAt": "2026-11-26T12:18:51.127Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 0.10240171791722888,
       "entryLow": 0.10240171791722888,
       "entryHigh": 0.10264134071332193,
@@ -5864,14 +5933,14 @@
       "triggerCandleTime": "2026-11-26T12:00:00.000Z",
       "score": 88,
       "setup": "LiquiditySweep",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T12:30:00.000Z",
-      "exitTime": null,
-      "remaining": 0.6,
-      "realizedGrossPct": 1.4068974585524598,
-      "estimatedCostsPct": 0.07073379228730278,
-      "netPct": null,
-      "netR": null,
+      "exitTime": "2026-11-27T02:10:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": 0.7444964981184989,
+      "estimatedCostsPct": 0.1793299531516933,
+      "netPct": 0.5651665449668056,
+      "netR": 0.5119254760106744,
       "exits": [
         {
           "time": "2026-11-26T15:09:00.000Z",
@@ -5880,15 +5949,23 @@
           "reason": "TP1",
           "grossPct": 1.4068974585524598,
           "costPct": 0.07073379228730278
+        },
+        {
+          "time": "2026-11-27T02:10:00.000Z",
+          "price": 0.10353223452220321,
+          "fraction": 0.6,
+          "reason": "STOP",
+          "grossPct": -0.6624009604339609,
+          "costPct": 0.10859616086439054
         }
       ],
       "observedMfePct": 3.8297384038017785,
-      "observedMaePct": 0.7014355787973303,
+      "observedMaePct": 0.7795592681524841,
       "observationMfePct": 3.8297384038017785,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "messageIds": [
         2801
       ],
@@ -5898,7 +5975,9 @@
       "liveAlertsSent": {
         "TP_HIT_1": "2026-11-26T15:12:33.794Z"
       },
-      "pendingLiveAlerts": []
+      "pendingLiveAlerts": [],
+      "exitReason": "STOP",
+      "resultNotifiedAt": "2026-11-27T06:13:27.196Z"
     },
     "205c62daf631f03d8e8aef6b": {
       "id": "205c62daf631f03d8e8aef6b",
@@ -5992,7 +6071,7 @@
       "triggerCandleTime": "2026-11-26T12:00:00.000Z",
       "score": 87,
       "setup": "LiquiditySweep",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T12:20:00.000Z",
       "exitTime": "2026-11-26T12:46:00.000Z",
       "remaining": 0,
@@ -6325,7 +6404,7 @@
       },
       "createdAt": "2026-11-26T12:21:56.940Z",
       "sentAt": "2026-11-26T12:21:57.102Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 0.5456278805287509,
       "entryLow": 0.5456278805287509,
       "entryHigh": 0.5470631984892833,
@@ -6350,14 +6429,14 @@
       "triggerCandleTime": "2026-11-26T12:00:00.000Z",
       "score": 84,
       "setup": "LiquiditySweep",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T12:26:00.000Z",
-      "exitTime": null,
-      "remaining": 0.6,
-      "realizedGrossPct": 0.6471722464179073,
-      "estimatedCostsPct": 0.07141754497822388,
-      "netPct": null,
-      "netR": null,
+      "exitTime": "2026-11-27T02:27:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": -0.06048784832976162,
+      "estimatedCostsPct": 0.18005443906349677,
+      "netPct": -0.2405422873932584,
+      "netR": -0.20394730960125323,
       "exits": [
         {
           "time": "2026-11-26T15:05:00.000Z",
@@ -6366,6 +6445,14 @@
           "reason": "TP1",
           "grossPct": 0.6471722464179073,
           "costPct": 0.07141754497822388
+        },
+        {
+          "time": "2026-11-27T02:27:00.000Z",
+          "price": 0.5520631984892833,
+          "fraction": 0.6,
+          "reason": "STOP",
+          "grossPct": -0.7076600947476689,
+          "costPct": 0.1086368940852729
         }
       ],
       "observedMfePct": 2.6259436220279273,
@@ -6374,7 +6461,7 @@
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "messageIds": [
         2805
       ],
@@ -6384,7 +6471,9 @@
       "liveAlertsSent": {
         "TP_HIT_1": "2026-11-26T15:05:38.255Z"
       },
-      "pendingLiveAlerts": []
+      "pendingLiveAlerts": [],
+      "exitReason": "STOP",
+      "resultNotifiedAt": "2026-11-27T06:13:27.483Z"
     },
     "cb082fef03e713f45ad1a209": {
       "id": "cb082fef03e713f45ad1a209",
@@ -6453,7 +6542,7 @@
       },
       "createdAt": "2026-11-26T12:21:57.104Z",
       "sentAt": "2026-11-26T12:21:57.246Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 1701.36739627567,
       "entryLow": 1701.36739627567,
       "entryHigh": 1703.871606384566,
@@ -6478,14 +6567,14 @@
       "triggerCandleTime": "2026-11-26T12:00:00.000Z",
       "score": 84,
       "setup": "LiquiditySweep",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T12:23:00.000Z",
-      "exitTime": null,
-      "remaining": 0.19999999999999996,
-      "realizedGrossPct": 1.1676441586939388,
-      "estimatedCostsPct": 0.14294912025717543,
-      "netPct": null,
-      "netR": null,
+      "exitTime": "2026-11-27T02:08:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": 1.005437989756194,
+      "estimatedCostsPct": 0.1790951058092194,
+      "netPct": 0.8263428839469746,
+      "netR": 1.0188797249309636,
       "exits": [
         {
           "time": "2026-11-26T15:05:00.000Z",
@@ -6502,6 +6591,14 @@
           "reason": "TP2",
           "grossPct": 0.7007868221977,
           "costPct": 0.07136929186002207
+        },
+        {
+          "time": "2026-11-27T02:08:00.000Z",
+          "price": 1715.166010640943,
+          "fraction": 0.19999999999999996,
+          "reason": "STOP",
+          "grossPct": -0.16220616893774487,
+          "costPct": 0.03614598555204396
         }
       ],
       "observedMfePct": 2.07758749539025,
@@ -6510,7 +6607,7 @@
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "messageIds": [
         2806
       ],
@@ -6523,7 +6620,9 @@
         "TP_HIT_2": "2026-11-26T15:12:34.395Z",
         "EXTENDED_RUNNER": "2026-11-26T15:16:10.576Z"
       },
-      "pendingLiveAlerts": []
+      "pendingLiveAlerts": [],
+      "exitReason": "STOP",
+      "resultNotifiedAt": "2026-11-27T06:13:27.707Z"
     },
     "0317460687515c27a4713948": {
       "id": "0317460687515c27a4713948",
@@ -6592,7 +6691,7 @@
       },
       "createdAt": "2026-11-26T12:21:57.247Z",
       "sentAt": "2026-11-26T12:21:57.415Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 0.0000036412579370300595,
       "entryLow": 0.0000036412579370300595,
       "entryHigh": 0.0000036459863936627554,
@@ -6617,22 +6716,31 @@
       "triggerCandleTime": "2026-11-26T12:00:00.000Z",
       "score": 82,
       "setup": "LiquiditySweep",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T12:25:00.000Z",
-      "exitTime": null,
-      "remaining": 1,
-      "realizedGrossPct": 0,
-      "estimatedCostsPct": 0,
-      "netPct": null,
-      "netR": null,
-      "exits": [],
+      "exitTime": "2026-11-27T02:10:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": -0.8161845783833703,
+      "estimatedCostsPct": 0.180734566120545,
+      "netPct": -0.9969191445039154,
+      "netR": -1.221438349740115,
+      "exits": [
+        {
+          "time": "2026-11-27T02:10:00.000Z",
+          "price": 0.0000036709773227712593,
+          "fraction": 1,
+          "reason": "STOP",
+          "grossPct": -0.8161845783833703,
+          "costPct": 0.180734566120545
+        }
+      ],
       "observedMfePct": 1.380235564170212,
       "observedMaePct": 0.7344182541419237,
       "observationMfePct": 1.380235564170212,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "messageIds": [
         2807
       ],
@@ -6643,7 +6751,9 @@
         "EMERGENCY_EXIT_WARNING": "2026-11-26T14:31:08.915Z",
         "SHAKEOUT_COMPLETED": "2026-11-26T18:15:56.721Z"
       },
-      "pendingLiveAlerts": []
+      "pendingLiveAlerts": [],
+      "exitReason": "STOP",
+      "resultNotifiedAt": "2026-11-27T06:13:28.002Z"
     },
     "3627c0cde137bbac7f1a5ae2": {
       "id": "3627c0cde137bbac7f1a5ae2",
@@ -6737,7 +6847,7 @@
       "triggerCandleTime": "2026-11-26T12:00:00.000Z",
       "score": 82,
       "setup": "LiquiditySweep",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T12:23:00.000Z",
       "exitTime": "2026-11-26T19:23:00.000Z",
       "remaining": 0,
@@ -6884,7 +6994,7 @@
       "triggerCandleTime": "2026-11-26T12:00:00.000Z",
       "score": 79,
       "setup": "LiquiditySweep",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T12:36:00.000Z",
       "exitTime": "2026-11-26T12:46:00.000Z",
       "remaining": 0,
@@ -7012,7 +7122,7 @@
       "triggerCandleTime": "2026-11-26T12:00:00.000Z",
       "score": 70,
       "setup": "Pullback",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T12:34:00.000Z",
       "exitTime": "2026-11-26T20:03:00.000Z",
       "remaining": 0,
@@ -7151,7 +7261,7 @@
       "triggerCandleTime": "2026-11-26T12:00:00.000Z",
       "score": 66,
       "setup": "Pullback",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T12:27:00.000Z",
       "exitTime": "2026-11-26T18:28:00.000Z",
       "remaining": 0,
@@ -7289,7 +7399,7 @@
       "triggerCandleTime": "2026-11-26T12:00:00.000Z",
       "score": 85,
       "setup": "LiquiditySweep",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T12:32:00.000Z",
       "exitTime": "2026-11-27T01:11:00.000Z",
       "remaining": 0,
@@ -7428,7 +7538,7 @@
       "triggerCandleTime": "2026-11-26T12:00:00.000Z",
       "score": 72,
       "setup": "Pullback",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T12:32:00.000Z",
       "exitTime": "2026-11-26T20:38:00.000Z",
       "remaining": 0,
@@ -7673,7 +7783,7 @@
       "triggerCandleTime": "2026-11-26T12:15:00.000Z",
       "score": 75,
       "setup": "LiquiditySweep",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T12:33:00.000Z",
       "exitTime": "2026-11-26T12:47:00.000Z",
       "remaining": 0,
@@ -7801,7 +7911,7 @@
       "triggerCandleTime": "2026-11-26T12:15:00.000Z",
       "score": 83,
       "setup": "EarlyIgnition",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T12:57:00.000Z",
       "exitTime": "2026-11-26T19:20:00.000Z",
       "remaining": 0,
@@ -8064,7 +8174,7 @@
       "triggerCandleTime": "2026-11-26T12:15:00.000Z",
       "score": 79,
       "setup": "Pullback",
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T12:36:00.000Z",
       "exitTime": "2026-11-26T15:45:00.000Z",
       "remaining": 0,
@@ -8084,7 +8194,7 @@
       ],
       "observedMfePct": 3.8656553825328204,
       "observedMaePct": 3.936459575779508,
-      "observationMfePct": 7.522896769241726,
+      "observationMfePct": 8.741977231478028,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
@@ -8548,7 +8658,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T13:03:00.000Z",
       "exitTime": "2026-11-27T01:01:00.000Z",
       "remaining": 0,
@@ -8689,7 +8799,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T13:02:00.000Z",
       "exitTime": "2026-11-27T01:07:00.000Z",
       "remaining": 0,
@@ -8830,7 +8940,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T13:02:00.000Z",
       "exitTime": "2026-11-26T21:51:00.000Z",
       "remaining": 0,
@@ -8971,7 +9081,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T13:02:00.000Z",
       "exitTime": null,
       "remaining": 1,
@@ -8980,9 +9090,9 @@
       "netPct": null,
       "netR": null,
       "exits": [],
-      "observedMfePct": 3.787342943276954,
+      "observedMfePct": 5.098907888548735,
       "observedMaePct": 1.3652336274336287,
-      "observationMfePct": 3.787342943276954,
+      "observationMfePct": 5.098907888548735,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
@@ -9099,7 +9209,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T13:19:00.000Z",
       "exitTime": "2026-11-26T17:29:00.000Z",
       "remaining": 0,
@@ -9119,7 +9229,7 @@
       ],
       "observedMfePct": 0.4920438665675551,
       "observedMaePct": 0.6457317157108394,
-      "observationMfePct": 0.4920438665675551,
+      "observationMfePct": 1.1320426315991747,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
@@ -9239,7 +9349,7 @@
         "whenBtcBearish": "مقاوم و ضدریزش (در 63٪ ریزش‌های گذشته BTC حمایت خود را حفظ کرده)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T13:07:00.000Z",
       "exitTime": "2026-11-27T01:12:00.000Z",
       "remaining": 0,
@@ -9379,7 +9489,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T13:06:00.000Z",
       "exitTime": null,
       "remaining": 0.6,
@@ -9398,7 +9508,7 @@
         }
       ],
       "observedMfePct": 2.2210147011904,
-      "observedMaePct": 0.3788156472215238,
+      "observedMaePct": 0.8860996176433603,
       "observationMfePct": 2.2210147011904,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
@@ -9766,7 +9876,7 @@
         "whenBtcBearish": "مقاوم و ضدریزش (در 68٪ ریزش‌های گذشته BTC حمایت خود را حفظ کرده)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T13:09:00.000Z",
       "exitTime": "2026-11-26T14:04:00.000Z",
       "remaining": 0,
@@ -9906,7 +10016,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T13:15:00.000Z",
       "exitTime": "2026-11-26T19:49:00.000Z",
       "remaining": 0,
@@ -10188,7 +10298,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T13:20:00.000Z",
       "exitTime": "2026-11-26T14:32:00.000Z",
       "remaining": 0,
@@ -10328,7 +10438,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T13:20:00.000Z",
       "exitTime": "2026-11-26T14:32:00.000Z",
       "remaining": 0,
@@ -10468,7 +10578,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T13:38:00.000Z",
       "exitTime": "2026-11-26T14:42:00.000Z",
       "remaining": 0,
@@ -10607,7 +10717,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T13:20:00.000Z",
       "exitTime": "2026-11-26T14:32:00.000Z",
       "remaining": 0,
@@ -10747,7 +10857,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T13:20:00.000Z",
       "exitTime": "2026-11-26T15:16:00.000Z",
       "remaining": 0,
@@ -11010,7 +11120,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T13:23:00.000Z",
       "exitTime": "2026-11-27T00:03:00.000Z",
       "remaining": 0,
@@ -11117,7 +11227,7 @@
       },
       "createdAt": "2026-11-26T13:21:40.229Z",
       "sentAt": "2026-11-26T13:21:40.410Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 106.63577763774087,
       "entryLow": 106.63577763774087,
       "entryHigh": 106.78295262101565,
@@ -11151,22 +11261,31 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T13:33:00.000Z",
-      "exitTime": null,
-      "remaining": 1,
-      "realizedGrossPct": 0,
-      "estimatedCostsPct": 0,
-      "netPct": null,
-      "netR": null,
-      "exits": [],
+      "exitTime": "2026-11-27T02:09:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": -0.4774602000979986,
+      "estimatedCostsPct": 0.18042971418008819,
+      "netPct": -0.6578899142780867,
+      "netR": -1.3778947735184104,
+      "exits": [
+        {
+          "time": "2026-11-27T02:09:00.000Z",
+          "price": 107.14492103502609,
+          "fraction": 1,
+          "reason": "STOP",
+          "grossPct": -0.4774602000979986,
+          "costPct": 0.18042971418008819
+        }
+      ],
       "observedMfePct": 1.5433634697463854,
-      "observedMaePct": 0.2477802179646868,
+      "observedMaePct": 0.46346767774140196,
       "observationMfePct": 1.5433634697463854,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "liveAlertsSent": {
         "ENTRY_ACTIVATED": "2026-11-26T13:34:47.629Z",
         "SHAKEOUT_COMPLETED": "2026-11-26T14:00:39.368Z"
@@ -11177,7 +11296,9 @@
       ],
       "entryCandleTime": 1795699920,
       "holdUntil": 1795786380,
-      "observeUntil": 1795872780
+      "observeUntil": 1795872780,
+      "exitReason": "STOP",
+      "resultNotifiedAt": "2026-11-27T06:13:28.252Z"
     },
     "8be1ba2caaf7a1f4240c34c6": {
       "id": "8be1ba2caaf7a1f4240c34c6",
@@ -11280,7 +11401,7 @@
         "whenBtcBearish": "مقاوم و ضدریزش (در 71٪ ریزش‌های گذشته BTC حمایت خود را حفظ کرده)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T13:37:00.000Z",
       "exitTime": "2026-11-26T19:03:00.000Z",
       "remaining": 0,
@@ -11430,7 +11551,7 @@
         "whenBtcBearish": "مقاوم و ضدریزش (در 68٪ ریزش‌های گذشته BTC حمایت خود را حفظ کرده)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T13:36:00.000Z",
       "exitTime": "2026-11-26T16:02:00.000Z",
       "remaining": 0,
@@ -11695,7 +11816,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T13:35:00.000Z",
       "exitTime": "2026-11-26T14:11:00.000Z",
       "remaining": 0,
@@ -11834,7 +11955,7 @@
         "whenBtcBearish": "مقاوم و ضدریزش (در 73٪ ریزش‌های گذشته BTC حمایت خود را حفظ کرده)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T13:35:00.000Z",
       "exitTime": "2026-11-27T01:14:00.000Z",
       "remaining": 0,
@@ -11975,7 +12096,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T13:57:00.000Z",
       "exitTime": "2026-11-26T20:23:00.000Z",
       "remaining": 0,
@@ -12240,7 +12361,7 @@
         "whenBtcBearish": "مقاوم و ضدریزش (در 68٪ ریزش‌های گذشته BTC حمایت خود را حفظ کرده)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T13:57:00.000Z",
       "exitTime": "2026-11-26T23:54:00.000Z",
       "remaining": 0,
@@ -12629,7 +12750,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T13:40:00.000Z",
       "exitTime": "2026-11-26T21:10:00.000Z",
       "remaining": 0,
@@ -12778,7 +12899,7 @@
         "whenBtcBearish": "مقاوم و ضدریزش (در 72٪ ریزش‌های گذشته BTC حمایت خود را حفظ کرده)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T13:53:00.000Z",
       "exitTime": "2026-11-27T01:13:00.000Z",
       "remaining": 0,
@@ -13051,7 +13172,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T13:52:00.000Z",
       "exitTime": "2026-11-26T15:05:00.000Z",
       "remaining": 0,
@@ -13071,8 +13192,8 @@
       ],
       "observedMfePct": 0,
       "observedMaePct": 0.4691547932699308,
-      "observationMfePct": 1.2581238773258108,
-      "beyondFinalTargetPct": 0,
+      "observationMfePct": 13.140217379807991,
+      "beyondFinalTargetPct": 9.398838066251287,
       "observationComplete": false,
       "dataIssue": null,
       "resultNotified": true,
@@ -13314,7 +13435,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T14:03:00.000Z",
       "exitTime": "2026-11-26T21:19:00.000Z",
       "remaining": 0,
@@ -13455,7 +13576,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T14:06:00.000Z",
       "exitTime": "2026-11-26T19:01:00.000Z",
       "remaining": 0,
@@ -13595,7 +13716,7 @@
         "whenBtcBearish": "مقاوم و ضدریزش (در 73٪ ریزش‌های گذشته BTC حمایت خود را حفظ کرده)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T14:10:00.000Z",
       "exitTime": "2026-11-27T01:11:00.000Z",
       "remaining": 0,
@@ -13744,7 +13865,7 @@
         "whenBtcBearish": "مقاوم و ضدریزش (در 69٪ ریزش‌های گذشته BTC حمایت خود را حفظ کرده)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T14:06:00.000Z",
       "exitTime": "2026-11-26T20:44:00.000Z",
       "remaining": 0,
@@ -13902,7 +14023,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T14:08:00.000Z",
       "exitTime": "2026-11-27T01:02:00.000Z",
       "remaining": 0,
@@ -14043,7 +14164,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T14:07:00.000Z",
       "exitTime": "2026-11-27T01:01:00.000Z",
       "remaining": 0,
@@ -14184,7 +14305,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T14:19:00.000Z",
       "exitTime": "2026-11-27T01:13:00.000Z",
       "remaining": 0,
@@ -14449,7 +14570,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T14:20:00.000Z",
       "exitTime": "2026-11-26T14:25:00.000Z",
       "remaining": 0,
@@ -14469,8 +14590,8 @@
       ],
       "observedMfePct": 0,
       "observedMaePct": 0.4584098990024631,
-      "observationMfePct": 1.5042942816399234,
-      "beyondFinalTargetPct": 0,
+      "observationMfePct": 5.7100889544450535,
+      "beyondFinalTargetPct": 1.2997903563941395,
       "observationComplete": false,
       "dataIssue": null,
       "resultNotified": true,
@@ -14679,7 +14800,7 @@
       },
       "createdAt": "2026-11-26T14:31:59.562Z",
       "sentAt": "2026-11-26T14:32:00.058Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 0.12783237947768727,
       "entryLow": 0.12783237947768727,
       "entryHigh": 0.1279887780382504,
@@ -14713,14 +14834,14 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T14:42:00.000Z",
-      "exitTime": null,
-      "remaining": 0.6,
-      "realizedGrossPct": 0.4575928207430476,
-      "estimatedCostsPct": 0.07158816646133126,
-      "netPct": null,
-      "netR": null,
+      "exitTime": "2026-11-27T02:24:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": 0.23593508989600426,
+      "estimatedCostsPct": 0.1797876584190936,
+      "netPct": 0.05614743147691065,
+      "netR": 0.15198413679238365,
       "exits": [
         {
           "time": "2026-11-26T15:04:00.000Z",
@@ -14729,15 +14850,23 @@
           "reason": "TP1",
           "grossPct": 0.4575928207430476,
           "costPct": 0.07158816646133126
+        },
+        {
+          "time": "2026-11-27T02:24:00.000Z",
+          "price": 0.12830463006375065,
+          "fraction": 0.6,
+          "reason": "STOP",
+          "grossPct": -0.22165773084704332,
+          "costPct": 0.10819949195776234
         }
       ],
       "observedMfePct": 1.9888384211224248,
-      "observedMaePct": 0.2562891527571906,
+      "observedMaePct": 0.3658075709952222,
       "observationMfePct": 1.9888384211224248,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "liveAlertsSent": {
         "ENTRY_ACTIVATED": "2026-11-26T14:45:20.944Z",
         "SHAKEOUT_COMPLETED": "2026-11-26T14:45:21.100Z",
@@ -14749,7 +14878,9 @@
       ],
       "entryCandleTime": 1795704060,
       "holdUntil": 1795790520,
-      "observeUntil": 1795876920
+      "observeUntil": 1795876920,
+      "exitReason": "STOP",
+      "resultNotifiedAt": "2026-11-27T06:13:28.497Z"
     },
     "5a8c63b87a08c74247ca837a": {
       "id": "5a8c63b87a08c74247ca837a",
@@ -14852,7 +14983,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T14:34:00.000Z",
       "exitTime": null,
       "remaining": 0.19999999999999996,
@@ -15124,7 +15255,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T14:42:00.000Z",
       "exitTime": "2026-11-26T15:57:00.000Z",
       "remaining": 0,
@@ -15144,7 +15275,7 @@
       ],
       "observedMfePct": 0.5777505208434263,
       "observedMaePct": 0.19265027038984764,
-      "observationMfePct": 0.5777505208434263,
+      "observationMfePct": 0.7602138661355231,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
@@ -15264,7 +15395,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T14:55:00.000Z",
       "exitTime": "2026-11-26T15:08:00.000Z",
       "remaining": 0,
@@ -15284,7 +15415,7 @@
       ],
       "observedMfePct": 0.19171820673071413,
       "observedMaePct": 0.7501545848719191,
-      "observationMfePct": 2.09901060972607,
+      "observationMfePct": 9.280790645696186,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
@@ -15403,7 +15534,7 @@
         "whenBtcBearish": "مقاوم و ضدریزش (در 68٪ ریزش‌های گذشته BTC حمایت خود را حفظ کرده)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T14:50:00.000Z",
       "exitTime": "2026-11-26T20:34:00.000Z",
       "remaining": 0,
@@ -15544,7 +15675,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T14:49:00.000Z",
       "exitTime": "2026-11-26T18:28:00.000Z",
       "remaining": 0,
@@ -16075,7 +16206,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T15:02:00.000Z",
       "exitTime": "2026-11-26T20:22:00.000Z",
       "remaining": 0,
@@ -16215,7 +16346,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T15:23:00.000Z",
       "exitTime": null,
       "remaining": 1,
@@ -16224,9 +16355,9 @@
       "netPct": null,
       "netR": null,
       "exits": [],
-      "observedMfePct": 8.605147884009686,
+      "observedMfePct": 14.915538739655517,
       "observedMaePct": 1.3586271512205519,
-      "observationMfePct": 8.605147884009686,
+      "observationMfePct": 14.915538739655517,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
@@ -16344,7 +16475,7 @@
         "whenBtcBearish": "مقاوم و ضدریزش (در 81٪ ریزش‌های گذشته BTC حمایت خود را حفظ کرده)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T15:19:00.000Z",
       "exitTime": "2026-11-26T21:19:00.000Z",
       "remaining": 0,
@@ -16484,7 +16615,7 @@
         "whenBtcBearish": "مقاوم و ضدریزش (در 63٪ ریزش‌های گذشته BTC حمایت خود را حفظ کرده)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T15:19:00.000Z",
       "exitTime": "2026-11-26T16:12:00.000Z",
       "remaining": 0,
@@ -16623,7 +16754,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T15:19:00.000Z",
       "exitTime": "2026-11-26T18:21:00.000Z",
       "remaining": 0,
@@ -16762,7 +16893,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T15:20:00.000Z",
       "exitTime": "2026-11-26T20:21:00.000Z",
       "remaining": 0,
@@ -16902,7 +17033,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T15:35:00.000Z",
       "exitTime": "2026-11-26T16:03:00.000Z",
       "remaining": 0,
@@ -17041,7 +17172,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T15:22:00.000Z",
       "exitTime": "2026-11-27T00:57:00.000Z",
       "remaining": 0,
@@ -17061,8 +17192,8 @@
       ],
       "observedMfePct": 0.7183840073766217,
       "observedMaePct": 1.2284919721474112,
-      "observationMfePct": 1.1856342424623887,
-      "beyondFinalTargetPct": 0,
+      "observationMfePct": 17.098100581772158,
+      "beyondFinalTargetPct": 10.80815524441169,
       "observationComplete": false,
       "dataIssue": null,
       "resultNotified": true,
@@ -17182,7 +17313,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T15:29:00.000Z",
       "exitTime": "2026-11-26T20:34:00.000Z",
       "remaining": 0,
@@ -17322,7 +17453,7 @@
         "whenBtcBearish": "مقاوم و ضدریزش (در 68٪ ریزش‌های گذشته BTC حمایت خود را حفظ کرده)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T15:23:00.000Z",
       "exitTime": "2026-11-26T21:19:00.000Z",
       "remaining": 0,
@@ -17462,7 +17593,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T15:22:00.000Z",
       "exitTime": "2026-11-27T01:11:00.000Z",
       "remaining": 0,
@@ -17974,7 +18105,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T16:06:00.000Z",
       "exitTime": null,
       "remaining": 1,
@@ -17983,9 +18114,9 @@
       "netPct": null,
       "netR": null,
       "exits": [],
-      "observedMfePct": 1.9662882778401205,
+      "observedMfePct": 2.0006782570232016,
       "observedMaePct": 2.3668490992282987,
-      "observationMfePct": 1.9662882778401205,
+      "observationMfePct": 2.0006782570232016,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
@@ -18070,7 +18201,7 @@
       },
       "createdAt": "2026-11-26T15:48:57.110Z",
       "sentAt": "2026-11-26T15:48:57.280Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 24.945561594512785,
       "entryLow": 24.945561594512785,
       "entryHigh": 25.011894409406654,
@@ -18087,9 +18218,9 @@
         0.2
       ],
       "targetHits": [
-        null,
-        null,
-        null
+        "2026-11-27T01:56:00.000Z",
+        "2026-11-27T02:01:00.000Z",
+        "2026-11-27T03:29:00.000Z"
       ],
       "validUntil": "2026-11-26T16:15:00.000Z",
       "triggerCandleTime": "2026-11-26T15:30:00.000Z",
@@ -18104,22 +18235,47 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T16:00:00.000Z",
-      "exitTime": null,
-      "remaining": 1,
-      "realizedGrossPct": 0,
-      "estimatedCostsPct": 0,
-      "netPct": null,
-      "netR": null,
-      "exits": [],
-      "observedMfePct": 1.4253501295837632,
+      "exitTime": "2026-11-27T03:29:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": 2.627968875461144,
+      "estimatedCostsPct": 0.17763482801208497,
+      "netPct": 2.450334047449059,
+      "netR": 2.1503003688376565,
+      "exits": [
+        {
+          "time": "2026-11-27T01:56:00.000Z",
+          "price": 24.5,
+          "fraction": 0.4,
+          "reason": "TP1",
+          "grossPct": 0.7144543013387912,
+          "costPct": 0.0713569911287951
+        },
+        {
+          "time": "2026-11-27T02:01:00.000Z",
+          "price": 24.3,
+          "fraction": 0.4,
+          "reason": "TP2",
+          "grossPct": 1.035152633572759,
+          "costPct": 0.07106836262978453
+        },
+        {
+          "time": "2026-11-27T03:29:00.000Z",
+          "price": 23.85,
+          "fraction": 0.19999999999999996,
+          "reason": "TP3",
+          "grossPct": 0.878361940549594,
+          "costPct": 0.03520947425350535
+        }
+      ],
+      "observedMfePct": 3.990936787455518,
       "observedMaePct": 0.45875257229080035,
-      "observationMfePct": 1.4253501295837632,
-      "beyondFinalTargetPct": 0,
+      "observationMfePct": 5.63451574015461,
+      "beyondFinalTargetPct": 1.2997903563941395,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "liveAlertsSent": {
         "ENTRY_ACTIVATED": "2026-11-26T16:02:18.272Z"
       },
@@ -18129,7 +18285,9 @@
       ],
       "entryCandleTime": 1795708740,
       "holdUntil": 1795795200,
-      "observeUntil": 1795881600
+      "observeUntil": 1795881600,
+      "exitReason": "ALL_TARGETS",
+      "resultNotifiedAt": "2026-11-27T06:13:28.747Z"
     },
     "c580113c4550b00a420a53b3": {
       "id": "c580113c4550b00a420a53b3",
@@ -18356,7 +18514,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T16:33:00.000Z",
       "exitTime": null,
       "remaining": 0.6,
@@ -18374,9 +18532,9 @@
           "costPct": 0.07280011223547231
         }
       ],
-      "observedMfePct": 3.413366021670049,
-      "observedMaePct": 1.6070306179489509,
-      "observationMfePct": 3.413366021670049,
+      "observedMfePct": 3.504096081422204,
+      "observedMaePct": 1.6183718754179701,
+      "observationMfePct": 3.504096081422204,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
@@ -18618,7 +18776,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T16:34:00.000Z",
       "exitTime": "2026-11-26T19:23:00.000Z",
       "remaining": 0,
@@ -18638,7 +18796,7 @@
       ],
       "observedMfePct": 0.21047580698707388,
       "observedMaePct": 0.43711388560599373,
-      "observationMfePct": 0.6556937206448124,
+      "observationMfePct": 0.939014211154284,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
@@ -18883,7 +19041,7 @@
         "whenBtcBearish": "مقاوم و ضدریزش (در 77٪ ریزش‌های گذشته BTC حمایت خود را حفظ کرده)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T16:36:00.000Z",
       "exitTime": "2026-11-26T18:47:00.000Z",
       "remaining": 0,
@@ -19146,7 +19304,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T16:57:00.000Z",
       "exitTime": null,
       "remaining": 1,
@@ -19242,7 +19400,7 @@
       },
       "createdAt": "2026-11-26T17:16:28.923Z",
       "sentAt": "2026-11-26T17:16:29.280Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 0.8700218581341599,
       "entryLow": 0.8700218581341599,
       "entryHigh": 0.8726768146271544,
@@ -19276,22 +19434,31 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T17:22:00.000Z",
-      "exitTime": null,
-      "remaining": 1,
-      "realizedGrossPct": 0,
-      "estimatedCostsPct": 0,
-      "netPct": null,
-      "netR": null,
-      "exits": [],
+      "exitTime": "2026-11-27T02:25:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": -1.5830444697831514,
+      "estimatedCostsPct": 0.18142474002280487,
+      "netPct": -1.7644692098059562,
+      "netR": -1.1146049548738557,
+      "exits": [
+        {
+          "time": "2026-11-27T02:25:00.000Z",
+          "price": 0.8837946910452573,
+          "fraction": 1,
+          "reason": "STOP",
+          "grossPct": -1.5830444697831514,
+          "costPct": 0.18142474002280487
+        }
+      ],
       "observedMfePct": 1.3817880575945365,
       "observedMaePct": 1.2618236844513,
       "observationMfePct": 1.3817880575945365,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "liveAlertsSent": {
         "ENTRY_ACTIVATED": "2026-11-26T17:22:57.703Z",
         "SHAKEOUT_COMPLETED": "2026-11-26T17:22:57.828Z"
@@ -19302,7 +19469,9 @@
       ],
       "entryCandleTime": 1795713660,
       "holdUntil": 1795800120,
-      "observeUntil": 1795886520
+      "observeUntil": 1795886520,
+      "exitReason": "STOP",
+      "resultNotifiedAt": "2026-11-27T06:13:29.000Z"
     },
     "03323849e08523e2eca9e566": {
       "id": "03323849e08523e2eca9e566",
@@ -19405,7 +19574,7 @@
         "whenBtcBearish": "مقاوم و ضدریزش (در 69٪ ریزش‌های گذشته BTC حمایت خود را حفظ کرده)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T17:22:00.000Z",
       "exitTime": "2026-11-26T18:25:00.000Z",
       "remaining": 0,
@@ -19545,7 +19714,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T17:22:00.000Z",
       "exitTime": "2026-11-26T21:19:00.000Z",
       "remaining": 0,
@@ -19686,7 +19855,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T17:22:00.000Z",
       "exitTime": "2026-11-26T19:24:00.000Z",
       "remaining": 0,
@@ -19809,7 +19978,7 @@
       ],
       "targetHits": [
         "2026-11-27T00:13:00.000Z",
-        null,
+        "2026-11-27T02:12:00.000Z",
         null
       ],
       "validUntil": "2026-11-26T18:15:00.000Z",
@@ -19825,12 +19994,12 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T17:53:00.000Z",
       "exitTime": null,
-      "remaining": 0.6,
-      "realizedGrossPct": 1.9565956063762187,
-      "estimatedCostsPct": 0.0737609360457386,
+      "remaining": 0.19999999999999996,
+      "realizedGrossPct": 5.587515450565573,
+      "estimatedCostsPct": 0.14902876390550904,
       "netPct": null,
       "netR": null,
       "exits": [
@@ -19841,18 +20010,27 @@
           "reason": "TP1",
           "grossPct": 1.9565956063762187,
           "costPct": 0.0737609360457386
+        },
+        {
+          "time": "2026-11-27T02:12:00.000Z",
+          "price": 0.0443,
+          "fraction": 0.4,
+          "reason": "TP2",
+          "grossPct": 3.6309198441893544,
+          "costPct": 0.07526782785977043
         }
       ],
-      "observedMfePct": 8.584851305234231,
+      "observedMfePct": 9.815972068332126,
       "observedMaePct": 0.7716664943097559,
-      "observationMfePct": 8.584851305234231,
+      "observationMfePct": 9.815972068332126,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
       "resultNotified": false,
       "liveAlertsSent": {
         "ENTRY_ACTIVATED": "2026-11-26T17:54:48.629Z",
-        "TP_HIT_1": "2026-11-27T00:14:03.154Z"
+        "TP_HIT_1": "2026-11-27T00:14:03.154Z",
+        "TP_HIT_2": "2026-11-27T06:13:15.828Z"
       },
       "pendingLiveAlerts": [],
       "messageIds": [
@@ -19929,7 +20107,7 @@
       },
       "createdAt": "2026-11-26T18:02:25.165Z",
       "sentAt": "2026-11-26T18:02:25.736Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 6.784966159545799,
       "entryLow": 6.784966159545799,
       "entryHigh": 6.808239544154864,
@@ -19963,14 +20141,14 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T18:10:00.000Z",
-      "exitTime": null,
-      "remaining": 0.19999999999999996,
-      "realizedGrossPct": 1.5147154049110028,
-      "estimatedCostsPct": 0.1426367561355801,
-      "netPct": null,
-      "netR": null,
+      "exitTime": "2026-11-27T02:27:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": 1.3075710125688333,
+      "estimatedCostsPct": 0.17882318608868805,
+      "netPct": 1.1287478264801454,
+      "netR": 1.0898174106645713,
       "exits": [
         {
           "time": "2026-11-26T20:31:00.000Z",
@@ -19987,6 +20165,14 @@
           "reason": "TP2",
           "grossPct": 0.9076900660981647,
           "costPct": 0.07118307894051165
+        },
+        {
+          "time": "2026-11-27T02:27:00.000Z",
+          "price": 6.8552395441548635,
+          "fraction": 0.19999999999999996,
+          "reason": "STOP",
+          "grossPct": -0.20714439234216933,
+          "costPct": 0.036186429953107946
         }
       ],
       "observedMfePct": 2.4018713684595308,
@@ -19995,7 +20181,7 @@
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "liveAlertsSent": {
         "ENTRY_ACTIVATED": "2026-11-26T18:12:35.807Z",
         "SHAKEOUT_COMPLETED": "2026-11-26T18:16:11.620Z",
@@ -20009,7 +20195,9 @@
       ],
       "entryCandleTime": 1795716540,
       "holdUntil": 1795803000,
-      "observeUntil": 1795889400
+      "observeUntil": 1795889400,
+      "exitReason": "STOP",
+      "resultNotifiedAt": "2026-11-27T06:13:29.247Z"
     },
     "2b058cd764e85afbe8279453": {
       "id": "2b058cd764e85afbe8279453",
@@ -20112,7 +20300,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T18:56:00.000Z",
       "exitTime": "2026-11-26T20:38:00.000Z",
       "remaining": 0,
@@ -20252,7 +20440,7 @@
         "whenBtcBearish": "مقاوم و ضدریزش (در 72٪ ریزش‌های گذشته BTC حمایت خود را حفظ کرده)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T19:40:00.000Z",
       "exitTime": "2026-11-26T20:34:00.000Z",
       "remaining": 0,
@@ -20516,7 +20704,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T19:57:00.000Z",
       "exitTime": "2026-11-26T20:43:00.000Z",
       "remaining": 0,
@@ -20622,7 +20810,7 @@
       },
       "createdAt": "2026-11-26T19:48:45.001Z",
       "sentAt": "2026-11-26T19:48:45.584Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 0.000003527254142209789,
       "entryLow": 0.000003527254142209789,
       "entryHigh": 0.000003537421470497505,
@@ -20656,14 +20844,14 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T19:50:00.000Z",
-      "exitTime": null,
-      "remaining": 0.6,
-      "realizedGrossPct": 0.7513395920859995,
-      "estimatedCostsPct": 0.0713237943671226,
-      "netPct": null,
-      "netR": null,
+      "exitTime": "2026-11-27T02:08:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": 0.40350570552783965,
+      "estimatedCostsPct": 0.17963684486502496,
+      "netPct": 0.2238688606628147,
+      "netR": 0.38616512533269093,
       "exits": [
         {
           "time": "2026-11-26T22:56:00.000Z",
@@ -20672,6 +20860,14 @@
           "reason": "TP1",
           "grossPct": 0.7513395920859995,
           "costPct": 0.0713237943671226
+        },
+        {
+          "time": "2026-11-27T02:08:00.000Z",
+          "price": 0.0000035477024508291755,
+          "fraction": 0.6,
+          "reason": "STOP",
+          "grossPct": -0.3478338865581599,
+          "costPct": 0.10831305049790234
         }
       ],
       "observedMfePct": 2.6438169309616577,
@@ -20680,7 +20876,7 @@
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "liveAlertsSent": {
         "ENTRY_ACTIVATED": "2026-11-26T19:51:29.492Z",
         "SHAKEOUT_COMPLETED": "2026-11-26T19:51:29.629Z",
@@ -20692,7 +20888,9 @@
       ],
       "entryCandleTime": 1795722540,
       "holdUntil": 1795809000,
-      "observeUntil": 1795895400
+      "observeUntil": 1795895400,
+      "exitReason": "STOP",
+      "resultNotifiedAt": "2026-11-27T06:13:29.496Z"
     },
     "49fcf308c3d7fb59a15718d6": {
       "id": "49fcf308c3d7fb59a15718d6",
@@ -20795,7 +20993,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T19:50:00.000Z",
       "exitTime": "2026-11-26T20:24:00.000Z",
       "remaining": 0,
@@ -21149,7 +21347,7 @@
       },
       "createdAt": "2026-11-26T20:46:56.377Z",
       "sentAt": "2026-11-26T20:46:56.629Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 0.07398008285664501,
       "entryLow": 0.07398008285664501,
       "entryHigh": 0.07425128653146568,
@@ -21183,14 +21381,14 @@
         "whenBtcBearish": "مقاوم و ضدریزش (در 72٪ ریزش‌های گذشته BTC حمایت خود را حفظ کرده)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T20:51:00.000Z",
-      "exitTime": null,
-      "remaining": 0.6,
-      "realizedGrossPct": 0.6650886612433818,
-      "estimatedCostsPct": 0.07140142020488095,
-      "netPct": null,
-      "netR": null,
+      "exitTime": "2026-11-27T02:19:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": -0.06921278382438956,
+      "estimatedCostsPct": 0.18006229150544195,
+      "netPct": -0.2492750753298315,
+      "netR": -0.20368344118415155,
       "exits": [
         {
           "time": "2026-11-26T22:56:00.000Z",
@@ -21199,15 +21397,23 @@
           "reason": "TP1",
           "grossPct": 0.6650886612433818,
           "costPct": 0.07140142020488095
+        },
+        {
+          "time": "2026-11-27T02:19:00.000Z",
+          "price": 0.0748854775524428,
+          "fraction": 0.6,
+          "reason": "STOP",
+          "grossPct": -0.7343014450677714,
+          "costPct": 0.10866087130056098
         }
       ],
       "observedMfePct": 2.473750752876618,
-      "observedMaePct": 0.5000226129400251,
+      "observedMaePct": 1.09477728610335,
       "observationMfePct": 2.473750752876618,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "liveAlertsSent": {
         "ENTRY_ACTIVATED": "2026-11-26T20:53:14.418Z",
         "SHAKEOUT_COMPLETED": "2026-11-26T20:53:14.573Z",
@@ -21219,7 +21425,9 @@
       ],
       "entryCandleTime": 1795726200,
       "holdUntil": 1795812660,
-      "observeUntil": 1795899060
+      "observeUntil": 1795899060,
+      "exitReason": "STOP",
+      "resultNotifiedAt": "2026-11-27T06:13:29.746Z"
     },
     "77ac02b21a6ed3903ae307ce": {
       "id": "77ac02b21a6ed3903ae307ce",
@@ -21412,7 +21620,7 @@
       },
       "createdAt": "2026-11-26T20:50:20.239Z",
       "sentAt": "2026-11-26T20:50:20.859Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 448.18156799999997,
       "entryLow": 448.18156799999997,
       "entryHigh": 451.597312,
@@ -21446,22 +21654,31 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T20:58:00.000Z",
-      "exitTime": null,
-      "remaining": 1,
-      "realizedGrossPct": 0,
-      "estimatedCostsPct": 0,
-      "netPct": null,
-      "netR": null,
-      "exits": [],
+      "exitTime": "2026-11-27T02:42:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": -5.543354710647716,
+      "estimatedCostsPct": 0.18498901923958297,
+      "netPct": -5.728343729887299,
+      "netR": -1.0333713119393668,
+      "exits": [
+        {
+          "time": "2026-11-27T02:42:00.000Z",
+          "price": 473.02586206198276,
+          "fraction": 1,
+          "reason": "STOP",
+          "grossPct": -5.543354710647716,
+          "costPct": 0.18498901923958297
+        }
+      ],
       "observedMfePct": 0.4889911046051678,
-      "observedMaePct": 5.142655041092643,
+      "observedMaePct": 5.428253577799974,
       "observationMfePct": 0.4889911046051678,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "liveAlertsSent": {
         "ENTRY_ACTIVATED": "2026-11-26T21:00:09.650Z",
         "EMERGENCY_EXIT_WARNING": "2026-11-27T00:56:25.153Z"
@@ -21472,7 +21689,9 @@
       ],
       "entryCandleTime": 1795726620,
       "holdUntil": 1795813080,
-      "observeUntil": 1795899480
+      "observeUntil": 1795899480,
+      "exitReason": "STOP",
+      "resultNotifiedAt": "2026-11-27T06:13:29.995Z"
     },
     "5fa6a223dbd90793b2b63125": {
       "id": "5fa6a223dbd90793b2b63125",
@@ -21541,7 +21760,7 @@
       },
       "createdAt": "2026-11-26T21:00:47.457Z",
       "sentAt": "2026-11-26T21:00:47.828Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 6.2884165255718925,
       "entryLow": 6.2884165255718925,
       "entryHigh": 6.30628595616247,
@@ -21575,14 +21794,14 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T21:06:00.000Z",
-      "exitTime": null,
-      "remaining": 0.6,
-      "realizedGrossPct": 0.8486494177308576,
-      "estimatedCostsPct": 0.07123621552404223,
-      "netPct": null,
-      "netR": null,
+      "exitTime": "2026-11-27T02:10:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": 0.26287332180049117,
+      "estimatedCostsPct": 0.17976341401037957,
+      "netPct": 0.0831099077901116,
+      "netR": 0.08512799518537323,
       "exits": [
         {
           "time": "2026-11-26T23:01:00.000Z",
@@ -21591,15 +21810,23 @@
           "reason": "TP1",
           "grossPct": 0.8486494177308576,
           "costPct": 0.07123621552404223
+        },
+        {
+          "time": "2026-11-27T02:10:00.000Z",
+          "price": 6.349809926937451,
+          "fraction": 0.6,
+          "reason": "STOP",
+          "grossPct": -0.5857760959303664,
+          "costPct": 0.10852719848633734
         }
       ],
       "observedMfePct": 2.5827889248656497,
-      "observedMaePct": 0.3591281578799944,
+      "observedMaePct": 0.7407822659118629,
       "observationMfePct": 2.5827889248656497,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "liveAlertsSent": {
         "ENTRY_ACTIVATED": "2026-11-26T21:07:28.068Z",
         "SHAKEOUT_COMPLETED": "2026-11-26T21:07:28.208Z",
@@ -21611,7 +21838,9 @@
       ],
       "entryCandleTime": 1795727100,
       "holdUntil": 1795813560,
-      "observeUntil": 1795899960
+      "observeUntil": 1795899960,
+      "exitReason": "STOP",
+      "resultNotifiedAt": "2026-11-27T06:13:30.244Z"
     },
     "52234eda6b29fcfe9c129509": {
       "id": "52234eda6b29fcfe9c129509",
@@ -22052,7 +22281,7 @@
       },
       "createdAt": "2026-11-26T21:08:04.250Z",
       "sentAt": "2026-11-26T21:08:04.649Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 0.062415172784527795,
       "entryLow": 0.062415172784527795,
       "entryHigh": 0.06264541808366664,
@@ -22086,14 +22315,14 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T21:14:00.000Z",
-      "exitTime": null,
-      "remaining": 0.6,
-      "realizedGrossPct": 1.0992024586386948,
-      "estimatedCostsPct": 0.07101071778722517,
-      "netPct": null,
-      "netR": null,
+      "exitTime": "2026-11-27T02:27:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": 0.015628733248636895,
+      "estimatedCostsPct": 0.17998593414007621,
+      "netPct": -0.16435720089143932,
+      "netR": -0.09100840877196893,
       "exits": [
         {
           "time": "2026-11-26T23:30:00.000Z",
@@ -22102,15 +22331,23 @@
           "reason": "TP1",
           "grossPct": 1.0992024586386948,
           "costPct": 0.07101071778722517
+        },
+        {
+          "time": "2026-11-27T02:27:00.000Z",
+          "price": 0.06354236347277771,
+          "fraction": 0.6,
+          "reason": "STOP",
+          "grossPct": -1.083573725390058,
+          "costPct": 0.10897521635285104
         }
       ],
       "observedMfePct": 2.748006146596737,
-      "observedMaePct": 0.45634290952859013,
+      "observedMaePct": 1.4176476263661673,
       "observationMfePct": 2.748006146596737,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "liveAlertsSent": {
         "ENTRY_ACTIVATED": "2026-11-26T21:17:54.478Z",
         "SHAKEOUT_COMPLETED": "2026-11-26T21:45:38.205Z",
@@ -22122,7 +22359,9 @@
       ],
       "entryCandleTime": 1795727580,
       "holdUntil": 1795814040,
-      "observeUntil": 1795900440
+      "observeUntil": 1795900440,
+      "exitReason": "STOP",
+      "resultNotifiedAt": "2026-11-27T06:13:30.494Z"
     },
     "e23b434d9b354c017eb8919c": {
       "id": "e23b434d9b354c017eb8919c",
@@ -22349,7 +22588,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T21:40:00.000Z",
       "exitTime": "2026-11-27T01:02:00.000Z",
       "remaining": 0,
@@ -22465,7 +22704,7 @@
       },
       "createdAt": "2026-11-26T21:39:06.979Z",
       "sentAt": "2026-11-26T21:39:07.433Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 185.2887504632774,
       "entryLow": 185.2887504632774,
       "entryHigh": 185.59071349152444,
@@ -22499,22 +22738,31 @@
         "whenBtcBearish": "مقاوم و ضدریزش (در 69٪ ریزش‌های گذشته BTC حمایت خود را حفظ کرده)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T21:52:00.000Z",
-      "exitTime": null,
-      "remaining": 1,
-      "realizedGrossPct": 0,
-      "estimatedCostsPct": 0,
-      "netPct": null,
-      "netR": null,
-      "exits": [],
+      "exitTime": "2026-11-27T02:10:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": -0.3395270108719725,
+      "estimatedCostsPct": 0.18030557430978475,
+      "netPct": -0.5198325851817572,
+      "netR": -1.5310492789564056,
+      "exits": [
+        {
+          "time": "2026-11-27T02:10:00.000Z",
+          "price": 185.9178558192074,
+          "fraction": 1,
+          "reason": "STOP",
+          "grossPct": -0.3395270108719725,
+          "costPct": 0.18030557430978475
+        }
+      ],
       "observedMfePct": 1.5590533456859426,
-      "observedMaePct": 0,
+      "observedMaePct": 0.060041171654749086,
       "observationMfePct": 1.5590533456859426,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "liveAlertsSent": {
         "ENTRY_ACTIVATED": "2026-11-26T21:52:36.954Z",
         "SHAKEOUT_COMPLETED": "2026-11-26T21:52:37.105Z"
@@ -22525,7 +22773,9 @@
       ],
       "entryCandleTime": 1795729860,
       "holdUntil": 1795816320,
-      "observeUntil": 1795902720
+      "observeUntil": 1795902720,
+      "exitReason": "STOP",
+      "resultNotifiedAt": "2026-11-27T06:13:30.745Z"
     },
     "070eeb093db01389b3a024e8": {
       "id": "070eeb093db01389b3a024e8",
@@ -22628,7 +22878,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T21:51:00.000Z",
       "exitTime": "2026-11-27T01:06:00.000Z",
       "remaining": 0,
@@ -22768,7 +23018,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T21:58:00.000Z",
       "exitTime": "2026-11-26T23:11:00.000Z",
       "remaining": 0,
@@ -22788,7 +23038,7 @@
       ],
       "observedMfePct": 0.9067438417421766,
       "observedMaePct": 1.2656772690861804,
-      "observationMfePct": 0.9067438417421766,
+      "observationMfePct": 5.140748251621961,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
@@ -22908,7 +23158,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T22:08:00.000Z",
       "exitTime": "2026-11-27T01:02:00.000Z",
       "remaining": 0,
@@ -23047,7 +23297,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T22:07:00.000Z",
       "exitTime": "2026-11-27T01:17:00.000Z",
       "remaining": 0,
@@ -23189,7 +23439,7 @@
         "whenBtcBearish": "مقاوم و ضدریزش (در 62٪ ریزش‌های گذشته BTC حمایت خود را حفظ کرده)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T22:02:00.000Z",
       "exitTime": "2026-11-27T01:13:00.000Z",
       "remaining": 0,
@@ -23346,7 +23596,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T22:02:00.000Z",
       "exitTime": "2026-11-27T01:14:00.000Z",
       "remaining": 0,
@@ -23453,7 +23703,7 @@
       },
       "createdAt": "2026-11-26T22:00:55.006Z",
       "sentAt": "2026-11-26T22:00:55.251Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 0.6723829275164585,
       "entryLow": 0.6723829275164585,
       "entryHigh": 0.6737946440428417,
@@ -23487,22 +23737,31 @@
         "whenBtcBearish": "مقاوم و ضدریزش (در 66٪ ریزش‌های گذشته BTC حمایت خود را حفظ کرده)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T22:02:00.000Z",
-      "exitTime": null,
-      "remaining": 1,
-      "realizedGrossPct": 0,
-      "estimatedCostsPct": 0,
-      "netPct": null,
-      "netR": null,
-      "exits": [],
+      "exitTime": "2026-11-27T02:08:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": -0.8341538610326725,
+      "estimatedCostsPct": 0.1807507384749294,
+      "netPct": -1.0149045995076018,
+      "netR": -1.2166875284269043,
+      "exits": [
+        {
+          "time": "2026-11-27T02:08:00.000Z",
+          "price": 0.6779916356672615,
+          "fraction": 1,
+          "reason": "STOP",
+          "grossPct": -0.8341538610326725,
+          "costPct": 0.1807507384749294
+        }
+      ],
       "observedMfePct": 1.2764939687211814,
       "observedMaePct": 0.18100883198164405,
       "observationMfePct": 1.2764939687211814,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "liveAlertsSent": {
         "ENTRY_ACTIVATED": "2026-11-26T22:04:06.070Z"
       },
@@ -23512,7 +23771,9 @@
       ],
       "entryCandleTime": 1795730460,
       "holdUntil": 1795816920,
-      "observeUntil": 1795903320
+      "observeUntil": 1795903320,
+      "exitReason": "STOP",
+      "resultNotifiedAt": "2026-11-27T06:13:30.993Z"
     },
     "a9f398144226127144f34206": {
       "id": "a9f398144226127144f34206",
@@ -23705,7 +23966,7 @@
       },
       "createdAt": "2026-11-26T22:04:45.208Z",
       "sentAt": "2026-11-26T22:04:45.351Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 555.0531539401916,
       "entryLow": 555.0531539401916,
       "entryHigh": 555.6419473715996,
@@ -23739,22 +24000,31 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T22:06:00.000Z",
-      "exitTime": null,
-      "remaining": 1,
-      "realizedGrossPct": 0,
-      "estimatedCostsPct": 0,
-      "netPct": null,
-      "netR": null,
-      "exits": [],
+      "exitTime": "2026-11-27T02:08:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": -0.4971169614945055,
+      "estimatedCostsPct": 0.18044740526534506,
+      "netPct": -0.6775643667598505,
+      "netR": -1.3629878262911361,
+      "exits": [
+        {
+          "time": "2026-11-27T02:08:00.000Z",
+          "price": 557.8124173137385,
+          "fraction": 1,
+          "reason": "STOP",
+          "grossPct": -0.4971169614945055,
+          "costPct": 0.18044740526534506
+        }
+      ],
       "observedMfePct": 0.46899182928920513,
-      "observedMaePct": 0.36876577410260025,
+      "observedMaePct": 0.48587167565198885,
       "observationMfePct": 0.46899182928920513,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "liveAlertsSent": {
         "ENTRY_ACTIVATED": "2026-11-26T22:07:40.401Z",
         "EMERGENCY_EXIT_WARNING": "2026-11-27T01:07:35.287Z"
@@ -23765,7 +24035,9 @@
       ],
       "entryCandleTime": 1795730700,
       "holdUntil": 1795817160,
-      "observeUntil": 1795903560
+      "observeUntil": 1795903560,
+      "exitReason": "STOP",
+      "resultNotifiedAt": "2026-11-27T06:13:31.239Z"
     },
     "6bfd74645292662104f1aeba": {
       "id": "6bfd74645292662104f1aeba",
@@ -23868,7 +24140,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T22:30:00.000Z",
       "exitTime": "2026-11-27T01:12:00.000Z",
       "remaining": 0,
@@ -23975,7 +24247,7 @@
       },
       "createdAt": "2026-11-26T22:04:45.511Z",
       "sentAt": "2026-11-26T22:04:45.663Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 34.2779875838288,
       "entryLow": 34.2779875838288,
       "entryHigh": 34.39202128486491,
@@ -24009,14 +24281,14 @@
         "whenBtcBearish": "مقاوم و ضدریزش (در 68٪ ریزش‌های گذشته BTC حمایت خود را حفظ کرده)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T22:06:00.000Z",
-      "exitTime": null,
-      "remaining": 0.19999999999999996,
-      "realizedGrossPct": 3.3910685807337764,
-      "estimatedCostsPct": 0.1409480382773396,
-      "netPct": null,
-      "netR": null,
+      "exitTime": "2026-11-27T01:32:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": 3.1564877787174273,
+      "estimatedCostsPct": 0.1771591609991543,
+      "netPct": 2.9793286177182727,
+      "netR": 2.5401299612835575,
       "exits": [
         {
           "time": "2026-11-26T22:56:00.000Z",
@@ -24033,15 +24305,23 @@
           "reason": "TP2",
           "grossPct": 1.8530697929046043,
           "costPct": 0.07033223718638586
+        },
+        {
+          "time": "2026-11-27T01:32:00.000Z",
+          "price": 34.680035474774854,
+          "fraction": 0.19999999999999996,
+          "reason": "STOP",
+          "grossPct": -0.23458080201634898,
+          "costPct": 0.036211122721814704
         }
       ],
       "observedMfePct": 5.011926618000439,
-      "observedMaePct": 0.06421735265922776,
+      "observedMaePct": 1.0561075538226237,
       "observationMfePct": 5.011926618000439,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "liveAlertsSent": {
         "ENTRY_ACTIVATED": "2026-11-26T22:07:40.879Z",
         "TP_HIT_1": "2026-11-26T22:58:02.337Z",
@@ -24054,7 +24334,9 @@
       ],
       "entryCandleTime": 1795730700,
       "holdUntil": 1795817160,
-      "observeUntil": 1795903560
+      "observeUntil": 1795903560,
+      "exitReason": "STOP",
+      "resultNotifiedAt": "2026-11-27T06:13:31.490Z"
     },
     "02431aa6fc45414547ae3a1e": {
       "id": "02431aa6fc45414547ae3a1e",
@@ -24123,7 +24405,7 @@
       },
       "createdAt": "2026-11-26T22:08:19.416Z",
       "sentAt": "2026-11-26T22:08:19.759Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 708.3412806769315,
       "entryLow": 708.3412806769315,
       "entryHigh": 712.4634837801952,
@@ -24157,14 +24439,14 @@
         "whenBtcBearish": "مقاوم و ضدریزش (در 77٪ ریزش‌های گذشته BTC حمایت خود را حفظ کرده)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T22:10:00.000Z",
-      "exitTime": null,
-      "remaining": 0.6,
-      "realizedGrossPct": 1.6416539015853706,
-      "estimatedCostsPct": 0.07052251148857316,
-      "netPct": null,
-      "netR": null,
+      "exitTime": "2026-11-27T02:10:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": 0.1116962162727928,
+      "estimatedCostsPct": 0.17989947340535448,
+      "netPct": -0.06820325713256167,
+      "netR": -0.026747115081928848,
       "exits": [
         {
           "time": "2026-11-26T23:27:00.000Z",
@@ -24173,15 +24455,23 @@
           "reason": "TP1",
           "grossPct": 1.6416539015853706,
           "costPct": 0.07052251148857316
+        },
+        {
+          "time": "2026-11-27T02:10:00.000Z",
+          "price": 726.4034837801953,
+          "fraction": 0.6,
+          "reason": "STOP",
+          "grossPct": -1.5299576853125778,
+          "costPct": 0.10937696191678131
         }
       ],
       "observedMfePct": 4.451424975090892,
-      "observedMaePct": 0.12546484968646193,
+      "observedMaePct": 2.0934427694087288,
       "observationMfePct": 4.451424975090892,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "liveAlertsSent": {
         "ENTRY_ACTIVATED": "2026-11-26T22:11:17.861Z",
         "APPROACHING_TP1_STRONG": "2026-11-26T23:20:26.198Z",
@@ -24193,7 +24483,9 @@
       ],
       "entryCandleTime": 1795730940,
       "holdUntil": 1795817400,
-      "observeUntil": 1795903800
+      "observeUntil": 1795903800,
+      "exitReason": "STOP",
+      "resultNotifiedAt": "2026-11-27T06:13:31.736Z"
     },
     "bae23c9dede83fb05d8650a4": {
       "id": "bae23c9dede83fb05d8650a4",
@@ -24668,7 +24960,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T22:24:00.000Z",
       "exitTime": "2026-11-26T23:01:00.000Z",
       "remaining": 0,
@@ -24825,7 +25117,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T22:25:00.000Z",
       "exitTime": "2026-11-27T01:11:00.000Z",
       "remaining": 0,
@@ -24950,7 +25242,7 @@
       },
       "createdAt": "2026-11-26T22:19:27.366Z",
       "sentAt": "2026-11-26T22:19:27.523Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 71.1376141403567,
       "entryLow": 71.1376141403567,
       "entryHigh": 71.30110245612374,
@@ -24984,22 +25276,31 @@
         "whenBtcBearish": "مقاوم و ضدریزش (در 64٪ ریزش‌های گذشته BTC حمایت خود را حفظ کرده)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T22:34:00.000Z",
-      "exitTime": null,
-      "remaining": 1,
-      "realizedGrossPct": 0,
-      "estimatedCostsPct": 0,
-      "netPct": null,
-      "netR": null,
-      "exits": [],
+      "exitTime": "2026-11-27T02:02:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": -0.8342820081034233,
+      "estimatedCostsPct": 0.18075085380729305,
+      "netPct": -1.0150328619107163,
+      "netR": -1.2166543831122458,
+      "exits": [
+        {
+          "time": "2026-11-27T02:02:00.000Z",
+          "price": 71.73110245612374,
+          "fraction": 1,
+          "reason": "STOP",
+          "grossPct": -0.8342820081034233,
+          "costPct": 0.18075085380729305
+        }
+      ],
       "observedMfePct": 0.4886502654852096,
-      "observedMaePct": 0.49535799576862877,
+      "observedMaePct": 0.7343314306445672,
       "observationMfePct": 0.4886502654852096,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "liveAlertsSent": {
         "ENTRY_ACTIVATED": "2026-11-26T22:37:00.797Z",
         "SHAKEOUT_COMPLETED": "2026-11-26T22:37:00.929Z"
@@ -25010,7 +25311,9 @@
       ],
       "entryCandleTime": 1795732380,
       "holdUntil": 1795818840,
-      "observeUntil": 1795905240
+      "observeUntil": 1795905240,
+      "exitReason": "STOP",
+      "resultNotifiedAt": "2026-11-27T06:13:31.981Z"
     },
     "1395b206298e592582a1391c": {
       "id": "1395b206298e592582a1391c",
@@ -25485,7 +25788,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T22:34:00.000Z",
       "exitTime": "2026-11-27T01:12:00.000Z",
       "remaining": 0,
@@ -25609,7 +25912,7 @@
       },
       "createdAt": "2026-11-26T22:23:21.568Z",
       "sentAt": "2026-11-26T22:23:21.709Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 0.11432544166846953,
       "entryLow": 0.11432544166846953,
       "entryHigh": 0.11455495713976652,
@@ -25643,22 +25946,31 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T22:27:00.000Z",
-      "exitTime": null,
-      "remaining": 1,
-      "realizedGrossPct": 0,
-      "estimatedCostsPct": 0,
-      "netPct": null,
-      "netR": null,
-      "exits": [],
+      "exitTime": "2026-11-27T02:08:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": -0.6701514145000402,
+      "estimatedCostsPct": 0.18060313627305005,
+      "netPct": -0.8507545507730903,
+      "netR": -1.2694960159231883,
+      "exits": [
+        {
+          "time": "2026-11-27T02:08:00.000Z",
+          "price": 0.1150915952329442,
+          "fraction": 1,
+          "reason": "STOP",
+          "grossPct": -0.6701514145000402,
+          "costPct": 0.18060313627305005
+        }
+      ],
       "observedMfePct": 1.4655020300101838,
       "observedMaePct": 0.2139141803971038,
       "observationMfePct": 1.4655020300101838,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "liveAlertsSent": {
         "ENTRY_ACTIVATED": "2026-11-26T22:29:55.276Z"
       },
@@ -25668,7 +25980,9 @@
       ],
       "entryCandleTime": 1795731960,
       "holdUntil": 1795818420,
-      "observeUntil": 1795904820
+      "observeUntil": 1795904820,
+      "exitReason": "STOP",
+      "resultNotifiedAt": "2026-11-27T06:13:32.232Z"
     },
     "bca56c6e8be67f00c01026ca": {
       "id": "bca56c6e8be67f00c01026ca",
@@ -25771,7 +26085,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T22:27:00.000Z",
       "exitTime": null,
       "remaining": 0.6,
@@ -25790,7 +26104,7 @@
         }
       ],
       "observedMfePct": 1.7665821780332474,
-      "observedMaePct": 0,
+      "observedMaePct": 0.562249504308559,
       "observationMfePct": 1.7665821780332474,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
@@ -25909,7 +26223,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T22:44:00.000Z",
       "exitTime": "2026-11-27T01:11:00.000Z",
       "remaining": 0,
@@ -26422,7 +26736,7 @@
         "whenBtcBearish": "مقاوم و ضدریزش (در 68٪ ریزش‌های گذشته BTC حمایت خود را حفظ کرده)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T22:51:00.000Z",
       "exitTime": "2026-11-27T01:02:00.000Z",
       "remaining": 0,
@@ -26570,7 +26884,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T22:51:00.000Z",
       "exitTime": "2026-11-27T00:03:00.000Z",
       "remaining": 0,
@@ -26833,7 +27147,7 @@
         "whenBtcBearish": "مقاوم و ضدریزش (در 66٪ ریزش‌های گذشته BTC حمایت خود را حفظ کرده)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T22:50:00.000Z",
       "exitTime": "2026-11-27T01:17:00.000Z",
       "remaining": 0,
@@ -26975,7 +27289,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T23:15:00.000Z",
       "exitTime": "2026-11-27T00:02:00.000Z",
       "remaining": 0,
@@ -27083,7 +27397,7 @@
       },
       "createdAt": "2026-11-26T23:13:39.764Z",
       "sentAt": "2026-11-26T23:13:39.902Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 38.017660974680375,
       "entryLow": 37.96972404340507,
       "entryHigh": 38.017660974680375,
@@ -27101,8 +27415,8 @@
       ],
       "targetHits": [
         "2026-11-27T01:15:00.000Z",
-        null,
-        null
+        "2026-11-27T01:28:00.000Z",
+        "2026-11-27T03:32:00.000Z"
       ],
       "validUntil": "2026-11-26T23:45:00.000Z",
       "triggerCandleTime": "2026-11-26T23:00:00.000Z",
@@ -27117,14 +27431,14 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T23:16:00.000Z",
-      "exitTime": null,
-      "remaining": 0.6,
-      "realizedGrossPct": 0.6232251118385429,
-      "estimatedCostsPct": 0.07256090260065469,
-      "netPct": null,
-      "netR": null,
+      "exitTime": "2026-11-27T03:32:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": 2.6996374816513873,
+      "estimatedCostsPct": 0.18242967373348626,
+      "netPct": 2.517207807917901,
+      "netR": 4.598209596869444,
       "exits": [
         {
           "time": "2026-11-27T01:15:00.000Z",
@@ -27133,15 +27447,31 @@
           "reason": "TP1",
           "grossPct": 0.6232251118385429,
           "costPct": 0.07256090260065469
+        },
+        {
+          "time": "2026-11-27T01:28:00.000Z",
+          "price": 38.94,
+          "fraction": 0.4,
+          "reason": "TP2",
+          "grossPct": 0.9704321640764774,
+          "costPct": 0.07287338894766884
+        },
+        {
+          "time": "2026-11-27T03:32:00.000Z",
+          "price": 40.12,
+          "fraction": 0.19999999999999996,
+          "reason": "TP3",
+          "grossPct": 1.1059802057363668,
+          "costPct": 0.03699538218516272
         }
       ],
-      "observedMfePct": 2.0315269417389965,
+      "observedMfePct": 5.398383205864443,
       "observedMaePct": 0.20427604615680875,
-      "observationMfePct": 2.0315269417389965,
-      "beyondFinalTargetPct": 0,
+      "observationMfePct": 7.318543418998476,
+      "beyondFinalTargetPct": 1.6949152542372874,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "liveAlertsSent": {
         "ENTRY_ACTIVATED": "2026-11-26T23:16:59.909Z",
         "SHAKEOUT_COMPLETED": "2026-11-26T23:58:15.344Z",
@@ -27154,7 +27484,9 @@
       ],
       "entryCandleTime": 1795734900,
       "holdUntil": 1795821360,
-      "observeUntil": 1795907760
+      "observeUntil": 1795907760,
+      "exitReason": "ALL_TARGETS",
+      "resultNotifiedAt": "2026-11-27T06:13:32.490Z"
     },
     "baef146c5fec32ce82b2c921": {
       "id": "baef146c5fec32ce82b2c921",
@@ -27259,7 +27591,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T23:15:00.000Z",
       "exitTime": "2026-11-27T00:01:00.000Z",
       "remaining": 0,
@@ -27401,7 +27733,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T23:30:00.000Z",
       "exitTime": "2026-11-27T00:01:00.000Z",
       "remaining": 0,
@@ -27669,7 +28001,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T23:39:00.000Z",
       "exitTime": "2026-11-27T00:17:00.000Z",
       "remaining": 0,
@@ -27689,7 +28021,7 @@
       ],
       "observedMfePct": 1.2122872636079607,
       "observedMaePct": 3.272905425167219,
-      "observationMfePct": 1.2122872636079607,
+      "observationMfePct": 2.4067460355853676,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
@@ -27777,7 +28109,7 @@
       },
       "createdAt": "2026-11-26T23:54:00.253Z",
       "sentAt": "2026-11-26T23:54:00.792Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 787.132511190662,
       "entryLow": 787.132511190662,
       "entryHigh": 790.1313965981085,
@@ -27811,22 +28143,31 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-26T23:56:00.000Z",
-      "exitTime": null,
-      "remaining": 1,
-      "realizedGrossPct": 0,
-      "estimatedCostsPct": 0,
-      "netPct": null,
-      "netR": null,
-      "exits": [],
+      "exitTime": "2026-11-27T01:28:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": -1.462128071681036,
+      "estimatedCostsPct": 0.18131591526451296,
+      "netPct": -1.643443986945549,
+      "netR": -1.1240082307263621,
+      "exits": [
+        {
+          "time": "2026-11-27T01:28:00.000Z",
+          "price": 798.6413965981085,
+          "fraction": 1,
+          "reason": "STOP",
+          "grossPct": -1.462128071681036,
+          "costPct": 0.18131591526451296
+        }
+      ],
       "observedMfePct": 3.0658765643103365,
-      "observedMaePct": 1.1062290891995605,
+      "observedMaePct": 1.3653976498926186,
       "observationMfePct": 3.0658765643103365,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "liveAlertsSent": {
         "ENTRY_ACTIVATED": "2026-11-26T23:58:16.474Z",
         "APPROACHING_TP1_STRONG": "2026-11-27T00:28:29.392Z"
@@ -27837,7 +28178,9 @@
       ],
       "entryCandleTime": 1795737300,
       "holdUntil": 1795823760,
-      "observeUntil": 1795910160
+      "observeUntil": 1795910160,
+      "exitReason": "STOP",
+      "resultNotifiedAt": "2026-11-27T06:13:32.741Z"
     },
     "ded2952b268cfd7802eeca4c": {
       "id": "ded2952b268cfd7802eeca4c",
@@ -27925,7 +28268,7 @@
         0.2
       ],
       "targetHits": [
-        null,
+        "2026-11-27T05:26:00.000Z",
         null,
         null
       ],
@@ -27942,24 +28285,34 @@
         "whenBtcBearish": "مقاوم و ضدریزش (در 73٪ ریزش‌های گذشته BTC حمایت خود را حفظ کرده)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-27T00:13:00.000Z",
       "exitTime": null,
-      "remaining": 1,
-      "realizedGrossPct": 0,
-      "estimatedCostsPct": 0,
+      "remaining": 0.6,
+      "realizedGrossPct": 0.5358659716071144,
+      "estimatedCostsPct": 0.0724822793744464,
       "netPct": null,
       "netR": null,
-      "exits": [],
-      "observedMfePct": 0.6641397999349831,
+      "exits": [
+        {
+          "time": "2026-11-27T05:26:00.000Z",
+          "price": 93.01,
+          "fraction": 0.4,
+          "reason": "TP1",
+          "grossPct": 0.5358659716071144,
+          "costPct": 0.0724822793744464
+        }
+      ],
+      "observedMfePct": 1.6011585273724118,
       "observedMaePct": 0,
-      "observationMfePct": 0.6641397999349831,
+      "observationMfePct": 1.6011585273724118,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
       "resultNotified": false,
       "liveAlertsSent": {
-        "ENTRY_ACTIVATED": "2026-11-27T00:14:14.431Z"
+        "ENTRY_ACTIVATED": "2026-11-27T00:14:14.431Z",
+        "TP_HIT_1": "2026-11-27T06:13:20.924Z"
       },
       "pendingLiveAlerts": [],
       "messageIds": [
@@ -28072,7 +28425,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-27T00:12:00.000Z",
       "exitTime": "2026-11-27T01:08:00.000Z",
       "remaining": 0,
@@ -28180,7 +28533,7 @@
       },
       "createdAt": "2026-11-27T00:09:04.455Z",
       "sentAt": "2026-11-27T00:09:04.691Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 0.9955044357335145,
       "entryLow": 0.992332967313975,
       "entryHigh": 0.9955044357335145,
@@ -28214,22 +28567,31 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-27T00:12:00.000Z",
-      "exitTime": null,
-      "remaining": 1,
-      "realizedGrossPct": 0,
-      "estimatedCostsPct": 0,
-      "netPct": null,
-      "netR": null,
-      "exits": [],
+      "exitTime": "2026-11-27T01:52:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": -1.0543221272361838,
+      "estimatedCostsPct": 0.1790511100854874,
+      "netPct": -1.2333732373216713,
+      "netR": -1.1698258107840862,
+      "exits": [
+        {
+          "time": "2026-11-27T01:52:00.000Z",
+          "price": 0.9850086121899584,
+          "fraction": 1,
+          "reason": "STOP",
+          "grossPct": -1.0543221272361838,
+          "costPct": 0.1790511100854874
+        }
+      ],
       "observedMfePct": 0.45158656306468375,
-      "observedMaePct": 0.2358036437863722,
-      "observationMfePct": 0.45158656306468375,
+      "observedMaePct": 0.6677454660075474,
+      "observationMfePct": 4.1078234107871054,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "liveAlertsSent": {
         "ENTRY_ACTIVATED": "2026-11-27T00:14:15.075Z"
       },
@@ -28239,7 +28601,9 @@
       ],
       "entryCandleTime": 1795738260,
       "holdUntil": 1795824720,
-      "observeUntil": 1795911120
+      "observeUntil": 1795911120,
+      "exitReason": "STOP",
+      "resultNotifiedAt": "2026-11-27T06:13:32.988Z"
     },
     "7f08a7d4cb60d2f3ea7aef2e": {
       "id": "7f08a7d4cb60d2f3ea7aef2e",
@@ -28310,7 +28674,7 @@
       },
       "createdAt": "2026-11-27T00:11:52.310Z",
       "sentAt": "2026-11-27T00:11:52.806Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 3561.8642729692897,
       "entryLow": 3561.8642729692897,
       "entryHigh": 3563.969220087743,
@@ -28344,22 +28708,31 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-27T00:13:00.000Z",
-      "exitTime": null,
-      "remaining": 1,
-      "realizedGrossPct": 0,
-      "estimatedCostsPct": 0,
-      "netPct": null,
-      "netR": null,
-      "exits": [],
+      "exitTime": "2026-11-27T01:26:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": -0.263764882613602,
+      "estimatedCostsPct": 0.18023738839435222,
+      "netPct": -0.4440022710079542,
+      "netR": -1.683325947747138,
+      "exits": [
+        {
+          "time": "2026-11-27T01:26:00.000Z",
+          "price": 3571.259220087743,
+          "fraction": 1,
+          "reason": "STOP",
+          "grossPct": -0.263764882613602,
+          "costPct": 0.18023738839435222
+        }
+      ],
       "observedMfePct": 0.20113829220442164,
       "observedMaePct": 0.20960167088249437,
       "observationMfePct": 0.20113829220442164,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "liveAlertsSent": {
         "ENTRY_ACTIVATED": "2026-11-27T00:14:15.395Z",
         "SHAKEOUT_COMPLETED": "2026-11-27T00:14:15.553Z"
@@ -28370,7 +28743,9 @@
       ],
       "entryCandleTime": 1795738320,
       "holdUntil": 1795824780,
-      "observeUntil": 1795911180
+      "observeUntil": 1795911180,
+      "exitReason": "STOP",
+      "resultNotifiedAt": "2026-11-27T06:13:33.236Z"
     },
     "900eb0cbc4a00af658077262": {
       "id": "900eb0cbc4a00af658077262",
@@ -28441,7 +28816,7 @@
       },
       "createdAt": "2026-11-27T00:14:51.852Z",
       "sentAt": "2026-11-27T00:14:52.188Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 3573.4892190940095,
       "entryLow": 3573.4892190940095,
       "entryHigh": 3575.7679454456866,
@@ -28475,22 +28850,31 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-27T00:42:00.000Z",
-      "exitTime": null,
-      "remaining": 1,
-      "realizedGrossPct": 0,
-      "estimatedCostsPct": 0,
-      "netPct": null,
-      "netR": null,
-      "exits": [],
+      "exitTime": "2026-11-27T01:26:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": -0.26972870941306193,
+      "estimatedCostsPct": 0.18024275583847174,
+      "netPct": -0.44997146525153364,
+      "netR": -1.6682371936998681,
+      "exits": [
+        {
+          "time": "2026-11-27T01:26:00.000Z",
+          "price": 3583.1279454456867,
+          "fraction": 1,
+          "reason": "STOP",
+          "grossPct": -0.26972870941306193,
+          "costPct": 0.18024275583847174
+        }
+      ],
       "observedMfePct": 0.22692720186981122,
       "observedMaePct": 0.21605720439106238,
       "observationMfePct": 0.22692720186981122,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "liveAlertsSent": {
         "ENTRY_ACTIVATED": "2026-11-27T00:42:41.206Z",
         "SHAKEOUT_COMPLETED": "2026-11-27T00:42:41.328Z"
@@ -28501,7 +28885,9 @@
       ],
       "entryCandleTime": 1795740060,
       "holdUntil": 1795826520,
-      "observeUntil": 1795912920
+      "observeUntil": 1795912920,
+      "exitReason": "STOP",
+      "resultNotifiedAt": "2026-11-27T06:13:33.490Z"
     },
     "53a2a0c0c8fc43742a1a7e7e": {
       "id": "53a2a0c0c8fc43742a1a7e7e",
@@ -28606,7 +28992,7 @@
         "whenBtcBearish": "مقاوم و ضدریزش (در 68٪ ریزش‌های گذشته BTC حمایت خود را حفظ کرده)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-27T00:17:00.000Z",
       "exitTime": "2026-11-27T01:02:00.000Z",
       "remaining": 0,
@@ -28714,7 +29100,7 @@
       },
       "createdAt": "2026-11-27T00:14:52.374Z",
       "sentAt": "2026-11-27T00:14:52.576Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 3563.1818598218038,
       "entryLow": 3563.1818598218038,
       "entryHigh": 3565.296114794847,
@@ -28748,22 +29134,31 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-27T00:43:00.000Z",
-      "exitTime": null,
-      "remaining": 1,
-      "realizedGrossPct": 0,
-      "estimatedCostsPct": 0,
-      "netPct": null,
-      "netR": null,
-      "exits": [],
+      "exitTime": "2026-11-27T01:26:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": -0.27122542023513047,
+      "estimatedCostsPct": 0.18024410287821163,
+      "netPct": -0.4514695231133421,
+      "netR": -1.6645546081999048,
+      "exits": [
+        {
+          "time": "2026-11-27T01:26:00.000Z",
+          "price": 3572.8461147948474,
+          "fraction": 1,
+          "reason": "STOP",
+          "grossPct": -0.27122542023513047,
+          "costPct": 0.18024410287821163
+        }
+      ],
       "observedMfePct": 0.20211878329903446,
       "observedMaePct": 0.22727271570139382,
       "observationMfePct": 0.20211878329903446,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "liveAlertsSent": {
         "ENTRY_ACTIVATED": "2026-11-27T00:45:15.551Z",
         "SHAKEOUT_COMPLETED": "2026-11-27T00:45:15.674Z"
@@ -28774,7 +29169,9 @@
       ],
       "entryCandleTime": 1795740120,
       "holdUntil": 1795826580,
-      "observeUntil": 1795912980
+      "observeUntil": 1795912980,
+      "exitReason": "STOP",
+      "resultNotifiedAt": "2026-11-27T06:13:33.736Z"
     },
     "74773f8c515536ecc69ef003": {
       "id": "74773f8c515536ecc69ef003",
@@ -28879,7 +29276,7 @@
         "whenBtcBearish": "مقاوم و ضدریزش (در 81٪ ریزش‌های گذشته BTC حمایت خود را حفظ کرده)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-27T00:17:00.000Z",
       "exitTime": "2026-11-27T01:01:00.000Z",
       "remaining": 0,
@@ -29524,7 +29921,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-27T00:25:00.000Z",
       "exitTime": "2026-11-27T01:07:00.000Z",
       "remaining": 0,
@@ -29666,7 +30063,7 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-27T00:47:00.000Z",
       "exitTime": "2026-11-27T01:16:00.000Z",
       "remaining": 0,
@@ -29686,8 +30083,8 @@
       ],
       "observedMfePct": 0.3263231279709712,
       "observedMaePct": 0.22723986483578887,
-      "observationMfePct": 0.3263231279709712,
-      "beyondFinalTargetPct": 0,
+      "observationMfePct": 13.800006548211835,
+      "beyondFinalTargetPct": 10.592822656333158,
       "observationComplete": false,
       "dataIssue": null,
       "resultNotified": true,
@@ -29774,7 +30171,7 @@
       },
       "createdAt": "2026-11-27T00:45:51.843Z",
       "sentAt": "2026-11-27T00:45:52.070Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 0.09975427783416026,
       "entryLow": 0.09933552371286812,
       "entryHigh": 0.09975427783416026,
@@ -29808,22 +30205,31 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-27T00:50:00.000Z",
-      "exitTime": null,
-      "remaining": 1,
-      "realizedGrossPct": 0,
-      "estimatedCostsPct": 0,
-      "netPct": null,
-      "netR": null,
-      "exits": [],
+      "exitTime": "2026-11-27T01:36:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": -1.398508090415928,
+      "estimatedCostsPct": 0.17874134271862566,
+      "netPct": -1.5772494331345537,
+      "netR": -1.127808586838755,
+      "exits": [
+        {
+          "time": "2026-11-27T01:36:00.000Z",
+          "price": 0.09835920618811354,
+          "fraction": 1,
+          "reason": "STOP",
+          "grossPct": -1.398508090415928,
+          "costPct": 0.17874134271862566
+        }
+      ],
       "observedMfePct": 0.04583479208355862,
       "observedMaePct": 1.357613792174125,
       "observationMfePct": 0.04583479208355862,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "liveAlertsSent": {
         "ENTRY_ACTIVATED": "2026-11-27T00:51:13.910Z",
         "EMERGENCY_EXIT_WARNING": "2026-11-27T01:18:39.945Z"
@@ -29834,7 +30240,9 @@
       ],
       "entryCandleTime": 1795740540,
       "holdUntil": 1795827000,
-      "observeUntil": 1795913400
+      "observeUntil": 1795913400,
+      "exitReason": "STOP",
+      "resultNotifiedAt": "2026-11-27T06:13:34.076Z"
     },
     "916b0a7beac0d8d7ddffcbc8": {
       "id": "916b0a7beac0d8d7ddffcbc8",
@@ -29905,7 +30313,7 @@
       },
       "createdAt": "2026-11-27T00:45:52.076Z",
       "sentAt": "2026-11-27T00:45:52.300Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 68.28934244561744,
       "entryLow": 68.13759301252162,
       "entryHigh": 68.28934244561744,
@@ -29939,22 +30347,31 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-27T01:12:00.000Z",
-      "exitTime": null,
-      "remaining": 1,
-      "realizedGrossPct": 0,
-      "estimatedCostsPct": 0,
-      "netPct": null,
-      "netR": null,
-      "exits": [],
-      "observedMfePct": 1.2310230619836786,
-      "observedMaePct": 0.6433543359526622,
-      "observationMfePct": 1.2310230619836786,
-      "beyondFinalTargetPct": 0,
+      "exitTime": "2026-11-27T02:04:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": -1.1558794057008717,
+      "estimatedCostsPct": 0.1789597085348692,
+      "netPct": -1.334839114235741,
+      "netR": -1.166042231983009,
+      "exits": [
+        {
+          "time": "2026-11-27T02:04:00.000Z",
+          "price": 67.5,
+          "fraction": 1,
+          "reason": "STOP_GAP",
+          "grossPct": -1.1558794057008717,
+          "costPct": 0.1789597085348692
+        }
+      ],
+      "observedMfePct": 2.5050139496435406,
+      "observedMaePct": 1.0973051120153519,
+      "observationMfePct": 13.282683987777489,
+      "beyondFinalTargetPct": 4.611223799864769,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "liveAlertsSent": {
         "ENTRY_ACTIVATED": "2026-11-27T01:12:57.418Z",
         "SHAKEOUT_COMPLETED": "2026-11-27T01:21:42.490Z"
@@ -29965,7 +30382,9 @@
       ],
       "entryCandleTime": 1795741860,
       "holdUntil": 1795828320,
-      "observeUntil": 1795914720
+      "observeUntil": 1795914720,
+      "exitReason": "STOP_GAP",
+      "resultNotifiedAt": "2026-11-27T06:13:34.322Z"
     },
     "196da1ce4153db8dc22b013d": {
       "id": "196da1ce4153db8dc22b013d",
@@ -30162,7 +30581,7 @@
       },
       "createdAt": "2026-11-27T00:51:48.825Z",
       "sentAt": "2026-11-27T00:51:49.157Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 91.15108378475688,
       "entryLow": 91.15108378475688,
       "entryHigh": 91.28385636898822,
@@ -30196,22 +30615,31 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-27T00:53:00.000Z",
-      "exitTime": null,
-      "remaining": 1,
-      "realizedGrossPct": 0,
-      "estimatedCostsPct": 0,
-      "netPct": null,
-      "netR": null,
-      "exits": [],
+      "exitTime": "2026-11-27T01:27:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": -0.8216207467281572,
+      "estimatedCostsPct": 0.18073945867205535,
+      "netPct": -1.0023602054002125,
+      "netR": -1.3266922169472615,
+      "exits": [
+        {
+          "time": "2026-11-27T01:27:00.000Z",
+          "price": 91.9,
+          "fraction": 1,
+          "reason": "STOP_GAP",
+          "grossPct": -0.8216207467281572,
+          "costPct": 0.18073945867205535
+        }
+      ],
       "observedMfePct": 0.16575094720063396,
-      "observedMaePct": 0.6022048147439797,
+      "observedMaePct": 0.7119127807360607,
       "observationMfePct": 0.16575094720063396,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "liveAlertsSent": {
         "ENTRY_ACTIVATED": "2026-11-27T00:54:14.334Z"
       },
@@ -30221,7 +30649,9 @@
       ],
       "entryCandleTime": 1795740720,
       "holdUntil": 1795827180,
-      "observeUntil": 1795913580
+      "observeUntil": 1795913580,
+      "exitReason": "STOP_GAP",
+      "resultNotifiedAt": "2026-11-27T06:13:34.574Z"
     },
     "98ca25f695e6e527e2439f53": {
       "id": "98ca25f695e6e527e2439f53",
@@ -30292,7 +30722,7 @@
       },
       "createdAt": "2026-11-27T00:54:49.126Z",
       "sentAt": "2026-11-27T00:54:49.473Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 0.08011384005548974,
       "entryLow": 0.08011384005548974,
       "entryHigh": 0.08056484561916046,
@@ -30326,22 +30756,31 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-27T00:56:00.000Z",
-      "exitTime": null,
-      "remaining": 1,
-      "realizedGrossPct": 0,
-      "estimatedCostsPct": 0,
-      "netPct": null,
-      "netR": null,
-      "exits": [],
+      "exitTime": "2026-11-27T02:27:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": -2.135589358749969,
+      "estimatedCostsPct": 0.18192203042287497,
+      "netPct": -2.317511389172844,
+      "netR": -1.0851858666917875,
+      "exits": [
+        {
+          "time": "2026-11-27T02:27:00.000Z",
+          "price": 0.08182474269860075,
+          "fraction": 1,
+          "reason": "STOP",
+          "grossPct": -2.135589358749969,
+          "costPct": 0.18192203042287497
+        }
+      ],
       "observedMfePct": 1.2030880741981096,
-      "observedMaePct": 0.5319429754148387,
-      "observationMfePct": 1.2030880741981096,
+      "observedMaePct": 0.8814456328908309,
+      "observationMfePct": 2.376418424296068,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "liveAlertsSent": {
         "ENTRY_ACTIVATED": "2026-11-27T00:56:37.655Z"
       },
@@ -30351,7 +30790,9 @@
       ],
       "entryCandleTime": 1795740900,
       "holdUntil": 1795827360,
-      "observeUntil": 1795913760
+      "observeUntil": 1795913760,
+      "exitReason": "STOP",
+      "resultNotifiedAt": "2026-11-27T06:13:34.825Z"
     },
     "4d7853689f51283fe01756b6": {
       "id": "4d7853689f51283fe01756b6",
@@ -30422,7 +30863,7 @@
       },
       "createdAt": "2026-11-27T00:57:12.306Z",
       "sentAt": "2026-11-27T00:57:12.775Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 0.002598665219973058,
       "entryLow": 0.002598665219973058,
       "entryHigh": 0.0026050024800461863,
@@ -30456,22 +30897,31 @@
         "whenBtcBearish": "مقاوم و ضدریزش (در 72٪ ریزش‌های گذشته BTC حمایت خود را حفظ کرده)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-27T01:00:00.000Z",
-      "exitTime": null,
-      "remaining": 1,
-      "realizedGrossPct": 0,
-      "estimatedCostsPct": 0,
-      "netPct": null,
-      "netR": null,
-      "exits": [],
-      "observedMfePct": 0.2564862884926356,
-      "observedMaePct": 0.3592144134302476,
-      "observationMfePct": 0.2564862884926356,
+      "exitTime": "2026-11-27T02:08:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": -0.9237657825030778,
+      "estimatedCostsPct": 0.18083138920425276,
+      "netPct": -1.1045971717073306,
+      "netR": -1.1957545869627946,
+      "exits": [
+        {
+          "time": "2026-11-27T02:08:00.000Z",
+          "price": 0.0026226708000769774,
+          "fraction": 1,
+          "reason": "STOP",
+          "grossPct": -0.9237657825030778,
+          "costPct": 0.18083138920425276
+        }
+      ],
+      "observedMfePct": 0.48737405171371473,
+      "observedMaePct": 0.6670647643916808,
+      "observationMfePct": 0.48737405171371473,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "liveAlertsSent": {
         "ENTRY_ACTIVATED": "2026-11-27T01:01:31.627Z"
       },
@@ -30481,7 +30931,9 @@
       ],
       "entryCandleTime": 1795741140,
       "holdUntil": 1795827600,
-      "observeUntil": 1795914000
+      "observeUntil": 1795914000,
+      "exitReason": "STOP",
+      "resultNotifiedAt": "2026-11-27T06:13:35.077Z"
     },
     "8143ee429a5cd22422fedeee": {
       "id": "8143ee429a5cd22422fedeee",
@@ -30552,7 +31004,7 @@
       },
       "createdAt": "2026-11-27T01:05:16.323Z",
       "sentAt": "2026-11-27T01:05:16.664Z",
-      "status": "PENDING_ENTRY",
+      "status": "EXPIRED_NO_ENTRY",
       "entry": 303.4467260016493,
       "entryLow": 303.4467260016493,
       "entryHigh": 303.88989828288686,
@@ -30586,9 +31038,9 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795743900,
       "entryTime": null,
-      "exitTime": null,
+      "exitTime": "2026-11-27T01:45:00.000Z",
       "remaining": 1,
       "realizedGrossPct": 0,
       "estimatedCostsPct": 0,
@@ -30599,14 +31051,15 @@
       "observedMaePct": 0,
       "observationMfePct": 0,
       "beyondFinalTargetPct": 0,
-      "observationComplete": false,
+      "observationComplete": true,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "liveAlertsSent": {},
       "pendingLiveAlerts": [],
       "messageIds": [
         3432
-      ]
+      ],
+      "resultNotifiedAt": "2026-11-27T06:13:35.084Z"
     },
     "da03d30df736aee22f907e9e": {
       "id": "da03d30df736aee22f907e9e",
@@ -30677,7 +31130,7 @@
       },
       "createdAt": "2026-11-27T01:13:34.184Z",
       "sentAt": "2026-11-27T01:13:34.577Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 0.33322170781913646,
       "entryLow": 0.331859929452909,
       "entryHigh": 0.33322170781913646,
@@ -30711,22 +31164,31 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-27T01:15:00.000Z",
-      "exitTime": null,
-      "remaining": 1,
-      "realizedGrossPct": 0,
-      "estimatedCostsPct": 0,
-      "netPct": null,
-      "netR": null,
-      "exits": [],
-      "observedMfePct": 0.1315317011403849,
-      "observedMaePct": 0.18357382030718727,
-      "observationMfePct": 0.1315317011403849,
+      "exitTime": "2026-11-27T02:37:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": -1.276975248342589,
+      "estimatedCostsPct": 0.17885072227649168,
+      "netPct": -1.4558259706190806,
+      "netR": -1.1400580962776103,
+      "exits": [
+        {
+          "time": "2026-11-27T02:37:00.000Z",
+          "price": 0.3289665490881816,
+          "fraction": 1,
+          "reason": "STOP",
+          "grossPct": -1.276975248342589,
+          "costPct": 0.17885072227649168
+        }
+      ],
+      "observedMfePct": 1.1788824343327942,
+      "observedMaePct": 1.1919114889394318,
+      "observationMfePct": 1.6770492587165755,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "liveAlertsSent": {
         "ENTRY_ACTIVATED": "2026-11-27T01:15:44.284Z"
       },
@@ -30736,7 +31198,9 @@
       ],
       "entryCandleTime": 1795742040,
       "holdUntil": 1795828500,
-      "observeUntil": 1795914900
+      "observeUntil": 1795914900,
+      "exitReason": "STOP",
+      "resultNotifiedAt": "2026-11-27T06:13:35.328Z"
     },
     "b2b83c2f492578d1a89ed716": {
       "id": "b2b83c2f492578d1a89ed716",
@@ -30841,7 +31305,7 @@
         "whenBtcBearish": "مقاوم و ضدریزش (در 68٪ ریزش‌های گذشته BTC حمایت خود را حفظ کرده)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-27T01:15:00.000Z",
       "exitTime": "2026-11-27T01:17:00.000Z",
       "remaining": 0,
@@ -30949,7 +31413,7 @@
       },
       "createdAt": "2026-11-27T01:16:19.971Z",
       "sentAt": "2026-11-27T01:16:20.386Z",
-      "status": "PENDING_ENTRY",
+      "status": "CLOSED",
       "entry": 349.008649949071,
       "entryLow": 349.008649949071,
       "entryHigh": 349.3651715158783,
@@ -30983,27 +31447,41 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
-      "entryTime": null,
-      "exitTime": null,
-      "remaining": 1,
-      "realizedGrossPct": 0,
-      "estimatedCostsPct": 0,
-      "netPct": null,
-      "netR": null,
-      "exits": [],
-      "observedMfePct": 0,
-      "observedMaePct": 0,
-      "observationMfePct": 0,
+      "nextMinute": 1795759980,
+      "entryTime": "2026-11-27T01:28:00.000Z",
+      "exitTime": "2026-11-27T02:10:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": -0.5520309914975682,
+      "estimatedCostsPct": 0.1804968278923478,
+      "netPct": -0.732527819389916,
+      "netR": -1.3269686497178173,
+      "exits": [
+        {
+          "time": "2026-11-27T02:10:00.000Z",
+          "price": 350.93528585979715,
+          "fraction": 1,
+          "reason": "STOP",
+          "grossPct": -0.5520309914975682,
+          "costPct": 0.1804968278923478
+        }
+      ],
+      "observedMfePct": 0.3405789367239105,
+      "observedMaePct": 0.4960765445732196,
+      "observationMfePct": 0.3405789367239105,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "liveAlertsSent": {},
       "pendingLiveAlerts": [],
       "messageIds": [
         3466
-      ]
+      ],
+      "entryCandleTime": 1795742820,
+      "holdUntil": 1795829280,
+      "observeUntil": 1795915680,
+      "exitReason": "STOP",
+      "resultNotifiedAt": "2026-11-27T06:13:35.580Z"
     },
     "f6ec61c115df62ee526929ee": {
       "id": "f6ec61c115df62ee526929ee",
@@ -31074,7 +31552,7 @@
       },
       "createdAt": "2026-11-27T01:19:19.867Z",
       "sentAt": "2026-11-27T01:19:20.204Z",
-      "status": "PENDING_ENTRY",
+      "status": "EXPIRED_NO_ENTRY",
       "entry": 305.1857551906779,
       "entryLow": 305.1857551906779,
       "entryHigh": 305.4958482445522,
@@ -31108,9 +31586,9 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795744800,
       "entryTime": null,
-      "exitTime": null,
+      "exitTime": "2026-11-27T02:00:00.000Z",
       "remaining": 1,
       "realizedGrossPct": 0,
       "estimatedCostsPct": 0,
@@ -31121,14 +31599,15 @@
       "observedMaePct": 0,
       "observationMfePct": 0,
       "beyondFinalTargetPct": 0,
-      "observationComplete": false,
+      "observationComplete": true,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "liveAlertsSent": {},
       "pendingLiveAlerts": [],
       "messageIds": [
         3472
-      ]
+      ],
+      "resultNotifiedAt": "2026-11-27T06:13:35.587Z"
     },
     "40c66bf1624a465bb9f24773": {
       "id": "40c66bf1624a465bb9f24773",
@@ -31199,7 +31678,7 @@
       },
       "createdAt": "2026-11-27T01:19:20.212Z",
       "sentAt": "2026-11-27T01:19:20.374Z",
-      "status": "PENDING_ENTRY",
+      "status": "EXPIRED_NO_ENTRY",
       "entry": 5.4298843850390455,
       "entryLow": 5.4298843850390455,
       "entryHigh": 5.457341054218781,
@@ -31233,9 +31712,9 @@
         "whenBtcBearish": "مقاوم و ضدریزش (در 68٪ ریزش‌های گذشته BTC حمایت خود را حفظ کرده)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795744800,
       "entryTime": null,
-      "exitTime": null,
+      "exitTime": "2026-11-27T02:00:00.000Z",
       "remaining": 1,
       "realizedGrossPct": 0,
       "estimatedCostsPct": 0,
@@ -31246,14 +31725,15 @@
       "observedMaePct": 0,
       "observationMfePct": 0,
       "beyondFinalTargetPct": 0,
-      "observationComplete": false,
+      "observationComplete": true,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "liveAlertsSent": {},
       "pendingLiveAlerts": [],
       "messageIds": [
         3473
-      ]
+      ],
+      "resultNotifiedAt": "2026-11-27T06:13:35.593Z"
     },
     "b63ebd12ba397eab1f5baab4": {
       "id": "b63ebd12ba397eab1f5baab4",
@@ -31324,7 +31804,7 @@
       },
       "createdAt": "2026-11-27T01:19:20.382Z",
       "sentAt": "2026-11-27T01:19:20.547Z",
-      "status": "OPEN",
+      "status": "CLOSED",
       "entry": 9.914524358057848,
       "entryLow": 9.914524358057848,
       "entryHigh": 9.956529671900832,
@@ -31358,22 +31838,31 @@
         "whenBtcBearish": "مقاوم و ضدریزش (در 73٪ ریزش‌های گذشته BTC حمایت خود را حفظ کرده)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795759980,
       "entryTime": "2026-11-27T01:21:00.000Z",
-      "exitTime": null,
-      "remaining": 1,
-      "realizedGrossPct": 0,
-      "estimatedCostsPct": 0,
-      "netPct": null,
-      "netR": null,
-      "exits": [],
+      "exitTime": "2026-11-27T01:29:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": -1.5098229261518792,
+      "estimatedCostsPct": 0.18135884063353666,
+      "netPct": -1.6911817667854159,
+      "netR": -1.120119278553923,
+      "exits": [
+        {
+          "time": "2026-11-27T01:29:00.000Z",
+          "price": 10.064216119834718,
+          "fraction": 1,
+          "reason": "STOP",
+          "grossPct": -1.5098229261518792,
+          "costPct": 0.18135884063353666
+        }
+      ],
       "observedMfePct": 0,
-      "observedMaePct": 0,
+      "observedMaePct": 1.2655739943810087,
       "observationMfePct": 0,
       "beyondFinalTargetPct": 0,
       "observationComplete": false,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "liveAlertsSent": {
         "ENTRY_ACTIVATED": "2026-11-27T01:21:44.659Z"
       },
@@ -31383,7 +31872,9 @@
       ],
       "entryCandleTime": 1795742400,
       "holdUntil": 1795828860,
-      "observeUntil": 1795915260
+      "observeUntil": 1795915260,
+      "exitReason": "STOP",
+      "resultNotifiedAt": "2026-11-27T06:13:35.837Z"
     },
     "a1f00362b021d7342da84946": {
       "id": "a1f00362b021d7342da84946",
@@ -31454,7 +31945,7 @@
       },
       "createdAt": "2026-11-27T01:19:20.557Z",
       "sentAt": "2026-11-27T01:19:20.712Z",
-      "status": "PENDING_ENTRY",
+      "status": "EXPIRED_NO_ENTRY",
       "entry": 1.5590219579139628,
       "entryLow": 1.5590219579139628,
       "entryHigh": 1.5671052150046354,
@@ -31488,9 +31979,9 @@
         "whenBtcBearish": "مقاوم و ضدریزش (در 81٪ ریزش‌های گذشته BTC حمایت خود را حفظ کرده)",
         "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795744800,
       "entryTime": null,
-      "exitTime": null,
+      "exitTime": "2026-11-27T02:00:00.000Z",
       "remaining": 1,
       "realizedGrossPct": 0,
       "estimatedCostsPct": 0,
@@ -31501,14 +31992,15 @@
       "observedMaePct": 0,
       "observationMfePct": 0,
       "beyondFinalTargetPct": 0,
-      "observationComplete": false,
+      "observationComplete": true,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "liveAlertsSent": {},
       "pendingLiveAlerts": [],
       "messageIds": [
         3475
-      ]
+      ],
+      "resultNotifiedAt": "2026-11-27T06:13:35.844Z"
     },
     "07e85ca2b4b4c269d007ba0b": {
       "id": "07e85ca2b4b4c269d007ba0b",
@@ -31579,7 +32071,7 @@
       },
       "createdAt": "2026-11-27T01:19:20.721Z",
       "sentAt": "2026-11-27T01:19:20.866Z",
-      "status": "PENDING_ENTRY",
+      "status": "EXPIRED_NO_ENTRY",
       "entry": 48.698530079845945,
       "entryLow": 48.698530079845945,
       "entryHigh": 48.75680557740694,
@@ -31613,9 +32105,9 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742460,
+      "nextMinute": 1795744800,
       "entryTime": null,
-      "exitTime": null,
+      "exitTime": "2026-11-27T02:00:00.000Z",
       "remaining": 1,
       "realizedGrossPct": 0,
       "estimatedCostsPct": 0,
@@ -31626,14 +32118,15 @@
       "observedMaePct": 0,
       "observationMfePct": 0,
       "beyondFinalTargetPct": 0,
-      "observationComplete": false,
+      "observationComplete": true,
       "dataIssue": null,
-      "resultNotified": false,
+      "resultNotified": true,
       "liveAlertsSent": {},
       "pendingLiveAlerts": [],
       "messageIds": [
         3476
-      ]
+      ],
+      "resultNotifiedAt": "2026-11-27T06:13:35.850Z"
     },
     "1cd5b259d19657dd5cee68ed": {
       "id": "1cd5b259d19657dd5cee68ed",
@@ -31704,7 +32197,7 @@
       },
       "createdAt": "2026-11-27T01:22:19.946Z",
       "sentAt": "2026-11-27T01:22:20.309Z",
-      "status": "PENDING_ENTRY",
+      "status": "CLOSED",
       "entry": 60739.12376355788,
       "entryLow": 60739.12376355788,
       "entryHigh": 60807.18783390077,
@@ -31738,7 +32231,146 @@
         "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
         "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
       },
-      "nextMinute": 1795742580,
+      "nextMinute": 1795759980,
+      "entryTime": "2026-11-27T01:26:00.000Z",
+      "exitTime": "2026-11-27T02:02:00.000Z",
+      "remaining": 0,
+      "realizedGrossPct": -0.3014903984943675,
+      "estimatedCostsPct": 0.18027134135864492,
+      "netPct": -0.4817617398530124,
+      "netR": -1.5979339383904552,
+      "exits": [
+        {
+          "time": "2026-11-27T02:02:00.000Z",
+          "price": 60922.24638983462,
+          "fraction": 1,
+          "reason": "STOP",
+          "grossPct": -0.3014903984943675,
+          "costPct": 0.18027134135864492
+        }
+      ],
+      "observedMfePct": 0.25045432685209545,
+      "observedMaePct": 0.20098452015430637,
+      "observationMfePct": 0.25045432685209545,
+      "beyondFinalTargetPct": 0,
+      "observationComplete": false,
+      "dataIssue": null,
+      "resultNotified": true,
+      "liveAlertsSent": {},
+      "pendingLiveAlerts": [],
+      "messageIds": [
+        3479
+      ],
+      "entryCandleTime": 1795742700,
+      "holdUntil": 1795829160,
+      "observeUntil": 1795915560,
+      "exitReason": "STOP",
+      "resultNotifiedAt": "2026-11-27T06:13:36.097Z"
+    },
+    "b6d1593f9fa5538dec36181c": {
+      "id": "b6d1593f9fa5538dec36181c",
+      "symbol": "BONK_USDT",
+      "side": "LONG",
+      "strategy": "gate-structural-ls-v6-realtime-ai-98b283e7a6",
+      "strategyConfig": {
+        "MODE": "BALANCED",
+        "ENABLE_LONG": true,
+        "ENABLE_SHORT": true,
+        "ENABLE_INTRABAR_15M": true,
+        "MIN_INTRABAR_ELAPSED_SECONDS": 210,
+        "MIN_QUOTE_VOLUME_24H": 1000000,
+        "SCAN_LIMIT": 0,
+        "TOP_COUNT": 5,
+        "MIN_LONG_SCORE": 65,
+        "MIN_LONG_SCORE_NEUTRAL": 70,
+        "MIN_LONG_SCORE_BEARISH": 78,
+        "MIN_SHORT_SCORE": 65,
+        "MIN_SHORT_SCORE_NEUTRAL": 70,
+        "MIN_SHORT_SCORE_BULLISH": 78,
+        "CONCURRENCY": 6,
+        "CANDLES_15M_LIMIT": 300,
+        "CANDLES_4H_LIMIT": 300,
+        "MIN_CANDLES_15M": 220,
+        "MIN_CANDLES_4H": 200,
+        "TRADE_LIMIT": 1000,
+        "MIN_RECENT_BUY_NOTIONAL": 1200,
+        "MIN_RECENT_SELL_NOTIONAL": 1200,
+        "MAX_RSI_LONG_ENTRY": 68,
+        "MAX_RSI_LONG_4H": 74,
+        "MIN_RSI_SHORT_ENTRY": 32,
+        "MIN_RSI_SHORT_4H": 26,
+        "MAX_FUNDING_RATE_LONG": 0.001,
+        "MIN_FUNDING_RATE_SHORT": -0.001,
+        "MIN_RR_TP1": 1,
+        "MIN_RR_TP2": 1.7,
+        "MIN_SINGLE_TARGET_RR": 1.6,
+        "MIN_COUNTER_BTC_RR": 2,
+        "STOP_ATR_BUFFER": 0.45,
+        "MIN_STOP_ATR": 0.7,
+        "MAX_STOP_ATR": 4.5,
+        "MAX_STOP_PCT": 5.5,
+        "MAX_DISTANCE_EMA_ATR": 1.6,
+        "MAX_TRIGGER_DRIFT_ATR": 0.85,
+        "MAX_TRIGGER_DRIFT_PCT": 2.2,
+        "ENTRY_ZONE_ATR": 0.45,
+        "MAX_ENTRY_ZONE_PCT": 0.8,
+        "ENTRY_VALID_MINUTES": 30,
+        "FEE_RATE_PER_SIDE": 0.0006,
+        "SLIPPAGE_RATE_PER_SIDE": 0.0003,
+        "MAX_SCAN_AGE_SECONDS": 240,
+        "MAX_QUOTE_AGE_SECONDS": 60,
+        "LEVEL_CLUSTER_ATR": 0.4
+      },
+      "evaluationVersion": "paper-fixed-stop-v1",
+      "evaluation": {
+        "version": "paper-fixed-stop-v1",
+        "maxHoldSeconds": 86400,
+        "observationSeconds": 172800,
+        "feeRate": 0.0006,
+        "slippageRate": 0.0003,
+        "fundingIncluded": false,
+        "entryModel": "CONSERVATIVE_BOUNDARY_TOUCH_AFTER_DELIVERY",
+        "stopModel": "FIXED_INITIAL_STOP",
+        "ambiguityPolicy": "EXCLUDE_AND_REPORT",
+        "maxPagesPerSignalPerRun": 8
+      },
+      "createdAt": "2026-11-27T06:14:12.067Z",
+      "sentAt": "2026-11-27T06:14:12.606Z",
+      "status": "PENDING_ENTRY",
+      "entry": 0.000002197725728084149,
+      "entryLow": 0.0000021910693483310025,
+      "entryHigh": 0.000002197725728084149,
+      "stop": 0.0000021700693483310027,
+      "initialRisk": 2.765637975314614e-8,
+      "targets": [
+        0.000002253,
+        0.000002339,
+        0.000002402
+      ],
+      "weights": [
+        0.4,
+        0.4,
+        0.2
+      ],
+      "targetHits": [
+        null,
+        null,
+        null
+      ],
+      "validUntil": "2026-11-27T06:30:00.000Z",
+      "triggerCandleTime": "2026-11-27T05:45:00.000Z",
+      "score": 83,
+      "setup": "Pullback",
+      "historyBehavior": {
+        "resiliencePct": 23,
+        "beta": 1.42,
+        "independentScore": 23,
+        "recentRelStrength": -1.45,
+        "whenBtcBullish": "شتاب‌گیرنده قوی (اهرم 1.42 برابر نسبت به صعود BTC)",
+        "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
+        "whenBtcNeutral": "در زمان خنثی بودن BTC، آرام حرکت می‌کند و انرژی جمع می‌کند"
+      },
+      "nextMinute": 1795760100,
       "entryTime": null,
       "exitTime": null,
       "remaining": 1,
@@ -31757,12 +32389,12 @@
       "liveAlertsSent": {},
       "pendingLiveAlerts": [],
       "messageIds": [
-        3479
+        3525
       ]
     }
   },
   "lastDailyReportDay": "2026-11-27",
-  "updatedAt": "2026-11-27T01:22:20.317Z",
+  "updatedAt": "2026-11-27T06:14:12.613Z",
   "waveWatches": {
     "H_USDT:SHORT": {
       "symbol": "H_USDT",
