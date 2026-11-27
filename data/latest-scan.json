@@ -1,12 +1,12 @@
 {
-  "updatedAt": "2026-11-27T17:14:15.267Z",
+  "updatedAt": "2026-11-27T17:17:11.464Z",
   "strategyVersion": "gate-structural-ls-v7-forensic-pro",
   "marketRegime": "BEARISH",
   "btcIntel": {
     "regime": "BEARISH",
     "regimeFa": "نزولی (Bearish)",
     "rsi4h": 45.9,
-    "rsi15m": 36.3,
+    "rsi15m": 35.9,
     "adx4h": 15.9,
     "nextMoveForecast": "⚖️ روند کلی نزولی است اما شتاب ریزش کم شده و احتمال ورود به فاز نوسان خنثی (رِنج) وجود دارد."
   },
@@ -19,76 +19,26 @@
     "candidates": 0,
     "longCandidates": 0,
     "shortCandidates": 0,
-    "durationMs": 18885,
+    "durationMs": 18594,
     "newSignalsSent": 0,
     "liveRadarUpdatesSent": 0,
     "trackedRecords": 415
   },
   "rankedCandidates": [],
-  "nearMisses": [
-    {
-      "symbol": "HAEDAL_USDT",
-      "side": "LONG",
-      "score": 80,
-      "required": 84,
-      "scoreBreakdown": {
-        "trend": 30,
-        "setup": 18,
-        "trigger": 15,
-        "candleVolume": 3,
-        "liveFlow": 0,
-        "firstTargetRR": 4,
-        "squeezeBonus": 10
-      }
-    },
-    {
-      "symbol": "SUI_USDT",
-      "side": "SHORT",
-      "score": 67,
-      "required": 70,
-      "scoreBreakdown": {
-        "trend": 22,
-        "setup": 18,
-        "trigger": 20,
-        "candleVolume": 3,
-        "liveFlow": 0,
-        "firstTargetRR": 4,
-        "squeezeBonus": 0
-      }
-    },
-    {
-      "symbol": "ENA_USDT",
-      "side": "SHORT",
-      "score": 62,
-      "required": 70,
-      "scoreBreakdown": {
-        "trend": 22,
-        "setup": 18,
-        "trigger": 15,
-        "candleVolume": 3,
-        "liveFlow": 0,
-        "firstTargetRR": 4,
-        "squeezeBonus": 0
-      }
-    }
-  ],
+  "nearMisses": [],
   "filterStats": {
     "LONG": {
       "COIN_4H_TREND": 46,
-      "NO_VALID_SETUP": 16,
+      "NO_VALID_SETUP": 17,
       "RSI_OVERBOUGHT": 5,
-      "NO_15M_TRIGGER": 1,
-      "SCORE_LOW": 1,
-      "PRICE_MOVED_AWAY_FROM_TRIGGER": 2
+      "SUPPORT_BROKEN": 2,
+      "BAD_RISK": 1
     },
     "SHORT": {
-      "NO_VALID_SETUP": 25,
-      "RSI_OVERSOLD": 13,
+      "NO_VALID_SETUP": 30,
+      "RSI_OVERSOLD": 14,
       "COIN_4H_TREND": 26,
-      "BLOCKED_BY_MAJOR_4H_SUPPORT": 1,
-      "FUNDING_CROWDED": 1,
-      "SCORE_LOW": 2,
-      "PRICE_MOVED_AWAY_FROM_TRIGGER": 3
+      "FUNDING_CROWDED": 1
     },
     "GLOBAL": {
       "INSUFFICIENT_CANDLES": 1
