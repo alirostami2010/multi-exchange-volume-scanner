@@ -1,12 +1,12 @@
 {
-  "updatedAt": "2026-11-27T20:07:59.363Z",
+  "updatedAt": "2026-11-27T20:10:39.416Z",
   "strategyVersion": "gate-structural-ls-v8-sniper-pro",
   "marketRegime": "BEARISH",
   "btcIntel": {
     "regime": "BEARISH",
     "regimeFa": "نزولی (Bearish)",
     "rsi4h": 44.6,
-    "rsi15m": 39.8,
+    "rsi15m": 39.4,
     "adx4h": 16.2,
     "nextMoveForecast": "⚖️ روند کلی نزولی است اما شتاب ریزش کم شده و فاز رِنج محتمل است."
   },
@@ -16,15 +16,181 @@
     "scanned": 59,
     "success": 59,
     "failed": 0,
-    "candidates": 0,
+    "candidates": 1,
     "longCandidates": 0,
-    "shortCandidates": 0,
-    "durationMs": 15304,
-    "newSignalsSent": 0,
+    "shortCandidates": 1,
+    "durationMs": 15667,
+    "newSignalsSent": 1,
     "liveRadarUpdatesSent": 0,
-    "trackedRecords": 421
+    "trackedRecords": 422
   },
-  "rankedCandidates": [],
+  "rankedCandidates": [
+    {
+      "symbol": "AAVE_USDT",
+      "contract": "AAVE_USDT",
+      "side": "SHORT",
+      "setup": "LiquiditySweep",
+      "isIntrabar": true,
+      "intrabarProgressPct": 69,
+      "strategyVersion": "gate-structural-ls-v8-sniper-pro",
+      "status": "SHORT_ENTRY",
+      "statusLabel": "SHORT LiquiditySweep",
+      "price": 95,
+      "entryLow": 94.9420106286317,
+      "entryHigh": 95.2255142219878,
+      "referenceEntry": 95,
+      "entry": {
+        "low": 94.9420106286317,
+        "high": 95.2255142219878,
+        "price": 95
+      },
+      "stopLoss": 96.3775,
+      "stopLossPct": -1.45,
+      "tp1": 93.06800000000001,
+      "tp2": 91.903,
+      "tp3": 89.72,
+      "tp1Pct": 2.03,
+      "tp2Pct": 3.26,
+      "tp3Pct": 5.56,
+      "takeProfits": [
+        {
+          "level": 1,
+          "price": 93.06800000000001,
+          "zoneLow": 93.06800000000001,
+          "zoneHigh": 93.06800000000001,
+          "source": "MAJOR_PIVOT",
+          "timeframes": [
+            "15m",
+            "4h"
+          ],
+          "touches": 2,
+          "pct": 2.03,
+          "rrNet": 1.14
+        },
+        {
+          "level": 2,
+          "price": 91.903,
+          "zoneLow": 91.903,
+          "zoneHigh": 91.903,
+          "source": "MAJOR_PIVOT",
+          "timeframes": [
+            "4h"
+          ],
+          "touches": 2,
+          "pct": 3.26,
+          "rrNet": 1.89
+        },
+        {
+          "level": 3,
+          "price": 89.72,
+          "zoneLow": 89.72,
+          "zoneHigh": 89.72,
+          "source": "STRUCTURAL_R",
+          "timeframes": [
+            "4h"
+          ],
+          "touches": 1,
+          "pct": 5.56,
+          "rrNet": 3.3
+        }
+      ],
+      "targetCount": 3,
+      "riskRewardToTp1": 1.14,
+      "riskRewardToTp2": 1.89,
+      "rr": 1.89,
+      "rsi15": 51,
+      "rsi4h": 47.9,
+      "adx4h": 13,
+      "volumeRatio15m": 3.31,
+      "fundingRate": 0.000037,
+      "isSqueezeFuel": false,
+      "change24h": -0.01,
+      "quoteVolume24h": 4309642,
+      "triggerCandleTime": "2026-11-27T20:00:00.000Z",
+      "analyzedAt": "2026-11-27T20:10:22.989Z",
+      "validUntil": "2026-11-27T21:45:00.000Z",
+      "riskNote": null,
+      "reasons": [
+        "شکار استاپ در سطح ماژور",
+        "جمع‌آوری نقدینگی (Stop Hunt) + شدو برگشتی نزولی",
+        "شتاب حجم 3.3x"
+      ],
+      "historyBehavior": {
+        "resiliencePct": 70,
+        "beta": 1.23,
+        "alpha4h": 1.19,
+        "whenBtcBullish": "اهرم 1.23x نسبت به صعود BTC",
+        "whenBtcBearish": "مقاومت 70% در برابر ریزش‌های گذشته BTC",
+        "whenBtcNeutral": "آلفای ۴ ساعته: 1.19% نسبت به BTC"
+      },
+      "btcIntel": {
+        "regime": "BEARISH",
+        "regimeFa": "نزولی (Bearish)",
+        "rsi4h": 44.6,
+        "rsi15m": 39.4,
+        "adx4h": 16.2,
+        "nextMoveForecast": "⚖️ روند کلی نزولی است اما شتاب ریزش کم شده و فاز رِنج محتمل است."
+      },
+      "score": 86,
+      "rankScore": 86,
+      "scoreBreakdown": {
+        "trend": 22,
+        "setup": 28,
+        "trigger": 20,
+        "candleVolume": 12,
+        "liveFlow": 0,
+        "firstTargetRR": 4,
+        "squeezeBonus": 0,
+        "alphaBonus": 0
+      },
+      "costAssumptions": {
+        "feeRatePerSide": 0.0006,
+        "slippageRatePerSide": 0.0003,
+        "fundingIncludedInRR": false
+      },
+      "grade": "A+",
+      "recent3m": {
+        "available": true,
+        "sampleComplete": true,
+        "sampleTruncated": false,
+        "tradesObserved": 0,
+        "buyNotional": 0,
+        "sellNotional": 0,
+        "buySharePct": null,
+        "sellSharePct": null,
+        "netDelta": 0,
+        "windowEnd": "2026-11-27T20:10:00.000Z"
+      },
+      "volume": {
+        "recent3m": {
+          "available": true,
+          "sampleComplete": true,
+          "sampleTruncated": false,
+          "tradesObserved": 0,
+          "buyNotional": 0,
+          "sellNotional": 0,
+          "buySharePct": null,
+          "sellSharePct": null,
+          "netDelta": 0,
+          "windowEnd": "2026-11-27T20:10:00.000Z"
+        }
+      },
+      "dataQuality": {
+        "recent3mComplete": true
+      },
+      "tradesObserved": 0,
+      "liveInsight": {
+        "confidencePct": 81,
+        "manipulationStatus": "✅ کلک بازارگردان (Stop Hunt) انجام شده؛ حد ضرر پشت ساختار امن قرار گرفت.",
+        "movePhase": "⚡ [شکار در کندل جاری] 🚀 آماده حرکت اصلی به سمت اهداف",
+        "entryInstruction": "🎯 دستور ورود: در ناحیه ورود وارد شوید؛ در ۶۵٪ مسیر تا TP1 معامله خودکار ریسک‌فری می‌شود.",
+        "targetProjection": "📊 هدف اول (TP1) برای قفل سود سریع بهینه‌سازی شده است؛ پس از TP1 حد ضرر روی نقطه ورود قفل می‌شود."
+      },
+      "lastCheckedPrice": 95,
+      "priceCheckedAt": "2026-11-27T20:10:37.686Z",
+      "rank": 1
+    }
+  ],
   "nearMisses": [],
   "filterStats": {
     "LONG": {
