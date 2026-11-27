@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-11-27T22:44:03.538Z",
+  "updatedAt": "2026-11-27T22:47:12.092Z",
   "strategyVersion": "gate-structural-ls-v8-sniper-pro",
   "marketRegime": "BEARISH",
   "btcIntel": {
@@ -19,27 +19,43 @@
     "candidates": 0,
     "longCandidates": 0,
     "shortCandidates": 0,
-    "durationMs": 15073,
+    "durationMs": 15146,
     "newSignalsSent": 0,
-    "liveRadarUpdatesSent": 1,
+    "liveRadarUpdatesSent": 0,
     "trackedRecords": 422
   },
   "rankedCandidates": [],
-  "nearMisses": [],
+  "nearMisses": [
+    {
+      "symbol": "MANTRA_USDT",
+      "side": "SHORT",
+      "score": 55,
+      "required": 76,
+      "scoreBreakdown": {
+        "trend": 17,
+        "setup": 18,
+        "trigger": 8,
+        "candleVolume": 8,
+        "liveFlow": 0,
+        "firstTargetRR": 4,
+        "squeezeBonus": 0,
+        "alphaBonus": 0
+      }
+    }
+  ],
   "filterStats": {
     "LONG": {
       "COIN_4H_TREND": 37,
       "BTC_OPPOSITE_NO_ALPHA": 20
     },
     "SHORT": {
-      "NO_VALID_SETUP": 11,
-      "RSI_OVERSOLD": 4,
+      "NO_VALID_SETUP": 13,
+      "RSI_OVERSOLD": 5,
       "COIN_4H_TREND": 32,
-      "PRICE_CHASING": 5,
       "STRONG_VS_BTC": 2,
-      "FUNDING_CROWDED": 1,
-      "PRICE_MOVED_AWAY": 1,
-      "BAD_RISK": 1
+      "FUNDING_CROWDED": 2,
+      "PRICE_CHASING": 2,
+      "SCORE_LOW": 1
     },
     "GLOBAL": {
       "INSUFFICIENT_CANDLES": 1
