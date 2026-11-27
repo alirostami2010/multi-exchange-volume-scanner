@@ -1,12 +1,12 @@
 {
-  "updatedAt": "2026-11-27T19:54:00.145Z",
+  "updatedAt": "2026-11-27T19:57:42.499Z",
   "strategyVersion": "gate-structural-ls-v7-forensic-pro",
   "marketRegime": "BEARISH",
   "btcIntel": {
     "regime": "BEARISH",
     "regimeFa": "نزولی (Bearish)",
     "rsi4h": 45.9,
-    "rsi15m": 41.3,
+    "rsi15m": 41,
     "adx4h": 15.9,
     "nextMoveForecast": "⚖️ روند کلی نزولی است اما شتاب ریزش کم شده و احتمال ورود به فاز نوسان خنثی (رِنج) وجود دارد."
   },
@@ -19,9 +19,9 @@
     "candidates": 2,
     "longCandidates": 1,
     "shortCandidates": 1,
-    "durationMs": 19047,
+    "durationMs": 19063,
     "newSignalsSent": 0,
-    "liveRadarUpdatesSent": 3,
+    "liveRadarUpdatesSent": 1,
     "trackedRecords": 421
   },
   "rankedCandidates": [
@@ -31,89 +31,89 @@
       "side": "LONG",
       "setup": "LiquiditySweep",
       "isIntrabar": true,
-      "intrabarProgressPct": 58,
+      "intrabarProgressPct": 83,
       "strategyVersion": "gate-structural-ls-v7-forensic-pro",
       "status": "LONG_ENTRY",
       "statusLabel": "LONG LiquiditySweep",
-      "price": 0.005574,
-      "entryLow": 0.0055510612018414215,
-      "entryHigh": 0.005578915456748267,
-      "referenceEntry": 0.005574,
+      "price": 0.00557,
+      "entryLow": 0.005547061201841422,
+      "entryHigh": 0.005574915456748267,
+      "referenceEntry": 0.00557,
       "entry": {
-        "low": 0.0055510612018414215,
-        "high": 0.005578915456748267,
-        "price": 0.005574
+        "low": 0.005547061201841422,
+        "high": 0.005574915456748267,
+        "price": 0.00557
       },
       "stopLoss": 0.005492355900169372,
-      "stopLossPct": -1.46,
-      "tp1": 0.005693672201793366,
-      "tp2": 0.00576960121463585,
-      "tp3": 0.005871656339424134,
-      "tp1Pct": 2.15,
-      "tp2Pct": 3.51,
-      "tp3Pct": 5.34,
+      "stopLossPct": -1.39,
+      "tp1": 0.005684777801793366,
+      "tp2": 0.0057569868146358505,
+      "tp3": 0.005854041939424136,
+      "tp1Pct": 2.06,
+      "tp2Pct": 3.36,
+      "tp3Pct": 5.1,
       "takeProfits": [
         {
           "level": 1,
-          "price": 0.005693672201793366,
-          "zoneLow": 0.005693672201793366,
-          "zoneHigh": 0.005693672201793366,
+          "price": 0.005684777801793366,
+          "zoneLow": 0.005684777801793366,
+          "zoneHigh": 0.005684777801793366,
           "source": "MAJOR_PIVOT_RESISTANCE",
           "timeframes": [
             "15m",
             "4h"
           ],
           "touches": 2,
-          "pct": 2.15,
-          "rrNet": 1.2
+          "pct": 2.06,
+          "rrNet": 1.19
         },
         {
           "level": 2,
-          "price": 0.00576960121463585,
-          "zoneLow": 0.00576960121463585,
-          "zoneHigh": 0.00576960121463585,
+          "price": 0.0057569868146358505,
+          "zoneLow": 0.0057569868146358505,
+          "zoneHigh": 0.0057569868146358505,
           "source": "MAJOR_PIVOT_RESISTANCE",
           "timeframes": [
             "4h"
           ],
           "touches": 2,
-          "pct": 3.51,
+          "pct": 3.36,
           "rrNet": 2.02
         },
         {
           "level": 3,
-          "price": 0.005871656339424134,
-          "zoneLow": 0.005871656339424134,
-          "zoneHigh": 0.005871656339424134,
+          "price": 0.005854041939424136,
+          "zoneLow": 0.005854041939424136,
+          "zoneHigh": 0.005854041939424136,
           "source": "STRUCTURAL_R_EXTENSION",
           "timeframes": [
             "4h"
           ],
           "touches": 1,
-          "pct": 5.34,
-          "rrNet": 3.14
+          "pct": 5.1,
+          "rrNet": 3.13
         }
       ],
       "targetCount": 3,
-      "riskRewardToTp1": 1.2,
+      "riskRewardToTp1": 1.19,
       "riskRewardToTp2": 2.02,
       "rr": 2.02,
-      "rsi15": 23.3,
+      "rsi15": 23.7,
       "rsi4h": 55.6,
       "adx4h": 49.8,
-      "volumeRatio15m": 2.41,
-      "fundingRate": -0.0004587,
+      "volumeRatio15m": 2.1,
+      "fundingRate": -0.0004589,
       "isSqueezeFuel": true,
-      "change24h": -1.03,
-      "quoteVolume24h": 5858504,
+      "change24h": -0.96,
+      "quoteVolume24h": 5864621,
       "triggerCandleTime": "2026-11-27T19:45:00.000Z",
-      "analyzedAt": "2026-11-27T19:53:40.414Z",
+      "analyzedAt": "2026-11-27T19:57:22.707Z",
       "validUntil": "2026-11-27T21:30:00.000Z",
       "riskNote": "جهت معامله خلاف رژیم BTC است؛ با مدیریت ریسک وارد شوید.",
       "reasons": [
         "شکار استاپ‌ها در کف ماژور و ورود پول هوشمند",
         "⚡ شکار زنده در کندل جاری ۱۵ دقیقه + 🔥 سوخت شورت‌اسکوییز (تله بازارگردان)",
-        "شتاب حجم 2.4 برابر میانگین"
+        "شتاب حجم 2.1 برابر میانگین"
       ],
       "historyBehavior": {
         "resiliencePct": 34,
@@ -128,7 +128,7 @@
         "regime": "BEARISH",
         "regimeFa": "نزولی (Bearish)",
         "rsi4h": 45.9,
-        "rsi15m": 41.3,
+        "rsi15m": 41,
         "adx4h": 15.9,
         "nextMoveForecast": "⚖️ روند کلی نزولی است اما شتاب ریزش کم شده و احتمال ورود به فاز نوسان خنثی (رِنج) وجود دارد."
       },
@@ -159,7 +159,7 @@
         "buySharePct": null,
         "sellSharePct": null,
         "netDelta": 0,
-        "windowEnd": "2026-11-27T19:53:00.000Z"
+        "windowEnd": "2026-11-27T19:57:00.000Z"
       },
       "volume": {
         "recent3m": {
@@ -172,7 +172,7 @@
           "buySharePct": null,
           "sellSharePct": null,
           "netDelta": 0,
-          "windowEnd": "2026-11-27T19:53:00.000Z"
+          "windowEnd": "2026-11-27T19:57:00.000Z"
         }
       },
       "dataQuality": {
@@ -182,12 +182,12 @@
       "liveInsight": {
         "confidencePct": 96,
         "manipulationStatus": "✅ کلک بازارگردان (Stop Hunt) انجام شده؛ حد ضرر پشت ساختار امن قرار گرفت.",
-        "movePhase": "⚡ [شکار لحظه‌ای در کندل جاری - دقیقه 9 از ۱۵] 🔋 در حال جمع کردن انرژی در کف/سقف برای پرتاب حرکت اصلی",
+        "movePhase": "⚡ [شکار لحظه‌ای در کندل جاری - دقیقه 12 از ۱۵] 🔋 در حال جمع کردن انرژی در کف/سقف برای پرتاب حرکت اصلی",
         "entryInstruction": "🎯 دستور ورود: در محدوده ورود وارد شوید و در TP1 حتماً معامله را ریسک‌فری کنید.",
         "targetProjection": "🔥 ظرفیت بالای ادامه حرکت: پس از سیو سود در TP1، پتانسیل حرکت تا TP3 و فراتر از آن وجود دارد."
       },
-      "lastCheckedPrice": 0.005568,
-      "priceCheckedAt": "2026-11-27T19:53:58.721Z",
+      "lastCheckedPrice": 0.00557,
+      "priceCheckedAt": "2026-11-27T19:57:41.086Z",
       "rank": 1
     },
     {
@@ -267,12 +267,12 @@
       "rsi4h": 44.1,
       "adx4h": 22,
       "volumeRatio15m": 0.25,
-      "fundingRate": 0.0000094,
+      "fundingRate": 0.0000135,
       "isSqueezeFuel": false,
-      "change24h": -5.78,
-      "quoteVolume24h": 1255728,
+      "change24h": -5.7,
+      "quoteVolume24h": 1257003,
       "triggerCandleTime": "2026-11-27T19:30:00.000Z",
-      "analyzedAt": "2026-11-27T19:53:40.414Z",
+      "analyzedAt": "2026-11-27T19:57:22.707Z",
       "validUntil": "2026-11-27T21:15:00.000Z",
       "riskNote": null,
       "reasons": [
@@ -293,7 +293,7 @@
         "regime": "BEARISH",
         "regimeFa": "نزولی (Bearish)",
         "rsi4h": 45.9,
-        "rsi15m": 41.3,
+        "rsi15m": 41,
         "adx4h": 15.9,
         "nextMoveForecast": "⚖️ روند کلی نزولی است اما شتاب ریزش کم شده و احتمال ورود به فاز نوسان خنثی (رِنج) وجود دارد."
       },
@@ -324,7 +324,7 @@
         "buySharePct": null,
         "sellSharePct": null,
         "netDelta": 0,
-        "windowEnd": "2026-11-27T19:53:00.000Z"
+        "windowEnd": "2026-11-27T19:57:00.000Z"
       },
       "volume": {
         "recent3m": {
@@ -337,7 +337,7 @@
           "buySharePct": null,
           "sellSharePct": null,
           "netDelta": 0,
-          "windowEnd": "2026-11-27T19:53:00.000Z"
+          "windowEnd": "2026-11-27T19:57:00.000Z"
         }
       },
       "dataQuality": {
@@ -352,7 +352,7 @@
         "targetProjection": "📊 هدف اول (TP1) برای قفل سود سریع بهینه‌سازی شده است؛ پس از TP1 حد ضرر به نقطه ورود منتقل می‌شود."
       },
       "lastCheckedPrice": 1.043,
-      "priceCheckedAt": "2026-11-27T19:53:58.721Z",
+      "priceCheckedAt": "2026-11-27T19:57:41.086Z",
       "rank": 2
     }
   ],
