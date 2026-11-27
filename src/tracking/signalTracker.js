@@ -16,7 +16,8 @@ import {
 const FILE = path.resolve(process.cwd(), 'data', 'signal-state.json');
 const MINUTE = 60;
 const DAY = 86400;
-const MAX_UNHEDGED_SAME_SIDE = 4;
+const MAX_WEAK_SIGNALS = 4;
+const STRONG_SCORE_THRESHOLD = 82;
 
 export const EVALUATION = Object.freeze({
   version: 'paper-fixed-stop-v1',
@@ -69,6 +70,15 @@ const hash = v => createHash('sha256').update(v).digest('hex');
 export const strategyKey = (ver, cfg) => ver + '-' + hash(JSON.stringify(cfg)).slice(0, 10);
 export const signalId = (c, strat) => hash([strat, c.symbol, c.side, c.triggerCandleTime].join('|')).slice(0, 24);
 
+// تشخیص سیگنال قوی (A+) در برابر سیگنال عادی/ضعیف‌تر
+export function isStrongSignal(item) {
+  if (!item) return false;
+  if (item.grade === 'A+') return true;
+  if (Number(item.score ?? 0) >= STRONG_SCORE_THRESHOLD) return true;
+  if (item.isSqueezeFuel && Number(item.score ?? 0) >= 80) return true;
+  return false;
+}
+
 export function canRegister(state, candidate, strategy) {
   const id = signalId(candidate, strategy);
   if (state.signals[id]) return false;
@@ -77,22 +87,20 @@ export function canRegister(state, candidate, strategy) {
     ['PENDING_DELIVERY', 'PENDING_ENTRY', 'OPEN'].includes(s.status)
   );
 
+  // ۱. جلوگیری از ارسال سیگنال تکراری روی ارزی که همین الان باز است
   if (activeSignals.some(s => s.symbol === candidate.symbol && s.side === candidate.side)) {
     return false;
   }
 
-  // قفل ضد موج دسته‌جمعی برای نسخه تک‌تیرانداز V8: حداکثر ۴ معامله بازِ ریسک‌فری‌نشده در یک جهت
-  if (String(strategy).includes('v8')) {
-    const unhedgedSameSide = activeSignals.filter(
-      s =>
-        String(s.strategy).includes('v8') &&
-        s.side === candidate.side &&
-        s.targetHits?.[0] == null
-    ).length;
+  // ۲. اگر سیگنال قوی (A+ / امتیاز ۸۲ به بالا) است -> هیچ محدودیتی ندارد و همیشه پذیرش می‌شود!
+  if (isStrongSignal(candidate)) {
+    return true;
+  }
 
-    if (unhedgedSameSide >= MAX_UNHEDGED_SAME_SIDE) {
-      return false;
-    }
+  // ۳. برای سیگنال‌های ضعیف‌تر/عادی (زیر ۸۲): هیچ سیگنالی حذف نمی‌شود، اما فقط زمانی جدید پذیرش می‌شود که تعداد در حال انجام/منتظر ورود زیر ۴ تا باشد
+  const activeWeakCount = activeSignals.filter(s => !isStrongSignal(s)).length;
+  if (activeWeakCount >= MAX_WEAK_SIGNALS) {
+    return false;
   }
 
   return true;
@@ -134,6 +142,7 @@ export function createSignal(candidate, strategy, config = {}) {
     evaluationVersion: EVALUATION.version,
     evaluation: { ...EVALUATION },
     proProtectionEnabled,
+    isStrong: isStrongSignal(candidate),
     createdAt: new Date().toISOString(),
     sentAt: null,
     status: 'PENDING_DELIVERY',
@@ -589,4 +598,4 @@ export function performanceMessages(state, now = Date.now()) {
   const delivered = Object.values(state.signals).filter(s => s.sentAt);
   if (!delivered.length) return ['📊 گزارش عملکرد Gate\nهنوز سیگنالی ثبت نشده است.'];
   return [['📊 گزارش عملکرد سیستم هوشمند Gate', periodReport(delivered, 7, now), '━━━━━━━━━━━━━━━━━━', periodReport(delivered, 30, now)].join('\n')];
-}
+    }
