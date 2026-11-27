@@ -8,50 +8,66 @@ import {
   requireArray,
 } from '../services/gate.js';
 
-export const STRATEGY_VERSION = 'gate-structural-ls-v6-realtime-ai';
+export const STRATEGY_VERSION = 'gate-structural-ls-v7-forensic-pro';
+
+const NON_CRYPTO_BLACKLIST = new Set([
+  'XAU', 'XAUT', 'PAXG', 'XAG', 'XPT', 'CL', 'BZ', 'NG',
+  'SPY', 'QQQ', 'TQQQX', 'SQQQ', 'SOXL', 'SOXS', 'UVXY', 'NAS100', 'SPCX', 'EWY', 'KORU',
+  'NVDA', 'AMD', 'TSLA', 'AAPL', 'MSFT', 'AMZN', 'GOOGL', 'META', 'NFLX', 'ORCL', 'IBM',
+  'INTC', 'INTW', 'TSM', 'AVGO', 'MU', 'MUU', 'MRVL', 'MVLL', 'ARM', 'SMCI', 'DELL', 'HPQ',
+  'PLTR', 'COIN', 'MSTR', 'HOOD', 'CRCL', 'CRWV', 'NBIS', 'IREN', 'RKLB', 'SNDK', 'WDC',
+  'SKHY', 'SKHYNIX', 'SAMSUNG', 'HYUNDAI', 'CXMT', 'DRAM', 'LITE', 'COHR', 'AAOI', 'AXTI',
+  'BE', 'SNXX', 'CBRS', 'KSTR', 'SKDD', 'BMNR', 'ZHONGJI', 'ZHIPU', 'MINIMAX', 'UNITREE'
+]);
+
+function isPureCryptoSymbol(contractName) {
+  const base = String(contractName).replace(/_USDT$/, '').toUpperCase();
+  return !NON_CRYPTO_BLACKLIST.has(base);
+}
 
 export const CONFIG = Object.freeze({
   MODE: 'BALANCED',
   ENABLE_LONG: true,
   ENABLE_SHORT: true,
   ENABLE_INTRABAR_15M: true,
-  MIN_INTRABAR_ELAPSED_SECONDS: 210,
-  MIN_QUOTE_VOLUME_24H: 1000000,
+  MIN_INTRABAR_ELAPSED_SECONDS: 240,
+  MIN_QUOTE_VOLUME_24H: 1200000,
   SCAN_LIMIT: 0,
-  TOP_COUNT: 5,
-  MIN_LONG_SCORE: 65,
-  MIN_LONG_SCORE_NEUTRAL: 70,
-  MIN_LONG_SCORE_BEARISH: 78,
-  MIN_SHORT_SCORE: 65,
-  MIN_SHORT_SCORE_NEUTRAL: 70,
-  MIN_SHORT_SCORE_BULLISH: 78,
+  TOP_COUNT: 3,
+  MIN_LONG_SCORE: 72,
+  MIN_LONG_SCORE_NEUTRAL: 76,
+  MIN_LONG_SCORE_BEARISH: 84,
+  MIN_SHORT_SCORE: 70,
+  MIN_SHORT_SCORE_NEUTRAL: 74,
+  MIN_SHORT_SCORE_BULLISH: 82,
   CONCURRENCY: 6,
   CANDLES_15M_LIMIT: 300,
   CANDLES_4H_LIMIT: 300,
   MIN_CANDLES_15M: 220,
   MIN_CANDLES_4H: 200,
   TRADE_LIMIT: 1000,
-  MIN_RECENT_BUY_NOTIONAL: 1200,
-  MIN_RECENT_SELL_NOTIONAL: 1200,
-  MAX_RSI_LONG_ENTRY: 68,
-  MAX_RSI_LONG_4H: 74,
-  MIN_RSI_SHORT_ENTRY: 32,
-  MIN_RSI_SHORT_4H: 26,
-  MAX_FUNDING_RATE_LONG: 0.001,
-  MIN_FUNDING_RATE_SHORT: -0.001,
+  MIN_RECENT_BUY_NOTIONAL: 1500,
+  MIN_RECENT_SELL_NOTIONAL: 1500,
+  MAX_RSI_LONG_ENTRY: 66,
+  MAX_RSI_LONG_4H: 72,
+  MIN_RSI_SHORT_ENTRY: 34,
+  MIN_RSI_SHORT_4H: 28,
+  MAX_FUNDING_RATE_LONG: 0.0008,
+  MIN_FUNDING_RATE_SHORT: -0.0008,
   MIN_RR_TP1: 1.0,
-  MIN_RR_TP2: 1.7,
+  MIN_RR_TP2: 1.75,
   MIN_SINGLE_TARGET_RR: 1.6,
   MIN_COUNTER_BTC_RR: 2.0,
-  STOP_ATR_BUFFER: 0.75,
-  MIN_STOP_ATR: 1.0,
+  STOP_ATR_BUFFER: 0.85,
+  MIN_STOP_ATR: 1.15,
   MAX_STOP_ATR: 4.5,
-  MAX_STOP_PCT: 5.5,
-  MAX_DISTANCE_EMA_ATR: 1.6,
-  MAX_TRIGGER_DRIFT_ATR: 0.85,
-  MAX_TRIGGER_DRIFT_PCT: 2.2,
-  ENTRY_ZONE_ATR: 0.6,
-  MAX_ENTRY_ZONE_PCT: 0.8,
+  MIN_STOP_PCT: 1.35,
+  MAX_STOP_PCT: 4.8,
+  MAX_DISTANCE_EMA_ATR: 1.5,
+  MAX_TRIGGER_DRIFT_ATR: 0.8,
+  MAX_TRIGGER_DRIFT_PCT: 2.0,
+  ENTRY_ZONE_ATR: 0.55,
+  MAX_ENTRY_ZONE_PCT: 0.9,
   ENTRY_VALID_MINUTES: 90,
   FEE_RATE_PER_SIDE: 0.0006,
   SLIPPAGE_RATE_PER_SIDE: 0.0003,
@@ -390,63 +406,69 @@ function buildMajorTargets(c15, c4, entry, stop, risk, atr, longSide) {
   }
 
   const costBuffer = entry * (CONFIG.FEE_RATE_PER_SIDE + CONFIG.SLIPPAGE_RATE_PER_SIDE) * 4;
-  const minValidTp1Distance = risk * 1.12 + costBuffer;
-  const minValidTp2Distance = risk * 1.85 + costBuffer;
+  const minTp1Dist = risk * 1.08 + costBuffer;
+  const maxTp1Dist = risk * 1.38 + costBuffer;
 
   const blockingMajorWall = zones.find(zone => {
     if (!(zone.timeframes.includes('4h') && zone.strength >= 4)) return false;
     return longSide
-      ? zone.low > entry && zone.low < entry + risk * 0.75
-      : zone.high < entry && zone.high > entry - risk * 0.75;
+      ? zone.low > entry && zone.low < entry + risk * 0.8
+      : zone.high < entry && zone.high > entry - risk * 0.8;
   });
 
   if (blockingMajorWall) return { blocked: true, zones: [] };
 
-  const validZones = longSide
-    ? zones.filter(z => z.low >= entry + minValidTp1Distance).sort((a, b) => a.low - b.low)
-    : zones.filter(z => z.high <= entry - minValidTp1Distance).sort((a, b) => b.high - a.high);
-
-  const selectedZones = [];
-  for (const z of validZones) {
-    const targetPrice = longSide ? z.low : z.high;
-    if (selectedZones.length === 0) {
-      selectedZones.push(z);
-    } else if (selectedZones.length === 1) {
-      const distFromEntry = Math.abs(targetPrice - entry);
-      const prevPrice = longSide ? selectedZones[0].low : selectedZones[0].high;
-      if (distFromEntry >= minValidTp2Distance && Math.abs(targetPrice - prevPrice) >= risk * 0.6) {
-        selectedZones.push(z);
-      }
-    } else if (selectedZones.length === 2) {
-      const prevPrice = longSide ? selectedZones[1].low : selectedZones[1].high;
-      if (Math.abs(targetPrice - prevPrice) >= risk * 0.8) {
-        selectedZones.push(z);
-        break;
-      }
-    }
-  }
-
   const dir = longSide ? 1 : -1;
-  const fallbackMultipliers = [1.5, 2.4, 3.8];
-  while (selectedZones.length < 3) {
-    const idx = selectedZones.length;
-    let fallbackPrice = entry + dir * (risk * fallbackMultipliers[idx] + costBuffer);
-    if (idx > 0) {
-      const prevTarget = longSide ? selectedZones[idx - 1].low : selectedZones[idx - 1].high;
-      const minStep = prevTarget + dir * (risk * 0.85);
-      fallbackPrice = longSide ? Math.max(fallbackPrice, minStep) : Math.min(fallbackPrice, minStep);
+  const validZones = longSide
+    ? zones.filter(z => z.low >= entry + minTp1Dist).sort((a, b) => a.low - b.low)
+    : zones.filter(z => z.high <= entry - minTp1Dist).sort((a, b) => b.high - a.high);
+
+  let tp1Price = entry + dir * (risk * 1.22 + costBuffer);
+  if (validZones.length > 0) {
+    const firstWall = longSide ? validZones[0].low : validZones[0].high;
+    const distToWall = Math.abs(firstWall - entry);
+    const frontRunPrice = entry + dir * Math.max(minTp1Dist, distToWall * 0.94);
+    if (Math.abs(frontRunPrice - entry) <= maxTp1Dist) {
+      tp1Price = frontRunPrice;
     }
-    selectedZones.push({
-      low: fallbackPrice,
-      high: fallbackPrice,
-      touches: 1,
-      strength: 2,
-      timeframes: ['4h'],
-      isStructuralProjection: true,
-    });
   }
 
-  return { blocked: false, zones: selectedZones.slice(0, 3) };
+  let tp2Price = entry + dir * (risk * 2.15 + costBuffer);
+  let tp3Price = entry + dir * (risk * 3.4 + costBuffer);
+
+  const higherZones = validZones.filter(z => {
+    const p = longSide ? z.low : z.high;
+    return Math.abs(p - entry) >= Math.abs(tp1Price - entry) + risk * 0.65;
+  });
+
+  if (higherZones[0]) {
+    const p2 = longSide ? higherZones[0].low : higherZones[0].high;
+    if (Math.abs(p2 - entry) <= risk * 3.0) tp2Price = p2;
+  }
+
+  if (higherZones[1]) {
+    const p3 = longSide ? higherZones[1].low : higherZones[1].high;
+    if (Math.abs(p3 - entry) > Math.abs(tp2Price - entry) + risk * 0.7 && Math.abs(p3 - entry) <= risk * 5.0) {
+      tp3Price = p3;
+    }
+  }
+
+  if (longSide) {
+    if (tp2Price <= tp1Price + risk * 0.6) tp2Price = tp1Price + risk * 0.85;
+    if (tp3Price <= tp2Price + risk * 0.7) tp3Price = tp2Price + risk * 1.2;
+  } else {
+    if (tp2Price >= tp1Price - risk * 0.6) tp2Price = tp1Price - risk * 0.85;
+    if (tp3Price >= tp2Price - risk * 0.7) tp3Price = tp2Price - risk * 1.2;
+  }
+
+  return {
+    blocked: false,
+    zones: [
+      { low: tp1Price, high: tp1Price, touches: 2, timeframes: ['15m', '4h'] },
+      { low: tp2Price, high: tp2Price, touches: 2, timeframes: ['4h'] },
+      { low: tp3Price, high: tp3Price, touches: 1, timeframes: ['4h'], isStructuralProjection: true },
+    ],
+  };
 }
 
 function riskReward(longSide, entry, stop, target) {
@@ -477,7 +499,7 @@ function analyze(market, c15, c4, context, side, isIntrabar = false) {
   );
   if (any([!positive(price), !positive(atr), !validIndicators])) return fail('BAD_PRICE_OR_INDICATOR');
 
-  if (isIntrabar && (!last.volumeRatio || last.volumeRatio < 1.35)) return null;
+  if (isIntrabar && (!last.volumeRatio || last.volumeRatio < 1.4)) return null;
 
   const macroAligned = longSide
     ? (trend.close > trend.ema50 && trend.ema20 >= trend.ema50 * 0.995) ||
@@ -515,19 +537,19 @@ function analyze(market, c15, c4, context, side, isIntrabar = false) {
 
   const rejectCandle = rejectionPattern(c15, longSide);
   const engulfCandle = engulfing(c15, longSide);
-  const hasVolume = last.volumeRatio != null && last.volumeRatio >= 1.25;
+  const hasVolume = last.volumeRatio != null && last.volumeRatio >= 1.3;
 
   const liquiditySweep = longSide
     ? (last.low < minorLow || previous.low < minorLow) &&
       last.close > minorLow &&
       price >= minorLow &&
       (rejectCandle || engulfCandle || last.close > last.open) &&
-      (hasVolume || previous.volumeRatio >= 1.3)
+      (hasVolume || previous.volumeRatio >= 1.35)
     : (last.high > minorHigh || previous.high > minorHigh) &&
       last.close < minorHigh &&
       price <= minorHigh &&
       (rejectCandle || engulfCandle || last.close < last.open) &&
-      (hasVolume || previous.volumeRatio >= 1.3);
+      (hasVolume || previous.volumeRatio >= 1.35);
 
   const hardBreakdown = longSide ? last.close < swingLow - atr * 0.2 : last.close > swingHigh + atr * 0.2;
   if (hardBreakdown && !liquiditySweep) return fail(longSide ? 'SUPPORT_BROKEN' : 'RESISTANCE_BROKEN');
@@ -551,7 +573,11 @@ function analyze(market, c15, c4, context, side, isIntrabar = false) {
     ? last.close > last.open && last.close >= previous.close
     : last.close < last.open && last.close <= previous.close;
 
-  const pullback = correction && any([nearStructure, emaTouch]) && directionalCandle;
+  const pullback =
+    correction &&
+    any([nearStructure, emaTouch]) &&
+    directionalCandle &&
+    (rejectCandle || engulfCandle || hasVolume);
 
   const beforeBreak = c15.slice(-25, -2);
   const breakLevel = longSide
@@ -559,7 +585,7 @@ function analyze(market, c15, c4, context, side, isIntrabar = false) {
     : Math.min(...beforeBreak.map(c => c.low));
 
   const retest =
-    (previous.volumeRatio >= 1.3 || last.volumeRatio >= 1.5) &&
+    (previous.volumeRatio >= 1.35 || last.volumeRatio >= 1.5) &&
     (longSide
       ? previous.close > breakLevel &&
         last.low <= breakLevel + atr * 0.4 &&
@@ -573,12 +599,12 @@ function analyze(market, c15, c4, context, side, isIntrabar = false) {
   const tightSqueeze = minorHigh - minorLow <= atr * 2.8;
   const earlyIgnition =
     tightSqueeze &&
-    last.volumeRatio >= 1.8 &&
+    last.volumeRatio >= 1.85 &&
     (longSide
       ? last.close > minorHigh && last.close - minorHigh <= atr * 0.8 && last.close > last.ema50
       : last.close < minorLow && minorLow - last.close <= atr * 0.8 && last.close < last.ema50);
 
-  if (isIntrabar && !any([liquiditySweep, earlyIgnition, retest, pullback && rejectCandle])) return null;
+  if (isIntrabar && !any([liquiditySweep, earlyIgnition, retest])) return null;
   if (!any([liquiditySweep, pullback, retest, earlyIgnition])) return fail('NO_VALID_SETUP');
 
   const cross = longSide
@@ -599,26 +625,28 @@ function analyze(market, c15, c4, context, side, isIntrabar = false) {
 
   let stopStructure;
   if (liquiditySweep) {
-    stopStructure = longSide ? Math.min(last.low, previous.low) : Math.max(last.high, previous.high);
+    stopStructure = longSide ? Math.min(last.low, previous.low, minorLow) : Math.max(last.high, previous.high, minorHigh);
   } else if (retest || earlyIgnition) {
     stopStructure = longSide
-      ? Math.min(last.low, breakLevel - atr * 0.3)
-      : Math.max(last.high, breakLevel + atr * 0.3);
+      ? Math.min(last.low, previous.low, breakLevel - atr * 0.4)
+      : Math.max(last.high, previous.high, breakLevel + atr * 0.4);
   } else {
     stopStructure = longSide
-      ? Math.min(...c15.slice(-5).map(c => c.low))
-      : Math.max(...c15.slice(-5).map(c => c.high));
+      ? Math.min(...c15.slice(-12).map(c => c.low))
+      : Math.max(...c15.slice(-12).map(c => c.high));
   }
 
-  const stop = stopStructure + (longSide ? -1 : 1) * atr * CONFIG.STOP_ATR_BUFFER;
-  const zoneWidth = Math.min(atr * CONFIG.ENTRY_ZONE_ATR, (price * CONFIG.MAX_ENTRY_ZONE_PCT) / 100);
+  const rawStop = stopStructure + (longSide ? -1 : 1) * atr * CONFIG.STOP_ATR_BUFFER;
+  const minSafeDist = Math.max(atr * CONFIG.MIN_STOP_ATR, price * (CONFIG.MIN_STOP_PCT / 100));
+  const stop = longSide ? Math.min(rawStop, price - minSafeDist) : Math.max(rawStop, price + minSafeDist);
 
+  const zoneWidth = Math.min(atr * CONFIG.ENTRY_ZONE_ATR, (price * CONFIG.MAX_ENTRY_ZONE_PCT) / 100);
   const pullbackAnchor = longSide
     ? Math.min(price, Math.max(last.ema9, price - zoneWidth))
     : Math.max(price, Math.min(last.ema9, price + zoneWidth));
 
-  const entryLow = longSide ? Math.min(pullbackAnchor, price - zoneWidth * 0.6) : price - zoneWidth * 0.35;
-  const entryHigh = longSide ? price + zoneWidth * 0.35 : Math.max(pullbackAnchor, price + zoneWidth * 0.6);
+  const entryLow = longSide ? Math.min(pullbackAnchor, price - zoneWidth * 0.7) : price - zoneWidth * 0.15;
+  const entryHigh = longSide ? price + zoneWidth * 0.15 : Math.max(pullbackAnchor, price + zoneWidth * 0.7);
 
   const entry = price;
   const risk = longSide ? entry - stop : stop - entry;
@@ -629,7 +657,6 @@ function analyze(market, c15, c4, context, side, isIntrabar = false) {
       !positive(stop),
       !positive(entryLow),
       invalidStop,
-      risk < atr * CONFIG.MIN_STOP_ATR,
       risk > atr * CONFIG.MAX_STOP_ATR,
       (risk / entry) * 100 > CONFIG.MAX_STOP_PCT,
     ])
@@ -696,7 +723,7 @@ function analyze(market, c15, c4, context, side, isIntrabar = false) {
   );
 
   const volumeScore = last.volumeRatio >= 1.8 ? 12 : last.volumeRatio >= 1.2 ? 8 : 3;
-  const rrScore = rr1 >= 1.8 ? 6 : rr1 >= 1.3 ? 4 : 2;
+  const rrScore = rr1 >= 1.4 ? 6 : rr1 >= 1.1 ? 4 : 2;
   const isSqueezeFuel = (longSide && funding < -0.00005) || (!longSide && funding > 0.00025);
   const squeezeBonus = isSqueezeFuel ? 10 : 0;
 
@@ -831,7 +858,7 @@ function buildLiveSignalIntelligence(candidate, flow) {
   let entryInstruction = '';
 
   if (setup === 'LiquiditySweep') {
-    manipulationStatus = '✅ کلک بازارگردان (Stop Hunt) انجام شده؛ استاپ‌های خرد جمع‌آوری شده و قیمت به داخل ساختار برگشته است.';
+    manipulationStatus = '✅ کلک بازارگردان (Stop Hunt) انجام شده؛ حد ضرر پشت ساختار امن قرار گرفت.';
     movePhase = timingTag + '🔋 در حال جمع کردن انرژی در کف/سقف برای پرتاب حرکت اصلی';
   } else if (setup === 'EarlyIgnition') {
     manipulationStatus = '🛡️ احتمال کلک پایین است؛ شکست فشردگی با ورود مستقیم حجم انجام شده است.';
@@ -840,7 +867,7 @@ function buildLiveSignalIntelligence(candidate, flow) {
     manipulationStatus = '✅ تست مجدد سطح شکسته شده با موفقیت انجام شد؛ تله فیک‌اوت خنثی شده است.';
     movePhase = timingTag + '⚡ آماده شروع موج دوم حرکت پس از تثبیت';
   } else {
-    manipulationStatus = '🔍 در فاز اصلاح طبیعی (Pullback)؛ احتمال نوسان و شدوهای فریبنده در محدوده ورود وجود دارد.';
+    manipulationStatus = '🔍 پولبک به حمایت/مقاومت بزرگ؛ حد ضرر با فاصله امن از شدوها تنظیم شد.';
     movePhase = timingTag + '⏳ در حال ساختن کف/سقف محلی و جذب سفارشات';
   }
 
@@ -848,23 +875,19 @@ function buildLiveSignalIntelligence(candidate, flow) {
   const flowOpposite = flow?.sampleComplete && (longSide ? flow.sellSharePct >= 62 : flow.buySharePct >= 62);
 
   if (flowOpposite) {
-    entryInstruction = '⚠️ احتیاط در ورود لحظه‌ای: در ۳ دقیقه اخیر فشار سفارشات خلاف جهت است؛ منتظر بمانید قیمت به لبه بهینه محدوده ورود برسد.';
+    entryInstruction = '⚠️ احتیاط در ورود لحظه‌ای: در ۳ دقیقه اخیر فشار سفارشات خلاف جهت است؛ پله‌ای وارد شوید.';
   } else if (flowAligned) {
-    entryInstruction = '🟢 دستور ورود: جریان سفارشات زنده کاملاً هم‌جهت با سیگنال است؛ ورود در محدوده اعلام‌شده با اطمینان بالا مجاز است.';
+    entryInstruction = '🟢 دستور ورود: جریان سفارشات زنده کاملاً هم‌جهت با سیگنال است؛ ورود با اطمینان بالا مجاز است.';
   } else {
-    entryInstruction = '🎯 دستور ورود: سفارش خود را در محدوده ورود قرار دهید و حد ضرر را دقیق تنظیم کنید.';
+    entryInstruction = '🎯 دستور ورود: در محدوده ورود وارد شوید و در TP1 حتماً معامله را ریسک‌فری کنید.';
   }
 
-  let targetProjection = '';
-  if (candidate.isSqueezeFuel || (candidate.adx4h >= 25 && candidate.volumeRatio15m >= 1.6)) {
-    targetProjection = '🔥 ظرفیت بالای ادامه حرکت: به دلیل قدرت روند و تله فاندینگ، در صورت شکست TP2 پتانسیل حرکت فراتر از TP3 وجود دارد.';
-  } else if (candidate.riskRewardToTp1 < 1.25) {
-    targetProjection = '💡 مدیریت تارگت: هدف اول نزدیک است؛ در TP1 حتماً ۵۰٪ سود را سیو و معامله را ریسک‌فری کنید.';
-  } else {
-    targetProjection = '📊 مسیر تا اهداف اول و دوم باز است؛ سیو سود پله‌ای در هر تارگت توصیه می‌شود.';
-  }
+  const targetProjection =
+    candidate.isSqueezeFuel || (candidate.adx4h >= 25 && candidate.volumeRatio15m >= 1.6)
+      ? '🔥 ظرفیت بالای ادامه حرکت: پس از سیو سود در TP1، پتانسیل حرکت تا TP3 و فراتر از آن وجود دارد.'
+      : '📊 هدف اول (TP1) برای قفل سود سریع بهینه‌سازی شده است؛ پس از TP1 حد ضرر به نقطه ورود منتقل می‌شود.';
 
-  const confidencePct = Math.min(96, Math.max(68, Math.round(candidate.score * 0.95)));
+  const confidencePct = Math.min(96, Math.max(70, Math.round(candidate.score * 0.95)));
   return { confidencePct, manipulationStatus, movePhase, entryInstruction, targetProjection };
 }
 
@@ -890,7 +913,6 @@ export function formatInitialAiReport(candidate) {
     '• در صورت صعود BTC: ' + (hb?.whenBtcBullish ?? '—'),
     '• در صورت ریزش BTC: ' + (hb?.whenBtcBearish ?? '—'),
     '• در صورت خنثی شدن BTC: ' + (hb?.whenBtcNeutral ?? '—'),
-    '📡 این سیگنال در هر اسکن به صورت لحظه‌ای (کندل جاری و اهداف) رصد می‌شود.',
   ].join('\n');
 }
 
@@ -1103,7 +1125,7 @@ async function scanOne(market, context) {
     return reject(context, 'SCORE_LOW', candidate.side);
   }
 
-  candidate.grade = candidate.score >= 82 ? 'A+' : candidate.score >= 72 ? 'A' : 'B';
+  candidate.grade = candidate.score >= 82 ? 'A+' : candidate.score >= 74 ? 'A' : 'B';
   candidate.recent3m = flow;
   candidate.volume = { recent3m: flow };
   candidate.dataQuality = { recent3mComplete: flow.sampleComplete };
@@ -1125,6 +1147,7 @@ export async function scanGateMarkets() {
     c =>
       typeof c.name === 'string' &&
       c.name.endsWith('_USDT') &&
+      isPureCryptoSymbol(c.name) &&
       c.status === 'trading' &&
       c.in_delisting === false &&
       positive(number(c.quanto_multiplier))
@@ -1171,7 +1194,7 @@ export async function scanGateMarkets() {
   }
 
   console.log(
-    '[SCAN] Active: ' +
+    '[SCAN] Pure Crypto Active: ' +
       active.length +
       ' | Liquid: ' +
       liquid.length +
