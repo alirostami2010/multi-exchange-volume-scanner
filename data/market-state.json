@@ -2080149,6 +2080149,174 @@
       "scoreRaw": 72,
       "timestamp": "2026-11-27T08:45:07.944Z",
       "recordType": "SCANNER_CANDIDATE"
+    },
+    {
+      "symbol": "PIEVERSE_USDT",
+      "contract": "PIEVERSE_USDT",
+      "side": "LONG",
+      "setup": "Pullback",
+      "isIntrabar": false,
+      "intrabarProgressPct": 100,
+      "strategyVersion": "gate-structural-ls-v6-realtime-ai",
+      "status": "LONG_ENTRY",
+      "statusLabel": "LONG Pullback",
+      "price": 4.0263,
+      "entryLow": 4.010146143226534,
+      "entryHigh": 4.035723083117855,
+      "referenceEntry": 4.0263,
+      "entry": {
+        "low": 4.010146143226534,
+        "high": 4.035723083117855,
+        "price": 4.0263
+      },
+      "stopLoss": 3.9578769053775575,
+      "stopLossPct": -1.7,
+      "tp1": 4.1186,
+      "tp2": 5.3464,
+      "tp3": 5.404559630429076,
+      "tp1Pct": 2.29,
+      "tp2Pct": 32.79,
+      "tp3Pct": 34.23,
+      "takeProfits": [
+        {
+          "level": 1,
+          "price": 4.1186,
+          "zoneLow": 4.1186,
+          "zoneHigh": 4.1417,
+          "source": "MAJOR_PIVOT_RESISTANCE",
+          "timeframes": [
+            "15m",
+            "4h"
+          ],
+          "touches": 4,
+          "pct": 2.29,
+          "rrNet": 1.12
+        },
+        {
+          "level": 2,
+          "price": 5.3464,
+          "zoneLow": 5.3464,
+          "zoneHigh": 5.3464,
+          "source": "MAJOR_PIVOT_RESISTANCE",
+          "timeframes": [
+            "4h"
+          ],
+          "touches": 1,
+          "pct": 32.79,
+          "rrNet": 17.35
+        },
+        {
+          "level": 3,
+          "price": 5.404559630429076,
+          "zoneLow": 5.404559630429076,
+          "zoneHigh": 5.404559630429076,
+          "source": "STRUCTURAL_R_EXTENSION",
+          "timeframes": [
+            "4h"
+          ],
+          "touches": 1,
+          "pct": 34.23,
+          "rrNet": 18.12
+        }
+      ],
+      "targetCount": 3,
+      "riskRewardToTp1": 1.12,
+      "riskRewardToTp2": 17.35,
+      "rr": 17.35,
+      "rsi15": 56.8,
+      "rsi4h": 61.5,
+      "adx4h": 20.4,
+      "volumeRatio15m": 0.63,
+      "fundingRate": 0.0001116,
+      "isSqueezeFuel": false,
+      "change24h": 8.34,
+      "quoteVolume24h": 15890737,
+      "triggerCandleTime": "2026-11-27T08:30:00.000Z",
+      "analyzedAt": "2026-11-27T08:47:49.514Z",
+      "validUntil": "2026-11-27T09:15:00.000Z",
+      "riskNote": null,
+      "reasons": [
+        "پولبک هوشمند به حمایت بزرگ",
+        "کراس صعودی MACD + چرخش صعودی RSI",
+        "هم‌جهت با ساختار ۴ ساعته صعودی"
+      ],
+      "historyBehavior": {
+        "resiliencePct": 49,
+        "beta": 1.83,
+        "independentScore": 44,
+        "recentRelStrength": 5.65,
+        "whenBtcBullish": "شتاب‌گیرنده قوی (اهرم 1.83 برابر نسبت به صعود BTC)",
+        "whenBtcBearish": "حساس به ریزش BTC (در صورت سقوط شدید بیت‌کوین، سیو سود سریع الزامی است)",
+        "whenBtcNeutral": "دارای پول هوشمند مستقل؛ وقتی BTC رِنج می‌شود این ارز تمایل به حرکت شارپ دارد"
+      },
+      "btcIntel": {
+        "regime": "NEUTRAL",
+        "regimeFa": "خنثی / رِنج",
+        "rsi4h": 59.5,
+        "rsi15m": 57.1,
+        "adx4h": 15.5,
+        "nextMoveForecast": "🌱 بیت‌کوین در حال خروج از فاز خنثی و جمع کردن انرژی برای تبدیل شدن به روند صعودی است."
+      },
+      "score": 73,
+      "rankScore": 73,
+      "scoreBreakdown": {
+        "trend": 30,
+        "setup": 18,
+        "trigger": 20,
+        "candleVolume": 3,
+        "liveFlow": 0,
+        "firstTargetRR": 2,
+        "squeezeBonus": 0
+      },
+      "costAssumptions": {
+        "feeRatePerSide": 0.0006,
+        "slippageRatePerSide": 0.0003,
+        "fundingIncludedInRR": false
+      },
+      "grade": "A",
+      "recent3m": {
+        "available": true,
+        "sampleComplete": true,
+        "sampleTruncated": false,
+        "tradesObserved": 0,
+        "buyNotional": 0,
+        "sellNotional": 0,
+        "buySharePct": null,
+        "sellSharePct": null,
+        "netDelta": 0,
+        "windowEnd": "2026-11-27T08:47:00.000Z"
+      },
+      "volume": {
+        "recent3m": {
+          "available": true,
+          "sampleComplete": true,
+          "sampleTruncated": false,
+          "tradesObserved": 0,
+          "buyNotional": 0,
+          "sellNotional": 0,
+          "buySharePct": null,
+          "sellSharePct": null,
+          "netDelta": 0,
+          "windowEnd": "2026-11-27T08:47:00.000Z"
+        }
+      },
+      "dataQuality": {
+        "recent3mComplete": true
+      },
+      "tradesObserved": 0,
+      "liveInsight": {
+        "confidencePct": 69,
+        "manipulationStatus": "🔍 در فاز اصلاح طبیعی (Pullback)؛ احتمال نوسان و شدوهای فریبنده در محدوده ورود وجود دارد.",
+        "movePhase": "🔒 [تأییدشده با کلوز کندل ۱۵ دقیقه] ⏳ در حال ساختن کف/سقف محلی و جذب سفارشات",
+        "entryInstruction": "🎯 دستور ورود: سفارش خود را در محدوده ورود قرار دهید و حد ضرر را دقیق تنظیم کنید.",
+        "targetProjection": "💡 مدیریت تارگت: هدف اول نزدیک است؛ در TP1 حتماً ۵۰٪ سود را سیو و معامله را ریسک‌فری کنید."
+      },
+      "lastCheckedPrice": 4.034,
+      "priceCheckedAt": "2026-11-27T08:48:23.705Z",
+      "rank": 1,
+      "scoreRaw": 73,
+      "timestamp": "2026-11-27T08:48:24.114Z",
+      "recordType": "SCANNER_CANDIDATE"
     }
   ],
   "summaries": {
@@ -2090708,6 +2090876,21 @@
       "lastSeenAt": "2026-11-27T08:45:07.944Z",
       "lastPrice": 0.03907,
       "lastScore": 72
+    },
+    "PIEVERSE_USDT:LONG": {
+      "symbol": "PIEVERSE_USDT",
+      "side": "LONG",
+      "firstDiscoveredAt": "2026-11-27T08:48:24.114Z",
+      "firstDiscoveryPrice": 4.034,
+      "highestPrice": 4.034,
+      "lowestPrice": 4.034,
+      "bestRank": 1,
+      "bestScore": 73,
+      "observations": 1,
+      "maxFavorableObservedPct": 0,
+      "lastSeenAt": "2026-11-27T08:48:24.114Z",
+      "lastPrice": 4.034,
+      "lastScore": 73
     }
   },
   "rankMemory": {
@@ -2093968,6 +2094151,13 @@
       "score": 72,
       "rank": 4,
       "updatedAt": "2026-11-27T08:45:07.944Z"
+    },
+    "PIEVERSE_USDT:LONG": {
+      "symbol": "PIEVERSE_USDT",
+      "side": "LONG",
+      "score": 73,
+      "rank": 1,
+      "updatedAt": "2026-11-27T08:48:24.114Z"
     }
   },
   "tradeStates": {
@@ -2107557,15 +2107747,12 @@
     }
   },
   "scanMeta": {
-    "timestamp": "2026-11-27T08:45:07.944Z",
-    "candidateCount": 4,
+    "timestamp": "2026-11-27T08:48:24.114Z",
+    "candidateCount": 1,
     "ranks": {
-      "AVAX_USDT:SHORT": 1,
-      "BTW_USDT:LONG": 2,
-      "牛来_USDT:LONG": 3,
-      "SEI_USDT:LONG": 4
+      "PIEVERSE_USDT:LONG": 1
     }
   },
-  "updatedAt": "2026-11-27T08:45:07.944Z",
+  "updatedAt": "2026-11-27T08:48:24.114Z",
   "schemaVersion": 2
 }
