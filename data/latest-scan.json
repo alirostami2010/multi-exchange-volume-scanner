@@ -1,46 +1,62 @@
 {
-  "updatedAt": "2026-11-27T16:34:55.791Z",
+  "updatedAt": "2026-11-27T16:37:44.835Z",
   "strategyVersion": "gate-structural-ls-v7-forensic-pro",
   "marketRegime": "BEARISH",
   "btcIntel": {
     "regime": "BEARISH",
     "regimeFa": "نزولی (Bearish)",
     "rsi4h": 45.9,
-    "rsi15m": 42.6,
+    "rsi15m": 42.5,
     "adx4h": 15.9,
     "nextMoveForecast": "⚖️ روند کلی نزولی است اما شتاب ریزش کم شده و احتمال ورود به فاز نوسان خنثی (رِنج) وجود دارد."
   },
   "stats": {
     "active": 970,
-    "liquid": 71,
-    "scanned": 71,
-    "success": 71,
+    "liquid": 72,
+    "scanned": 72,
+    "success": 72,
     "failed": 0,
     "candidates": 0,
     "longCandidates": 0,
     "shortCandidates": 0,
-    "durationMs": 18124,
+    "durationMs": 18549,
     "newSignalsSent": 0,
-    "liveRadarUpdatesSent": 0,
+    "liveRadarUpdatesSent": 2,
     "trackedRecords": 415
   },
   "rankedCandidates": [],
-  "nearMisses": [],
+  "nearMisses": [
+    {
+      "symbol": "HAEDAL_USDT",
+      "side": "LONG",
+      "score": 73,
+      "required": 84,
+      "scoreBreakdown": {
+        "trend": 30,
+        "setup": 18,
+        "trigger": 8,
+        "candleVolume": 3,
+        "liveFlow": 0,
+        "firstTargetRR": 4,
+        "squeezeBonus": 10
+      }
+    }
+  ],
   "filterStats": {
     "LONG": {
-      "COIN_4H_TREND": 46,
-      "NO_VALID_SETUP": 15,
+      "COIN_4H_TREND": 47,
+      "NO_VALID_SETUP": 14,
       "RSI_OVERBOUGHT": 3,
       "PRICE_CHASING": 1,
       "SUPPORT_BROKEN": 2,
-      "COUNTER_BTC_WEAK_SETUP": 1,
-      "PRICE_MOVED_AWAY_FROM_TRIGGER": 2
+      "PRICE_MOVED_AWAY_FROM_TRIGGER": 3,
+      "SCORE_LOW": 1
     },
     "SHORT": {
-      "PRICE_MOVED_AWAY_FROM_TRIGGER": 5,
-      "RSI_OVERSOLD": 18,
+      "PRICE_MOVED_AWAY_FROM_TRIGGER": 8,
+      "RSI_OVERSOLD": 19,
       "COIN_4H_TREND": 25,
-      "NO_VALID_SETUP": 18,
+      "NO_VALID_SETUP": 15,
       "FUNDING_CROWDED": 3,
       "PRICE_CHASING": 1
     },
