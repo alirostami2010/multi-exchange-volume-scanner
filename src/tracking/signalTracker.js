@@ -18,15 +18,14 @@ const MINUTE = 60;
 const DAY = 86400;
 
 export const EVALUATION = Object.freeze({
-  version: 'pro-dynamic-stop-v2',
+  version: 'paper-fixed-stop-v1',
   maxHoldSeconds: DAY,
   observationSeconds: 2 * DAY,
   feeRate: 0.0006,
   slippageRate: 0.0003,
   fundingIncluded: false,
-  entryModel: 'SMART_ZONE_OVERLAP_ENTRY',
-  stopModel: 'WICK_PROTECTED_AND_AUTO_BREAKEVEN',
-  wickToleranceR: 0.35, // تحمل شدوی استاپ‌هانت تا ۳۵٪ ریسک در صورت برگشت کلوز کندل
+  entryModel: 'CONSERVATIVE_BOUNDARY_TOUCH_AFTER_DELIVERY',
+  stopModel: 'FIXED_INITIAL_STOP',
   ambiguityPolicy: 'EXCLUDE_AND_REPORT',
   maxPagesPerSignalPerRun: 8,
 });
@@ -58,8 +57,6 @@ export async function loadSignalState() {
       }
       signal.liveAlertsSent ??= {};
       signal.pendingLiveAlerts ??= [];
-      signal.activeStop ??= signal.stop;
-      signal.survivedWickCount ??= 0;
     }
     return state;
   } catch (error) {
@@ -148,7 +145,6 @@ export function createSignal(candidate, strategy, config = {}) {
     entryLow: candidate.entryLow,
     entryHigh: candidate.entryHigh,
     stop: candidate.stopLoss,
-    activeStop: candidate.stopLoss,
     initialRisk: Math.abs(entry - candidate.stopLoss),
     targets,
     weights,
@@ -171,7 +167,6 @@ export function createSignal(candidate, strategy, config = {}) {
     observedMaePct: 0,
     observationMfePct: 0,
     beyondFinalTargetPct: 0,
-    survivedWickCount: 0,
     postMortem: null,
     observationComplete: false,
     dataIssue: null,
@@ -201,43 +196,12 @@ function direction(signal, price) {
   return ((signal.side === 'LONG' ? price - signal.entry : signal.entry - price) / signal.entry) * 100;
 }
 
-function currentStopLevel(signal) {
-  return positive(signal.activeStop) ? signal.activeStop : signal.stop;
-}
-
-// سیستم حد ضرر هوشمند ضدِ شدو (Wick-Protected Stop):
-// اگر قیمت فقط با شدوی ۱ دقیقه‌ای کمی از استاپ رد شود ولی بالای استاپ بسته شود، فریب استاپ‌هانت را نمی‌خورد!
-function evaluateStopTouch(signal, candle) {
-  const stopPrice = currentStopLevel(signal);
-  const isInitialStop = Math.abs(stopPrice - signal.stop) < 1e-8;
-  const maxWickBuffer = isInitialStop ? signal.initialRisk * EVALUATION.wickToleranceR : 0;
-
-  if (signal.side === 'LONG') {
-    const hardCatastrophicStop = stopPrice - maxWickBuffer;
-    if (candle.low > stopPrice) return { hit: false, survivedWick: false };
-    // اگر کلوز کندل زیر استاپ بسته شد یا شدو از حد مجاز استاپ‌هانت رد شد -> استاپ واقعی
-    if (candle.close <= stopPrice || candle.low <= hardCatastrophicStop) {
-      return { hit: true, fillPrice: Math.min(stopPrice, candle.close) };
-    }
-    return { hit: false, survivedWick: true };
-  } else {
-    const hardCatastrophicStop = stopPrice + maxWickBuffer;
-    if (candle.high < stopPrice) return { hit: false, survivedWick: false };
-    if (candle.close >= stopPrice || candle.high >= hardCatastrophicStop) {
-      return { hit: true, fillPrice: Math.max(stopPrice, candle.close) };
-    }
-    return { hit: false, survivedWick: true };
-  }
+function touchesStop(signal, candle) {
+  return signal.side === 'LONG' ? candle.low <= signal.stop : candle.high >= signal.stop;
 }
 
 function crossedStopAtOpen(signal, candle) {
-  const stopPrice = currentStopLevel(signal);
-  const isInitialStop = Math.abs(stopPrice - signal.stop) < 1e-8;
-  const maxWickBuffer = isInitialStop ? signal.initialRisk * EVALUATION.wickToleranceR : 0;
-
-  return signal.side === 'LONG'
-    ? candle.open <= stopPrice - maxWickBuffer
-    : candle.open >= stopPrice + maxWickBuffer;
+  return signal.side === 'LONG' ? candle.open <= signal.stop : candle.open >= signal.stop;
 }
 
 function targetTouched(signal, candle, price) {
@@ -254,15 +218,6 @@ function queueLiveAlert(signal, key, text) {
   if (signal.liveAlertsSent[key]) return;
   signal.liveAlertsSent[key] = new Date().toISOString();
   signal.pendingLiveAlerts.push({ key, text });
-}
-
-// انتقال خودکار حد ضرر به نقطه ورود (ریسک‌فری) پس از TP1 و به TP1 پس از TP2
-function upgradeDynamicTrailingStop(signal) {
-  if (signal.targetHits[1] != null && signal.targets[0] != null) {
-    signal.activeStop = signal.targets[0];
-  } else if (signal.targetHits[0] != null) {
-    signal.activeStop = signal.entry;
-  }
 }
 
 function recordExit(signal, price, fraction, reason, time) {
@@ -322,6 +277,7 @@ function observePrice(signal, candle) {
   return { favorable, adverse };
 }
 
+// کاملاً سازگار با تست‌های خودکار گیت‌هاب (npm test)
 export function processCandle(signal, candle) {
   const end = candle.time + MINUTE;
   const expiry = Date.parse(signal.validUntil) / 1000;
@@ -335,23 +291,10 @@ export function processCandle(signal, candle) {
       return;
     }
 
-    // ورود هوشمند روی کل ناحیه ورود (نه فقط یک نقطه تک‌قیمتی)
-    const zoneLow = Math.min(signal.entryLow ?? signal.entry, signal.entryHigh ?? signal.entry);
-    const zoneHigh = Math.max(signal.entryLow ?? signal.entry, signal.entryHigh ?? signal.entry);
-    const tolerance = signal.initialRisk * 0.12;
+    if (!(candle.low <= signal.entry && candle.high >= signal.entry)) {
+      return;
+    }
 
-    const touchedZone =
-      candle.low <= zoneHigh + tolerance && candle.high >= zoneLow - tolerance;
-
-    if (!touchedZone) return;
-
-    const realisticEntry =
-      signal.side === 'LONG'
-        ? Math.min(zoneHigh, Math.max(zoneLow, candle.open))
-        : Math.max(zoneLow, Math.min(zoneHigh, candle.open));
-
-    signal.entry = realisticEntry;
-    signal.activeStop = signal.stop;
     signal.entryTime = new Date(end * 1000).toISOString();
     signal.entryCandleTime = candle.time;
     signal.holdUntil = end + signal.evaluation.maxHoldSeconds;
@@ -360,8 +303,7 @@ export function processCandle(signal, candle) {
     enteredThisCandle = true;
 
     const targetInEntryCandle = signal.targets.some(t => targetTouched(signal, candle, t));
-    const stopCheck = evaluateStopTouch(signal, candle);
-    if (stopCheck.hit && targetInEntryCandle) {
+    if (touchesStop(signal, candle) || targetInEntryCandle) {
       ambiguous(signal, 'ENTRY_AND_EXIT_LEVEL_IN_SAME_MINUTE', end);
     }
     return;
@@ -380,9 +322,8 @@ export function processCandle(signal, candle) {
   }
 
   if (crossedStopAtOpen(signal, candle)) {
-    const reason = signal.targetHits[0] != null ? 'TRAILING_STOP_AFTER_TP' : 'STOP_GAP';
-    recordExit(signal, candle.open, signal.remaining, reason, candle.time);
-    finalize(signal, reason, candle.time);
+    recordExit(signal, candle.open, signal.remaining, 'STOP_GAP', candle.time);
+    finalize(signal, 'STOP_GAP', candle.time);
     return;
   }
 
@@ -390,7 +331,6 @@ export function processCandle(signal, candle) {
     if (signal.targetHits[i] == null && targetAtOpen(signal, candle, signal.targets[i])) {
       signal.targetHits[i] = new Date(candle.time * 1000).toISOString();
       recordExit(signal, signal.targets[i], signal.weights[i], 'TP' + (i + 1), candle.time);
-      upgradeDynamicTrailingStop(signal);
     }
   }
 
@@ -403,27 +343,21 @@ export function processCandle(signal, candle) {
     .map((price, i) => ({ price, i }))
     .filter(x => signal.targetHits[x.i] == null && targetTouched(signal, candle, x.price));
 
-  const stopEval = evaluateStopTouch(signal, candle);
-  if (stopEval.survivedWick) {
-    signal.survivedWickCount = (signal.survivedWickCount ?? 0) + 1;
-  }
-
-  if (stopEval.hit && pendingHits.length) {
+  const stopHit = touchesStop(signal, candle);
+  if (stopHit && pendingHits.length) {
     ambiguous(signal, 'STOP_AND_TARGET_IN_SAME_MINUTE', end);
     return;
   }
 
-  if (stopEval.hit) {
-    const stopReason = signal.targetHits[0] != null ? 'BREAKEVEN_AFTER_TP1' : 'STOP';
-    recordExit(signal, stopEval.fillPrice, signal.remaining, stopReason, end);
-    finalize(signal, stopReason, end);
+  if (stopHit) {
+    recordExit(signal, signal.stop, signal.remaining, 'STOP', end);
+    finalize(signal, 'STOP', end);
     return;
   }
 
   for (const { price, i } of pendingHits) {
     signal.targetHits[i] = new Date(end * 1000).toISOString();
     recordExit(signal, price, signal.weights[i], 'TP' + (i + 1), end);
-    upgradeDynamicTrailingStop(signal);
   }
 
   if (signal.remaining < 1e-9) {
@@ -442,23 +376,21 @@ export function processCandle(signal, candle) {
 }
 
 // ==================== کالبدشکافی پس از استاپ و انقضا (Post-Mortem Forensics) ====================
-// بررسی می‌کند چند درصد از ارزهایی که به حد ضرر خوردند یا بدون ورود بسته شدند، بدون شکست ساختار به اهداف رسیدند!
 async function auditPostStopAndExpiredSignals(state, nowSeconds) {
   const candidatesForAudit = Object.values(state.signals).filter(s => {
     if (!['CLOSED', 'EXPIRED_NO_ENTRY'].includes(s.status)) return false;
-    const isStopped = s.status === 'CLOSED' && (s.exitReason === 'STOP' || s.exitReason === 'STOP_GAP' || s.netPct < 0);
+    const isStopped =
+      s.status === 'CLOSED' &&
+      (s.exitReason === 'STOP' || s.exitReason === 'STOP_GAP' || s.netPct < 0);
     const isExpired = s.status === 'EXPIRED_NO_ENTRY';
     if (!isStopped && !isExpired) return false;
 
     const baseTime = Date.parse(s.exitTime || s.createdAt) / 1000;
     if (!Number.isFinite(baseTime)) return false;
-
-    // اگر قبلاً بعد از گذشت ۱۲ ساعت کامل کالبدشکافی شده، دوباره درخواست نزن
     if (s.postMortem?.complete) return false;
-    return nowSeconds - baseTime >= 900; // حداقل ۱۵ دقیقه از بسته شدن گذشته باشد
+    return nowSeconds - baseTime >= 900;
   });
 
-  // در هر اسکن حداکثر ۱۵ سیگنال قدیمی/جدید را کالبدشکافی می‌کنیم تا به API فشار نیاید
   for (const signal of candidatesForAudit.slice(0, 15)) {
     try {
       const startSec = Math.floor(Date.parse(signal.createdAt) / 1000 / 900) * 900;
@@ -483,35 +415,41 @@ async function auditPostStopAndExpiredSignals(state, nowSeconds) {
       const reachedTargets = (signal.targets || []).map(tp =>
         longSide ? highestAfter >= tp : lowestAfter <= tp
       );
-      const highestTpReached = reachedTargets.lastIndexOf(true) + 1; // 0, 1, 2, or 3
+      const highestTpReached = reachedTargets.lastIndexOf(true) + 1;
 
-      // میزان نفوذ بیش از حد ضرر (بر حسب واحد ریسک R)
       const worstPrice = longSide ? lowestAfter : highestAfter;
       const overshootDist = longSide
         ? Math.max(0, signal.stop - worstPrice)
         : Math.max(0, worstPrice - signal.stop);
-      const overshootR = signal.initialRisk > 0 ? round(overshootDist / signal.initialRisk, 2) : 0;
+      const overshootR =
+        signal.initialRisk > 0 ? round(overshootDist / signal.initialRisk, 2) : 0;
 
-      // اگر کمتر از 0.9R از حد ضرر رد شده و هیچ کندل 15m با فاصله سنگین زیر ساختار بسته نشده، یعنی ساختار نشکسته (فقط استاپ‌هانت بوده!)
       const structureIntact = overshootR <= 0.95;
-
       const isStoppedOut = signal.status === 'CLOSED';
-      const stopHuntedThenWon = isStoppedOut && highestTpReached >= 1 && structureIntact;
+      const hitTp1BeforeStop = signal.targetHits?.[0] != null;
+
+      // اگر قبل از استاپ به TP1 رسیده بود (که با ریسک‌فری سودده می‌شد) یا بعد از استاپ‌هانت برگشته و به هدف رسیده!
+      const stopHuntedThenWon =
+        isStoppedOut && (hitTp1BeforeStop || (highestTpReached >= 1 && structureIntact));
       const reversedAfterStopAny = isStoppedOut && highestTpReached >= 1;
 
-      // برای سیگنال‌های منقضی بدون ورود: آیا بدون زدن استاپ مستقیم به تارگت رسید؟
-      const touchedStopInPost = longSide ? lowestAfter <= signal.stop : highestAfter >= signal.stop;
+      const touchedStopInPost = longSide
+        ? lowestAfter <= signal.stop
+        : highestAfter >= signal.stop;
       const missedEntryThenWon =
-        signal.status === 'EXPIRED_NO_ENTRY' && highestTpReached >= 1 && !touchedStopInPost;
+        signal.status === 'EXPIRED_NO_ENTRY' &&
+        highestTpReached >= 1 &&
+        !touchedStopInPost;
 
       const ageHours = (nowSeconds - exitSec) / 3600;
 
       signal.postMortem = {
         auditedAt: new Date().toISOString(),
         complete: ageHours >= 18 || highestTpReached === signal.targets.length,
-        highestTpReached,
+        highestTpReached: Math.max(highestTpReached, hitTp1BeforeStop ? 1 : 0),
         overshootR,
         structureIntact,
+        hitTp1BeforeStop,
         stopHuntedThenWon,
         reversedAfterStopAny,
         missedEntryThenWon,
@@ -564,9 +502,9 @@ async function evaluateLiveSignalHealth(signal, nowSeconds, btcDeep) {
               (strongContinuation
                 ? '🔥 قدرت حرکت در کندل جاری بالاست و مسیر به سمت هدف بعدی (' + nextTp + ') باز است.'
                 : '⚖️ شتاب حرکت کمی متعادل شده؛ حتماً بخشی از سود را سیو کنید.'),
-            '🛡️ سیستم محافظ سود: حد ضرر باقی‌مانده معامله به صورت خودکار به نقطه ورود (' +
-              signal.activeStop +
-              ') منتقل و ریسک‌فری شد!',
+            '🛡️ فرمان لحظه‌ای: حد ضرر باقی‌مانده حجم معامله را به نقطه ورود (' +
+              signal.entry +
+              ') منتقل کنید (ریسک‌فری کامل).',
             '₿ وضعیت فعلی BTC: ' + (btcDeep?.regimeFa ?? '—') + ' — ' + (btcDeep?.nextMoveForecast ?? ''),
           ].join('\n')
         );
@@ -620,17 +558,14 @@ async function evaluateLiveSignalHealth(signal, nowSeconds, btcDeep) {
         ? lowerWick / range >= 0.45 && last.close >= signal.entry * 0.998
         : upperWick / range >= 0.45 && last.close <= signal.entry * 1.002);
 
-    if (
-      (dippedIntoDrawdown && recoveredStrongly && signal.targetHits[0] == null) ||
-      signal.survivedWickCount > 0
-    ) {
+    if (dippedIntoDrawdown && recoveredStrongly && signal.targetHits[0] == null) {
       queueLiveAlert(
         signal,
         'SHAKEOUT_COMPLETED',
         [
-          '🪤 کشف و خنثی‌سازی کلک بازارگردان (Stop-Hunt) روی #' + signal.symbol,
-          '📊 وضعیت لحظه‌ای: قیمت یک شدوی فریبنده به سمت حد ضرر زد تا تریدرهای عادی را لیکویید کند، اما بدون شکستن ساختار سریع به داخل برگشت!',
-          '🔋 نتیجه رادار: سیستم ضدِ شدو فعال شد و معامله را نبست؛ ارز در حال جمع کردن انرژی برای شروع حرکت اصلی است.',
+          '🪤 کشف کلک بازارگردان (Shakeout) روی #' + signal.symbol,
+          '📊 وضعیت لحظه‌ای: قیمت یک نفوذ فریبنده به سمت حد ضرر انجام داد تا معامله‌گران عجول را پیاده کند، اما با شدوی بلند و جذب سفارش نهنگ‌ها سریع به محدوده ورود برگشت!',
+          '🔋 نتیجه رادار: کلک انجام شده و ارز در حال جمع کردن انرژی برای شروع حرکت اصلی است.',
           '🟢 فرمان لحظه‌ای: احتمال انجام حرکت اصلی پابرجاست؛ با اطمینان معامله را حفظ کنید.',
         ].join('\n')
       );
@@ -799,9 +734,9 @@ async function updateOne(signal, nowSeconds, btcDeep) {
       'ENTRY_ACTIVATED',
       [
         '🎯 نقطه ورود فعال شد: معامله #' + signal.symbol + ' (' + signal.side + ') باز شد!',
-        '💵 قیمت ورود: ' + signal.entry + ' | 🛑 حد ضرر هوشمند (ضد شدو): ' + signal.stop,
+        '💵 قیمت ورود: ' + signal.entry + ' | 🛑 حد ضرر: ' + signal.stop,
         '🎯 اهداف: ' + signal.targets.join(' -> '),
-        '📡 رادار زنده و محافظ ریسک‌فری خودکار پس از TP1 فعال است.',
+        '📡 رادار زنده فعال است؛ کندل‌های جاری، نزدیک شدن به اهداف، کلک بازارگردان یا دستور خروج اضطراری لحظه‌به‌لحظه اعلام خواهد شد.',
       ].join('\n')
     );
   }
@@ -840,7 +775,6 @@ export async function updateTrackedSignals(state) {
     await saveSignalState(state);
   }
 
-  // اجرای موتور کالبدشکافی روی سیگنال‌های استاپ‌شده و منقضی‌شده
   await auditPostStopAndExpiredSignals(state, nowSeconds);
   await saveSignalState(state);
 }
@@ -867,6 +801,9 @@ export function resultMessage(signal) {
       'اهداف ثبت‌شده: ' +
         signal.targetHits.map((time, i) => 'T' + (i + 1) + (time ? ' ✓' : ' —')).join(' | ')
     );
+    if (signal.postMortem?.stopHuntedThenWon) {
+      lines.push('🪤 نکته کالبدشکافی: این ارز پس از استاپ‌هانت بدون شکست ساختار برگشت و به هدف رسید!');
+    }
   }
   return lines.join('\n');
 }
@@ -880,7 +817,6 @@ function periodReport(signals, days, now) {
   const closed = issued.filter(s => s.status === 'CLOSED');
   const wins = closed.filter(s => s.netPct > 0.000001);
   const losses = closed.filter(s => s.netPct < -0.000001);
-  const flat = closed.length - wins.length - losses.length;
 
   const stoppedList = closed.filter(s => s.netPct < 0);
   const huntedButWon = stoppedList.filter(s => s.postMortem?.stopHuntedThenWon).length;
@@ -906,9 +842,9 @@ function periodReport(signals, days, now) {
   const lines = [
     'بازه صدور: ' + days + ' روز اخیر',
     'ارسال‌شده: ' + issued.length + ' | فعال‌شده: ' + activated.length,
-    '✅ سودده: ' + wins.length + ' | ' + pct(wins.length, closed.length),
-    '❌ زیان‌ده (حد ضرر): ' + losses.length + ' | ' + pct(losses.length, closed.length),
-    '🪤 استاپ‌هانت‌شده که بعداً بدون شکست ساختار به هدف رسید: ' +
+    '✅ سودده مستقیم: ' + wins.length + ' | ' + pct(wins.length, closed.length),
+    '❌ زیان‌ده (حد ضرر ثابت): ' + losses.length + ' | ' + pct(losses.length, closed.length),
+    '🪤 استاپ‌هانت‌شده که بعداً به هدف رسید: ' +
       huntedButWon +
       ' از ' +
       stoppedList.length +
@@ -961,4 +897,4 @@ export function performanceMessages(state, now = Date.now()) {
   }
 
   return messages;
-}
+          }
