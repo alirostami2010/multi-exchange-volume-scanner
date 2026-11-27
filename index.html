@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ترمینال هوشمند شکارچی بازار | Gate.io AI Radar</title>
+  <title>ترمینال هوشمند و کالبدشکافی بازار | Gate.io VIP Radar</title>
   <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;600;700;800&display=swap" rel="stylesheet" />
   <style>
     :root {
@@ -19,13 +19,14 @@
       --short-bg: rgba(244, 63, 94, 0.13);
       --accent: #6366f1;
       --warn: #f59e0b;
-      --warn-bg: rgba(245, 158, 11, 0.14);
+      --warn-bg: rgba(245, 158, 11, 0.15);
+      --purple: #c084fc;
+      --purple-bg: rgba(192, 132, 252, 0.14);
     }
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Vazirmatn', sans-serif; }
     body { background: radial-gradient(circle at top right, #111827, var(--bg) 65%); color: var(--text); min-height: 100vh; padding: 14px; }
-    .container { max-width: 1400px; margin: 0 auto; }
+    .container { max-width: 1420px; margin: 0 auto; }
 
-    /* Header & BTC Banner */
     .header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 14px; background: var(--card); border: 1px solid var(--border); padding: 14px 20px; border-radius: 16px; margin-bottom: 14px; }
     .brand { display: flex; align-items: center; gap: 10px; }
     .pulse { width: 11px; height: 11px; background: var(--long); border-radius: 50%; box-shadow: 0 0 12px var(--long); animation: blink 1.8s infinite; }
@@ -41,46 +42,44 @@
     .btc-top { display: flex; flex-wrap: wrap; align-items: center; gap: 18px; font-size: 0.88rem; }
     .btc-forecast { width: 100%; background: rgba(255, 255, 255, 0.03); padding: 9px 14px; border-radius: 10px; font-size: 0.84rem; border-right: 3px solid var(--accent); color: #e2e8f0; }
 
-    /* Stats */
-    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 10px; margin-bottom: 14px; }
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(185px, 1fr)); gap: 10px; margin-bottom: 14px; }
     .stat-card { background: var(--card); border: 1px solid var(--border); padding: 12px 15px; border-radius: 13px; }
     .stat-label { font-size: 0.75rem; color: var(--muted); margin-bottom: 4px; }
-    .stat-num { font-size: 1.25rem; font-weight: 800; }
+    .stat-num { font-size: 1.18rem; font-weight: 800; }
+    .stat-sub { font-size: 0.72rem; color: var(--muted); margin-top: 3px; }
 
-    /* Controls & Tabs */
     .controls { display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; align-items: center; background: var(--card); border: 1px solid var(--border); padding: 12px 14px; border-radius: 14px; margin-bottom: 14px; }
     .tabs { display: flex; flex-wrap: wrap; gap: 6px; }
-    .tab { background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border); color: var(--muted); padding: 7px 13px; border-radius: 10px; cursor: pointer; font-size: 0.82rem; font-weight: 600; transition: 0.18s; }
+    .tab { background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border); color: var(--muted); padding: 7px 13px; border-radius: 10px; cursor: pointer; font-size: 0.81rem; font-weight: 600; transition: 0.18s; }
     .tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
     .right-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-    .search-box { background: rgba(0, 0, 0, 0.35); border: 1px solid var(--border); color: #fff; padding: 7px 12px; border-radius: 9px; min-width: 200px; font-size: 0.82rem; outline: none; }
+    .search-box { background: rgba(0, 0, 0, 0.35); border: 1px solid var(--border); color: #fff; padding: 7px 12px; border-radius: 9px; min-width: 190px; font-size: 0.82rem; outline: none; }
     .search-box:focus { border-color: var(--accent); }
 
-    /* Compact 1-Line List & Accordion */
     .list-container { display: flex; flex-direction: column; gap: 8px; }
     .sig-row { background: var(--card); border: 1px solid var(--border); border-radius: 13px; overflow: hidden; transition: 0.2s; }
     .sig-row.long { border-right: 4px solid var(--long); }
     .sig-row.short { border-right: 4px solid var(--short); }
     .sig-row.has-alert { border-color: rgba(245, 158, 11, 0.45); }
 
-    .sig-summary { display: grid; grid-template-columns: 155px 95px 115px 1.2fr 1.1fr 1.2fr 125px; align-items: center; gap: 10px; padding: 11px 15px; cursor: pointer; user-select: none; font-size: 0.84rem; transition: background 0.15s; }
+    .sig-summary { display: grid; grid-template-columns: 150px 92px 108px 1.15fr 1fr 1.45fr 120px; align-items: center; gap: 10px; padding: 11px 15px; cursor: pointer; user-select: none; font-size: 0.83rem; transition: background 0.15s; }
     .sig-summary:hover { background: var(--row-hover); }
 
-    .col-sym { font-weight: 800; font-size: 0.98rem; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
-    .badge { padding: 3px 8px; border-radius: 6px; font-size: 0.73rem; font-weight: 700; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+    .col-sym { font-weight: 800; font-size: 0.96rem; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+    .badge { padding: 3px 8px; border-radius: 6px; font-size: 0.72rem; font-weight: 700; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
     .badge.long { background: var(--long-bg); color: var(--long); }
     .badge.short { background: var(--short-bg); color: var(--short); }
     .badge.grade { background: var(--warn-bg); color: var(--warn); }
     .badge.setup { background: rgba(99, 102, 241, 0.15); color: #a5b4fc; }
     .badge.ok { background: var(--long-bg); color: var(--long); }
     .badge.cancel { background: rgba(148, 163, 184, 0.15); color: var(--muted); }
+    .badge.forensic { background: var(--purple-bg); color: var(--purple); border: 1px solid rgba(192, 132, 252, 0.35); }
 
     .mono { direction: ltr; display: inline-block; font-weight: 700; color: #e2e8f0; }
-    .muted-label { color: var(--muted); font-size: 0.74rem; margin-left: 4px; }
-    .toggle-btn { justify-self: end; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border); color: #cbd5e1; padding: 5px 10px; border-radius: 8px; font-size: 0.76rem; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
+    .muted-label { color: var(--muted); font-size: 0.73rem; margin-left: 4px; }
+    .toggle-btn { justify-self: end; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border); color: #cbd5e1; padding: 5px 10px; border-radius: 8px; font-size: 0.75rem; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
     .sig-row.open .toggle-btn { background: var(--accent); color: #fff; border-color: var(--accent); }
 
-    /* Accordion Details Body */
     .sig-details { display: none; padding: 16px; border-top: 1px solid var(--border); background: rgba(7, 10, 18, 0.65); }
     .sig-row.open .sig-details { display: block; }
 
@@ -94,15 +93,15 @@
     .tp-item small { display: block; font-size: 0.7rem; color: var(--muted); }
 
     .alert-box { background: var(--warn-bg); border: 1px solid rgba(245, 158, 11, 0.4); color: #fde68a; padding: 10px 12px; border-radius: 10px; margin-bottom: 12px; font-size: 0.82rem; white-space: pre-line; line-height: 1.65; }
+    .forensic-box { background: var(--purple-bg); border: 1px solid rgba(192, 132, 252, 0.4); color: #e9d5ff; padding: 10px 12px; border-radius: 10px; margin-bottom: 12px; font-size: 0.82rem; line-height: 1.65; }
 
-    /* Daily History Group */
     .day-group { margin-bottom: 18px; border: 1px solid var(--border); border-radius: 16px; overflow: hidden; background: rgba(11, 15, 25, 0.6); }
     .day-header { background: rgba(30, 41, 59, 0.65); padding: 12px 18px; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; border-bottom: 1px solid var(--border); }
-    .day-title { font-weight: 800; font-size: 0.96rem; color: #fff; display: flex; align-items: center; gap: 8px; }
-    .day-stats { display: flex; flex-wrap: wrap; gap: 10px; font-size: 0.8rem; }
+    .day-title { font-weight: 800; font-size: 0.95rem; color: #fff; display: flex; align-items: center; gap: 8px; }
+    .day-stats { display: flex; flex-wrap: wrap; gap: 8px; font-size: 0.78rem; }
     .day-body { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
 
-    .empty { text-align: center; padding: 45px 20px; color: var(--muted); background: var(--card); border-radius: 14px; border: 1px dashed var(--border); }
+    .empty { text-align: center; padding: 45px 20px; color: var(--muted); background: var(--card); border-radius: 14px; border: 1px dashed var(--border); line-height: 1.8; }
 
     @media (max-width: 980px) {
       .sig-summary { grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -115,7 +114,7 @@
     <header class="header">
       <div class="brand">
         <div class="pulse"></div>
-        <h1>ترمینال هوشمند شکارچی بازار (Gate.io VIP Radar)</h1>
+        <h1>ترمینال هوشمند و کالبدشکافی استاپ‌هانت (Gate.io VIP Radar)</h1>
       </div>
       <div class="meta-bar">
         <span id="lastUpdate">در حال همگام‌سازی...</span>
@@ -137,36 +136,42 @@
       <div class="stat-card">
         <div class="stat-label">📡 سیگنال‌های فعال (در جریان)</div>
         <div class="stat-num" id="statActive">0</div>
+        <div class="stat-sub">تا تعیین تکلیف خارج نمی‌شوند</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">🚨 دارای هشدار زنده رادار</div>
-        <div class="stat-num" id="statAlerts" style="color:var(--warn)">0</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">✅ به هدف رسیده (آرشیو)</div>
+        <div class="stat-label">✅ به هدف رسیده (سودده)</div>
         <div class="stat-num" id="statWins" style="color:var(--long)">0</div>
+        <div class="stat-sub" id="statWinPct">نرخ برد مستقیم: —</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">🛑 حد ضرر / خروج اضطراری</div>
+        <div class="stat-label">🛑 حد ضرر خورده (ثبت‌شده)</div>
         <div class="stat-num" id="statLosses" style="color:var(--short)">0</div>
+        <div class="stat-sub" id="statTrueAccuracy">دقت واقعی جهت تحلیل: —</div>
       </div>
-      <div class="stat-card">
-        <div class="stat-label">🚫 کنسل / منقضی بدون ورود</div>
-        <div class="stat-num" id="statCanceled" style="color:var(--muted)">0</div>
+      <div class="stat-card" style="border-color: rgba(192, 132, 252, 0.35);">
+        <div class="stat-label">🪤 قربانی استاپ‌هانت (سودده پس از استاپ)</div>
+        <div class="stat-num" id="statStopHunted" style="color:var(--purple)">0 (0%)</div>
+        <div class="stat-sub">بدون شکست ساختار برگشتند و هدف زدند!</div>
+      </div>
+      <div class="stat-card" style="border-color: rgba(245, 158, 11, 0.35);">
+        <div class="stat-label">🏃‍♂️ جامانده سودده (بدون ورود به هدف رسید)</div>
+        <div class="stat-num" id="statMissedWins" style="color:var(--warn)">0 (0%)</div>
+        <div class="stat-sub" id="statCanceledSub">از کل سیگنال‌های منقضی بدون ورود</div>
       </div>
     </section>
 
     <div class="controls">
       <div class="tabs">
-        <button class="tab active" onclick="setFilter('ACTIVE', this)">📡 سیگنال‌های فعال (تا تعیین تکلیف)</button>
-        <button class="tab" onclick="setFilter('DAILY_HISTORY', this)">📅 نتایج روزانه (تعیین‌تکلیف‌شده)</button>
+        <button class="tab active" onclick="setFilter('ACTIVE', this)">📡 سیگنال‌های فعال</button>
+        <button class="tab" onclick="setFilter('DAILY_HISTORY', this)">📅 نتایج روزانه (آرشیو)</button>
+        <button class="tab" onclick="setFilter('FORENSIC_HUNTED', this)">🔬 کالبدشکافی (استاپ‌هانت / جامانده)</button>
         <button class="tab" onclick="setFilter('RADAR_ALERTS', this)">🚨 هشدارهای فوری رادار</button>
         <button class="tab" onclick="setFilter('GRADE_A_PLUS', this)">⭐ فقط درجه A+</button>
         <button class="tab" onclick="setFilter('NEAR_MISS', this)">👀 در آستانه سیگنال</button>
       </div>
 
       <div class="right-tools">
-        <button class="btn btn-ghost" onclick="expandAll()">📂 باز کردن جزئیات همه</button>
+        <button class="btn btn-ghost" onclick="expandAll()">📂 باز کردن همه</button>
         <button class="btn btn-ghost" onclick="collapseAll()">📁 بستن همه (تک‌خطی)</button>
         <input type="text" id="searchInput" class="search-box" placeholder="🔍 نام ارز (مثلاً SSV)..." oninput="renderView()" />
       </div>
@@ -176,7 +181,7 @@
   </div>
 
   <script>
-    const STORAGE_KEY = 'GATE_VIP_PERSISTENT_SIGNALS_V1';
+    const STORAGE_KEY = 'GATE_VIP_PERSISTENT_SIGNALS_V2';
     let latestScan = null;
     let signalState = null;
     let currentFilter = 'ACTIVE';
@@ -254,12 +259,10 @@
       }
     }
 
-    // ادغام هوشمند: هیچ سیگنالی تا تعیین تکلیف نهایی حذف نمی‌شود
     function buildUnifiedSignalList() {
       const cache = loadLocalCache();
       const now = Date.now();
 
-      // ۱. دریافت سیگنال‌های ثبت‌شده در بک‌اند (signal-state.json)
       if (signalState?.signals) {
         for (const s of Object.values(signalState.signals)) {
           const key = s.id || (s.symbol + '_' + s.side + '_' + s.triggerCandleTime);
@@ -277,6 +280,7 @@
             entry: s.entry,
             currentPrice: s.lastCheckedPrice ?? cache[key]?.currentPrice ?? s.entry,
             stopLoss: s.stop,
+            activeStop: s.activeStop ?? s.stop,
             targets: s.targets ?? [],
             targetHits: s.targetHits ?? [null, null, null],
             createdAt: s.sentAt || s.createdAt || cache[key]?.createdAt,
@@ -286,6 +290,9 @@
             netPct: s.netPct,
             netR: s.netR,
             exitReason: s.exitReason,
+            beyondFinalTargetPct: s.beyondFinalTargetPct ?? 0,
+            observationMfePct: s.observationMfePct ?? 0,
+            postMortem: s.postMortem ?? cache[key]?.postMortem ?? null,
             liveInsight: s.liveInsight ?? cache[key]?.liveInsight ?? null,
             historyBehavior: s.historyBehavior ?? cache[key]?.historyBehavior ?? null,
             reasons: s.reasons?.length ? s.reasons : (cache[key]?.reasons ?? []),
@@ -295,7 +302,6 @@
         }
       }
 
-      // ۲. دریافت سیگنال‌های اسکن جاری (latest-scan.json) و حفظ آن‌ها تا تعیین تکلیف
       if (latestScan?.rankedCandidates) {
         for (const c of latestScan.rankedCandidates) {
           const existingActive = Object.values(cache).find(
@@ -334,23 +340,30 @@
         }
       }
 
-      // ۳. بررسی خودکار سیگنال‌های کش‌شده که زمان ورودشان منقضی شده و در بک‌اند ثبت نشده‌اند
-      for (const item of Object.values(cache)) {
-        if (!FINAL_STATUSES.includes(item.status)) {
-          const exp = Date.parse(item.validUntil);
-          if (item.status === 'PENDING_ENTRY' && Number.isFinite(exp) && now > exp + 120000 && !item.entryTime) {
-            item.status = 'EXPIRED_NO_ENTRY';
-            item.exitTime = item.validUntil;
-            item.exitReason = 'EXPIRED_NO_ENTRY';
-          }
-        }
-      }
-
       saveLocalCache(cache);
 
       return Object.values(cache).sort(
         (a, b) => Date.parse(b.exitTime || b.createdAt || 0) - Date.parse(a.exitTime || a.createdAt || 0)
       );
+    }
+
+    // تشخیص استاپ‌هانت حتی از روی دیتای پایش ۴۸ ساعته قبلی (observationMfePct) یا postMortem جدید
+    function isStopHuntedWinner(item) {
+      if (item.status !== 'CLOSED' || !(Number(item.netPct) < 0)) return false;
+      if (item.postMortem?.stopHuntedThenWon) return true;
+
+      // اگر از نسخه‌های قبلی باشد که observationMfePct را ثبت کرده‌اند، بررسی می‌کنیم آیا بعد از استاپ به TP1 رسیده است
+      const tp1 = item.targets?.[0];
+      if (tp1 && item.entry > 0 && Number.isFinite(item.observationMfePct)) {
+        const tp1PctNeeded = Math.abs((tp1 - item.entry) / item.entry) * 100;
+        if (item.observationMfePct >= tp1PctNeeded * 0.98) return true;
+      }
+      return false;
+    }
+
+    function isMissedWinner(item) {
+      if (item.status !== 'EXPIRED_NO_ENTRY' && item.exitReason !== 'EXPIRED_NO_ENTRY') return false;
+      return Boolean(item.postMortem?.missedEntryThenWon);
     }
 
     function getResolutionSummary(item) {
@@ -360,13 +373,24 @@
 
       const highestTp = hits.length > 0 ? hits.join(' ، ') : 'بدون هدف';
       const duration = formatDuration(item.entryTime || item.createdAt, item.exitTime);
+      const pm = item.postMortem;
 
       if (item.status === 'EXPIRED_NO_ENTRY' || item.exitReason === 'EXPIRED_NO_ENTRY') {
+        if (isMissedWinner(item)) {
+          return {
+            isFinal: true,
+            outcomeType: 'CANCELED_WON',
+            badgeHtml: `<span class="badge forensic">🏃‍♂️ بدون ورود به TP${pm.highestTpReached} رسید!</span>`,
+            detailText: `سفارش ورود فعال نشد (منقضی پس از ${duration})، اما تحلیل درست بود و قیمت بدون زدن حد ضرر مستقیماً تا هدف ${pm.highestTpReached} پیش رفت!`,
+            duration,
+            highestTp: 'TP' + pm.highestTpReached + ' (پس از انقضا)',
+          };
+        }
         return {
           isFinal: true,
           outcomeType: 'CANCELED',
           badgeHtml: '<span class="badge cancel">🚫 کنسل (منقضی بدون ورود)</span>',
-          detailText: `قیمت در مهلت تعیین‌شده وارد محدوده ورود نشد و سیگنال پس از ${duration} لغو گردید.`,
+          detailText: `قیمت در مهلت تعیین‌شده وارد محدوده ورود نشد و پس از ${duration} لغو گردید.`,
           duration,
           highestTp: '—',
         };
@@ -386,26 +410,31 @@
       if (item.status === 'CLOSED') {
         const net = Number(item.netPct ?? 0);
         const sign = net >= 0 ? '+' : '';
-        if (item.exitReason === 'ALL_TARGETS') {
+
+        if (item.exitReason === 'ALL_TARGETS' || (net > 0 && hits.length > 0)) {
           return {
             isFinal: true,
             outcomeType: 'WIN',
-            badgeHtml: `<span class="badge ok">🚀 فول تارگت (${sign}${net.toFixed(2)}%)</span>`,
-            detailText: `تمام اهداف (${highestTp}) با موفقیت طی مدت ${duration} زده شد!`,
+            badgeHtml: `<span class="badge ok">✅ سودده (${hits.length ? highestTp : 'TP'} | ${sign}${net.toFixed(2)}%)</span>`,
+            detailText: `رسیدن به ${highestTp} و بسته شدن با سود طی مدت ${duration}`,
             duration,
             highestTp,
           };
         }
-        if (hits.length > 0 && net >= 0) {
+
+        if (isStopHuntedWinner(item)) {
+          const reachedLabel = pm?.highestTpReached ? 'TP' + pm.highestTpReached : 'اهداف تعیین‌شده';
+          const overR = pm?.overshootR != null ? ` (نفوذ از استاپ: ${pm.overshootR}R)` : '';
           return {
             isFinal: true,
-            outcomeType: 'WIN',
-            badgeHtml: `<span class="badge ok">✅ سودده (${highestTp} | ${sign}${net.toFixed(2)}%)</span>`,
-            detailText: `رسیدن به ${highestTp} و بسته شدن معامله پس از ${duration}`,
+            outcomeType: 'STOP_HUNTED_WIN',
+            badgeHtml: `<span class="badge forensic">🪤 استاپ‌هانت شد ولی به ${reachedLabel} رسید!</span>`,
+            detailText: `قیمت پس از ${duration} با یک نفوذ کوتاه به حد ضرر خورد${overR}، اما ساختار اصلی نشکست و دقیقاً در جهت تحلیل حرکت کرد و به ${reachedLabel} رسید!`,
             duration,
-            highestTp,
+            highestTp: reachedLabel + ' (پس از استاپ‌هانت)',
           };
         }
+
         return {
           isFinal: true,
           outcomeType: 'LOSS',
@@ -416,7 +445,6 @@
         };
       }
 
-      // هنوز فعال است
       const activeDuration = formatDuration(item.createdAt, null);
       if (item.status === 'OPEN') {
         return {
@@ -441,11 +469,8 @@
 
     function toggleRow(uid, event) {
       if (event) event.stopPropagation();
-      if (expandedIds.has(uid)) {
-        expandedIds.delete(uid);
-      } else {
-        expandedIds.add(uid);
-      }
+      if (expandedIds.has(uid)) expandedIds.delete(uid);
+      else expandedIds.add(uid);
       const el = document.getElementById('row_' + uid);
       if (el) el.classList.toggle('open');
     }
@@ -454,8 +479,7 @@
       expandAllMode = true;
       document.querySelectorAll('.sig-row').forEach(el => {
         el.classList.add('open');
-        const id = el.id.replace('row_', '');
-        expandedIds.add(id);
+        expandedIds.add(el.id.replace('row_', ''));
       });
     }
 
@@ -481,10 +505,10 @@
       const tp1 = item.targets?.[0];
       const ai = item.liveInsight;
       const hb = item.historyBehavior;
+      const isForensicCase = isStopHuntedWinner(item) || isMissedWinner(item);
 
       return `
         <div class="sig-row ${isLong ? 'long' : 'short'} ${hasAlert ? 'has-alert' : ''} ${isOpen ? 'open' : ''}" id="row_${item.uid}">
-          <!-- سطر تک‌خطی خلاصه -->
           <div class="sig-summary" onclick="toggleRow('${item.uid}', event)">
             <div class="col-sym">
               <span>#${item.symbol}</span>
@@ -507,7 +531,7 @@
             <div>
               <span class="muted-label">TP1:</span>
               <span class="mono">${fmtPrice(tp1)}</span>
-              <span style="font-size:0.75rem; color:var(--long)">(${fmtPct(item.side, item.entry, tp1)})</span>
+              <span style="font-size:0.74rem; color:var(--long)">(${fmtPct(item.side, item.entry, tp1)})</span>
             </div>
 
             <div>
@@ -520,8 +544,8 @@
             </button>
           </div>
 
-          <!-- بخش آبشاری جزئیات کامل -->
           <div class="sig-details">
+            ${isForensicCase ? `<div class="forensic-box">🔬 <strong>نتیجه کالبدشکافی پس از بسته شدن:</strong> ${res.detailText}</div>` : ''}
             ${latestAlert ? `<div class="alert-box">${latestAlert}</div>` : ''}
 
             <div class="details-grid">
@@ -531,7 +555,7 @@
                   <span>ستاپ: ${item.setup}</span>
                 </div>
                 <div>• <strong>محدوده ورود:</strong> <span class="mono">${fmtPrice(item.entryLow)}</span> تا <span class="mono">${fmtPrice(item.entryHigh)}</span></div>
-                <div>• <strong>حد ضرر (Stop Loss):</strong> <span class="mono" style="color:var(--short)">${fmtPrice(item.stopLoss)} (${fmtPct(item.side, item.entry, item.stopLoss)})</span></div>
+                <div>• <strong>حد ضرر اولیه:</strong> <span class="mono" style="color:var(--short)">${fmtPrice(item.stopLoss)} (${fmtPct(item.side, item.entry, item.stopLoss)})</span></div>
                 <div>• <strong>وضعیت و زمان نتیجه:</strong> ${res.detailText}</div>
 
                 <div class="tp-grid">
@@ -553,11 +577,11 @@
                 ${item.reasons?.length ? `<div>• <strong>چرایی سیگنال:</strong> ${item.reasons.join(' • ')}</div>` : ''}
                 ${ai?.manipulationStatus ? `<div>• <strong>بررسی کلک بازارگردان:</strong> ${ai.manipulationStatus}</div>` : ''}
                 ${ai?.entryInstruction ? `<div>• <strong>فرمان رادار:</strong> ${ai.entryInstruction}</div>` : ''}
-                ${hb ? `<div>• <strong>رفتار نسبت به BTC:</strong> مقاومت در ریزش ${hb.resiliencePct}% | شتاب در صعود ${hb.beta}x | ${hb.whenBtcNeutral || ''}</div>` : ''}
+                ${hb ? `<div>• <strong>رفتار نسبت به BTC:</strong> مقاومت در ریزش ${hb.resiliencePct}% | شتاب در صعود ${hb.beta}x</div>` : ''}
 
                 <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
-                  <a class="btn" target="_blank" href="https://www.gate.io/futures/USDT/${item.symbol}">📊 باز کردن چارت Gate.io</a>
-                  <a class="btn btn-ghost" target="_blank" href="https://www.tradingview.com/chart/?symbol=GATEIO:${item.symbol.replace('_', '')}.P">📈 چارت TradingView</a>
+                  <a class="btn" target="_blank" href="https://www.gate.io/futures/USDT/${item.symbol}">📊 چارت Gate.io</a>
+                  <a class="btn btn-ghost" target="_blank" href="https://www.tradingview.com/chart/?symbol=GATEIO:${item.symbol.replace('_', '')}.P">📈 TradingView</a>
                 </div>
               </div>
             </div>
@@ -574,22 +598,33 @@
       const activeList = all.filter(s => !FINAL_STATUSES.includes(s.status));
       const resolvedList = all.filter(s => FINAL_STATUSES.includes(s.status));
 
-      // بروزرسانی کارت‌های آمار بالا
-      document.getElementById('statActive').textContent = activeList.length;
-      document.getElementById('statAlerts').textContent = activeList.filter(
-        s => Object.keys(s.liveAlertsSent || {}).length > 0
-      ).length;
-      document.getElementById('statWins').textContent = resolvedList.filter(
-        s => s.status === 'CLOSED' && Number(s.netPct) > 0
-      ).length;
-      document.getElementById('statLosses').textContent = resolvedList.filter(
-        s => s.status === 'CLOSED' && Number(s.netPct) < 0
-      ).length;
-      document.getElementById('statCanceled').textContent = resolvedList.filter(
-        s => s.status === 'EXPIRED_NO_ENTRY' || s.exitReason === 'EXPIRED_NO_ENTRY'
-      ).length;
+      const wins = resolvedList.filter(s => s.status === 'CLOSED' && Number(s.netPct) > 0);
+      const losses = resolvedList.filter(s => s.status === 'CLOSED' && Number(s.netPct) < 0);
+      const canceled = resolvedList.filter(s => s.status === 'EXPIRED_NO_ENTRY' || s.exitReason === 'EXPIRED_NO_ENTRY');
 
-      // تب در آستانه سیگنال
+      const huntedWinners = losses.filter(isStopHuntedWinner);
+      const missedWinners = canceled.filter(isMissedWinner);
+
+      const closedTotal = wins.length + losses.length;
+      const rawWinRate = closedTotal > 0 ? Math.round((wins.length / closedTotal) * 100) : 0;
+      const trueDirectionAccuracy = closedTotal > 0
+        ? Math.round(((wins.length + huntedWinners.length) / closedTotal) * 100)
+        : 0;
+      const huntedPct = losses.length > 0 ? Math.round((huntedWinners.length / losses.length) * 100) : 0;
+      const missedPct = canceled.length > 0 ? Math.round((missedWinners.length / canceled.length) * 100) : 0;
+
+      document.getElementById('statActive').textContent = activeList.length;
+      document.getElementById('statWins').textContent = wins.length;
+      document.getElementById('statWinPct').textContent = closedTotal > 0
+        ? `نرخ برد مستقیم: ${rawWinRate}% (از ${closedTotal} معامله)`
+        : 'در حال ثبت';
+      document.getElementById('statLosses').textContent = losses.length;
+      document.getElementById('statTrueAccuracy').textContent = closedTotal > 0
+        ? `دقت واقعی جهت (با احتساب استاپ‌هانت): ${trueDirectionAccuracy}%`
+        : '—';
+      document.getElementById('statStopHunted').textContent = `${huntedWinners.length} از ${losses.length} (${huntedPct}%)`;
+      document.getElementById('statMissedWins').textContent = `${missedWinners.length} از ${canceled.length} (${missedPct}%)`;
+
       if (currentFilter === 'NEAR_MISS') {
         const misses = (latestScan?.nearMisses || []).filter(m => !query || m.symbol.includes(query));
         if (!misses.length) {
@@ -602,7 +637,7 @@
               <div class="col-sym">#${m.symbol}</div>
               <div><span class="badge ${m.side === 'LONG' ? 'long' : 'short'}">${m.side}</span></div>
               <div><span class="badge grade">امتیاز ${m.score} از ${m.required}</span></div>
-              <div style="grid-column: span 3; color:var(--muted);">فقط ${m.required - m.score} امتیاز تا صدور سیگنال فاصله دارد (آماده جهش)</div>
+              <div style="grid-column: span 3; color:var(--muted);">فقط ${m.required - m.score} امتیاز تا صدور سیگنال فاصله دارد</div>
               <a class="btn" target="_blank" href="https://www.gate.io/futures/USDT/${m.symbol}">📈 چارت</a>
             </div>
           </div>
@@ -610,15 +645,25 @@
         return;
       }
 
-      // تب نتایج دسته‌بندی‌شده روزانه
+      if (currentFilter === 'FORENSIC_HUNTED') {
+        const forensicList = resolvedList.filter(
+          s => (!query || s.symbol.toUpperCase().includes(query)) && (isStopHuntedWinner(s) || isMissedWinner(s))
+        );
+        if (!forensicList.length) {
+          container.innerHTML = '<div class="empty">در حال حاضر موردی در لیست «استاپ‌هانت‌شده یا جامانده‌ی سودده» یافت نشد (در اولین اجرای اسکن جدید، تمام سیگنال‌های بسته شده قبلی کالبدشکافی می‌شوند).</div>';
+          return;
+        }
+        container.innerHTML = `<div class="list-container">${forensicList.map(renderSignalRowHtml).join('')}</div>`;
+        return;
+      }
+
       if (currentFilter === 'DAILY_HISTORY') {
         const filteredResolved = resolvedList.filter(s => !query || s.symbol.toUpperCase().includes(query));
         if (!filteredResolved.length) {
-          container.innerHTML = '<div class="empty">هنوز سیگنالی به پایان کار (هدف، حد ضرر یا انقضا) نرسیده است. تا زمانی که تکلیف سیگنال‌ها مشخص نشود، در تب «سیگنال‌های فعال» باقی می‌مانند.</div>';
+          container.innerHTML = '<div class="empty">هنوز سیگنالی تعیین تکلیف نشده است.</div>';
           return;
         }
 
-        // گروه‌بندی بر اساس روز (YYYY-MM-DD)
         const groups = new Map();
         for (const item of filteredResolved) {
           const dateKey = (item.exitTime || item.createdAt || new Date().toISOString()).slice(0, 10);
@@ -628,9 +673,10 @@
 
         let html = '';
         for (const [dateKey, items] of groups.entries()) {
-          const wins = items.filter(x => x.status === 'CLOSED' && Number(x.netPct) > 0).length;
-          const losses = items.filter(x => x.status === 'CLOSED' && Number(x.netPct) < 0).length;
-          const canceled = items.filter(x => x.status === 'EXPIRED_NO_ENTRY' || x.exitReason === 'EXPIRED_NO_ENTRY').length;
+          const dWins = items.filter(x => x.status === 'CLOSED' && Number(x.netPct) > 0).length;
+          const dLosses = items.filter(x => x.status === 'CLOSED' && Number(x.netPct) < 0).length;
+          const dHunted = items.filter(isStopHuntedWinner).length;
+          const dCanceled = items.filter(x => x.status === 'EXPIRED_NO_ENTRY' || x.exitReason === 'EXPIRED_NO_ENTRY').length;
           const netSum = items
             .filter(x => x.status === 'CLOSED' && Number.isFinite(x.netPct))
             .reduce((s, x) => s + Number(x.netPct), 0);
@@ -642,10 +688,11 @@
                 <div class="day-title">📅 کارنامه روز: ${formatPersianDate(dateKey + 'T12:00:00Z')}</div>
                 <div class="day-stats">
                   <span class="badge setup">کل: ${items.length}</span>
-                  <span class="badge ok">✅ سودده: ${wins}</span>
-                  <span class="badge short">🛑 حد ضرر: ${losses}</span>
-                  <span class="badge cancel">🚫 کنسل/بدون ورود: ${canceled}</span>
-                  <span class="badge ${netSum >= 0 ? 'ok' : 'short'}">برآیند خالص روز: ${sign}${netSum.toFixed(2)}%</span>
+                  <span class="badge ok">✅ سودده: ${dWins}</span>
+                  <span class="badge short">🛑 حد ضرر: ${dLosses}</span>
+                  <span class="badge forensic">🪤 استاپ‌هانت‌شده‌ی سودده: ${dHunted}</span>
+                  <span class="badge cancel">🚫 بدون ورود: ${dCanceled}</span>
+                  <span class="badge ${netSum >= 0 ? 'ok' : 'short'}">برآیند ثبت‌شده: ${sign}${netSum.toFixed(2)}%</span>
                 </div>
               </div>
               <div class="day-body">
@@ -658,9 +705,7 @@
         return;
       }
 
-      // فیلترهای مربوط به سیگنال‌های فعال
       let list = activeList.filter(s => !query || s.symbol.toUpperCase().includes(query));
-
       if (currentFilter === 'RADAR_ALERTS') {
         list = list.filter(s => Object.keys(s.liveAlertsSent || {}).length > 0);
       } else if (currentFilter === 'GRADE_A_PLUS') {
@@ -668,7 +713,7 @@
       }
 
       if (!list.length) {
-        container.innerHTML = '<div class="empty">در حال حاضر سیگنال فعالی با این فیلتر وجود ندارد. به محض شکار موقعیت جدید در اسکن بعدی، اینجا نمایش داده می‌شود و تا تعیین تکلیف نهایی باقی می‌ماند.</div>';
+        container.innerHTML = '<div class="empty">در حال حاضر سیگنال فعالی با این فیلتر وجود ندارد.</div>';
         return;
       }
 
@@ -687,7 +732,7 @@
       const updatedTime = scanData?.updatedAt || stateData?.updatedAt;
       document.getElementById('lastUpdate').textContent = updatedTime
         ? 'آخرین همگام‌سازی: ' + formatDuration(updatedTime, null) + ' پیش'
-        : 'منتظر اولین اجرای اسکن';
+        : 'منتظر اجرای اسکن';
 
       if (scanData?.btcIntel) {
         const b = scanData.btcIntel;
