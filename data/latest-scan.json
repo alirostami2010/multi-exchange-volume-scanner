@@ -1,12 +1,12 @@
 {
-  "updatedAt": "2026-11-28T07:42:05.739Z",
+  "updatedAt": "2026-11-28T07:46:01.742Z",
   "strategyVersion": "gate-structural-ls-v8-sniper-pro",
   "marketRegime": "BEARISH",
   "btcIntel": {
     "regime": "BEARISH",
     "regimeFa": "نزولی (Bearish)",
     "rsi4h": 45.7,
-    "rsi15m": 43.3,
+    "rsi15m": 43.6,
     "adx4h": 16.4,
     "nextMoveForecast": "⚖️ روند کلی نزولی است اما شتاب ریزش کم شده و فاز رِنج محتمل است."
   },
@@ -19,26 +19,42 @@
     "candidates": 0,
     "longCandidates": 0,
     "shortCandidates": 0,
-    "durationMs": 16199,
+    "durationMs": 16180,
     "newSignalsSent": 0,
     "liveRadarUpdatesSent": 0,
     "trackedRecords": 429
   },
   "rankedCandidates": [],
-  "nearMisses": [],
+  "nearMisses": [
+    {
+      "symbol": "ONDO_USDT",
+      "side": "SHORT",
+      "score": 67,
+      "required": 76,
+      "scoreBreakdown": {
+        "trend": 22,
+        "setup": 18,
+        "trigger": 15,
+        "candleVolume": 8,
+        "liveFlow": 0,
+        "firstTargetRR": 4,
+        "squeezeBonus": 0,
+        "alphaBonus": 0
+      }
+    }
+  ],
   "filterStats": {
     "LONG": {
-      "COIN_4H_TREND": 35,
-      "BTC_OPPOSITE_NO_ALPHA": 26
+      "COIN_4H_TREND": 36,
+      "BTC_OPPOSITE_NO_ALPHA": 25
     },
     "SHORT": {
-      "NO_VALID_SETUP": 14,
+      "NO_VALID_SETUP": 13,
       "COIN_4H_TREND": 33,
-      "RSI_OVERSOLD": 7,
+      "RSI_OVERSOLD": 10,
       "STRONG_VS_BTC": 3,
-      "PRICE_CHASING": 2,
-      "PRICE_MOVED_AWAY": 1,
-      "FUNDING_CROWDED": 1
+      "FUNDING_CROWDED": 1,
+      "SCORE_LOW": 1
     },
     "GLOBAL": {
       "INSUFFICIENT_CANDLES": 1
