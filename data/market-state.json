@@ -2202905,6 +2202905,174 @@
       "scoreRaw": 77,
       "timestamp": "2026-11-28T02:05:19.582Z",
       "recordType": "SCANNER_CANDIDATE"
+    },
+    {
+      "symbol": "AAVE_USDT",
+      "contract": "AAVE_USDT",
+      "side": "SHORT",
+      "setup": "EarlyIgnition",
+      "isIntrabar": true,
+      "intrabarProgressPct": 52,
+      "strategyVersion": "gate-structural-ls-v8-sniper-pro",
+      "status": "SHORT_ENTRY",
+      "statusLabel": "SHORT EarlyIgnition",
+      "price": 94.98,
+      "entryLow": 94.94091677213471,
+      "entryHigh": 95.19712904369608,
+      "referenceEntry": 94.98,
+      "entry": {
+        "low": 94.94091677213471,
+        "high": 95.19712904369608,
+        "price": 94.98
+      },
+      "stopLoss": 96.35721000000001,
+      "stopLossPct": -1.45,
+      "tp1": 93.0664,
+      "tp2": 91.883652,
+      "tp3": 89.72,
+      "tp1Pct": 2.01,
+      "tp2Pct": 3.26,
+      "tp3Pct": 5.54,
+      "takeProfits": [
+        {
+          "level": 1,
+          "price": 93.0664,
+          "zoneLow": 93.0664,
+          "zoneHigh": 93.0664,
+          "source": "MAJOR_PIVOT",
+          "timeframes": [
+            "15m",
+            "4h"
+          ],
+          "touches": 2,
+          "pct": 2.01,
+          "rrNet": 1.13
+        },
+        {
+          "level": 2,
+          "price": 91.883652,
+          "zoneLow": 91.883652,
+          "zoneHigh": 91.883652,
+          "source": "MAJOR_PIVOT",
+          "timeframes": [
+            "4h"
+          ],
+          "touches": 2,
+          "pct": 3.26,
+          "rrNet": 1.89
+        },
+        {
+          "level": 3,
+          "price": 89.72,
+          "zoneLow": 89.72,
+          "zoneHigh": 89.72,
+          "source": "STRUCTURAL_R",
+          "timeframes": [
+            "4h"
+          ],
+          "touches": 1,
+          "pct": 5.54,
+          "rrNet": 3.29
+        }
+      ],
+      "targetCount": 3,
+      "riskRewardToTp1": 1.13,
+      "riskRewardToTp2": 1.89,
+      "rr": 1.89,
+      "rsi15": 42.9,
+      "rsi4h": 49.3,
+      "adx4h": 12.6,
+      "volumeRatio15m": 2.37,
+      "fundingRate": 0.0001,
+      "isSqueezeFuel": false,
+      "change24h": -0.85,
+      "quoteVolume24h": 4023410,
+      "triggerCandleTime": "2026-11-28T02:15:00.000Z",
+      "analyzedAt": "2026-11-28T02:22:51.296Z",
+      "validUntil": "2026-11-28T04:00:00.000Z",
+      "riskNote": null,
+      "reasons": [
+        "آغاز حرکت انفجاری",
+        "💎 قدرت مستقل از BTC (آلفا -1.41%) + انفجار حجم از فشردگی",
+        "شتاب حجم 2.4x"
+      ],
+      "historyBehavior": {
+        "resiliencePct": 70,
+        "beta": 1.23,
+        "alpha4h": -1.41,
+        "whenBtcBullish": "اهرم 1.23x نسبت به صعود BTC",
+        "whenBtcBearish": "مقاومت 70% در برابر ریزش‌های گذشته BTC",
+        "whenBtcNeutral": "آلفای ۴ ساعته: -1.41% نسبت به BTC"
+      },
+      "btcIntel": {
+        "regime": "BEARISH",
+        "regimeFa": "نزولی (Bearish)",
+        "rsi4h": 44.7,
+        "rsi15m": 58.6,
+        "adx4h": 16.5,
+        "nextMoveForecast": "⚖️ روند کلی نزولی است اما شتاب ریزش کم شده و فاز رِنج محتمل است."
+      },
+      "score": 86,
+      "rankScore": 86,
+      "scoreBreakdown": {
+        "trend": 22,
+        "setup": 26,
+        "trigger": 17,
+        "candleVolume": 12,
+        "liveFlow": 0,
+        "firstTargetRR": 4,
+        "squeezeBonus": 0,
+        "alphaBonus": 5
+      },
+      "costAssumptions": {
+        "feeRatePerSide": 0.0006,
+        "slippageRatePerSide": 0.0003,
+        "fundingIncludedInRR": false
+      },
+      "grade": "A+",
+      "recent3m": {
+        "available": true,
+        "sampleComplete": true,
+        "sampleTruncated": false,
+        "tradesObserved": 0,
+        "buyNotional": 0,
+        "sellNotional": 0,
+        "buySharePct": null,
+        "sellSharePct": null,
+        "netDelta": 0,
+        "windowEnd": "2026-11-28T02:22:00.000Z"
+      },
+      "volume": {
+        "recent3m": {
+          "available": true,
+          "sampleComplete": true,
+          "sampleTruncated": false,
+          "tradesObserved": 0,
+          "buyNotional": 0,
+          "sellNotional": 0,
+          "buySharePct": null,
+          "sellSharePct": null,
+          "netDelta": 0,
+          "windowEnd": "2026-11-28T02:22:00.000Z"
+        }
+      },
+      "dataQuality": {
+        "recent3mComplete": true
+      },
+      "tradesObserved": 0,
+      "liveInsight": {
+        "confidencePct": 81,
+        "manipulationStatus": "🛡️ ساختار تایید شده؛ حد ضرر با فاصله امن از شدوهای بازارگردان تنظیم شد.",
+        "movePhase": "⚡ [شکار در کندل جاری] 🚀 آماده حرکت اصلی به سمت اهداف",
+        "entryInstruction": "🎯 دستور ورود: در ناحیه ورود وارد شوید؛ در ۶۵٪ مسیر تا TP1 معامله خودکار ریسک‌فری می‌شود.",
+        "targetProjection": "📊 هدف اول (TP1) برای قفل سود سریع بهینه‌سازی شده است؛ پس از TP1 حد ضرر روی نقطه ورود قفل می‌شود."
+      },
+      "lastCheckedPrice": 94.98,
+      "priceCheckedAt": "2026-11-28T02:23:05.512Z",
+      "rank": 1,
+      "scoreRaw": 86,
+      "timestamp": "2026-11-28T02:23:05.885Z",
+      "recordType": "SCANNER_CANDIDATE"
     }
   ],
   "summaries": {
@@ -2212514,11 +2212682,11 @@
       "lowestPrice": 94.94,
       "bestRank": 1,
       "bestScore": 86,
-      "observations": 10,
+      "observations": 11,
       "maxFavorableObservedPct": 0.14724442574674018,
-      "lastSeenAt": "2026-11-27T20:20:32.478Z",
-      "lastPrice": 95.02,
-      "lastScore": 78
+      "lastSeenAt": "2026-11-28T02:23:05.885Z",
+      "lastPrice": 94.98,
+      "lastScore": 86
     },
     "MU_USDT:SHORT": {
       "symbol": "MU_USDT",
@@ -2217105,9 +2217273,9 @@
     "AAVE_USDT:SHORT": {
       "symbol": "AAVE_USDT",
       "side": "SHORT",
-      "score": 78,
+      "score": 86,
       "rank": 1,
-      "updatedAt": "2026-11-27T20:20:32.478Z"
+      "updatedAt": "2026-11-28T02:23:05.885Z"
     },
     "MU_USDT:SHORT": {
       "symbol": "MU_USDT",
@@ -2231523,10 +2231691,12 @@
     }
   },
   "scanMeta": {
-    "timestamp": "2026-11-28T02:19:48.722Z",
-    "candidateCount": 0,
-    "ranks": {}
+    "timestamp": "2026-11-28T02:23:05.885Z",
+    "candidateCount": 1,
+    "ranks": {
+      "AAVE_USDT:SHORT": 1
+    }
   },
-  "updatedAt": "2026-11-28T02:19:48.722Z",
+  "updatedAt": "2026-11-28T02:23:05.885Z",
   "schemaVersion": 2
 }
