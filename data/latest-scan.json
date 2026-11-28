@@ -1,12 +1,12 @@
 {
-  "updatedAt": "2026-11-28T06:20:21.661Z",
+  "updatedAt": "2026-11-28T06:24:21.977Z",
   "strategyVersion": "gate-structural-ls-v8-sniper-pro",
   "marketRegime": "BEARISH",
   "btcIntel": {
     "regime": "BEARISH",
     "regimeFa": "نزولی (Bearish)",
     "rsi4h": 45.7,
-    "rsi15m": 38.9,
+    "rsi15m": 41.2,
     "adx4h": 16.4,
     "nextMoveForecast": "⚖️ روند کلی نزولی است اما شتاب ریزش کم شده و فاز رِنج محتمل است."
   },
@@ -16,26 +16,192 @@
     "scanned": 57,
     "success": 57,
     "failed": 0,
-    "candidates": 0,
+    "candidates": 1,
     "longCandidates": 0,
-    "shortCandidates": 0,
-    "durationMs": 14959,
+    "shortCandidates": 1,
+    "durationMs": 15354,
     "newSignalsSent": 0,
     "liveRadarUpdatesSent": 0,
     "trackedRecords": 429
   },
-  "rankedCandidates": [],
+  "rankedCandidates": [
+    {
+      "symbol": "LISTA_USDT",
+      "contract": "LISTA_USDT",
+      "side": "SHORT",
+      "setup": "LiquiditySweep",
+      "isIntrabar": true,
+      "intrabarProgressPct": 61,
+      "strategyVersion": "gate-structural-ls-v8-sniper-pro",
+      "status": "SHORT_ENTRY",
+      "statusLabel": "SHORT LiquiditySweep",
+      "price": 0.08769,
+      "entryLow": 0.08757332487595909,
+      "entryHigh": 0.08814373659349242,
+      "referenceEntry": 0.08769,
+      "entry": {
+        "low": 0.08757332487595909,
+        "high": 0.08814373659349242,
+        "price": 0.08769
+      },
+      "stopLoss": 0.09043068294582643,
+      "stopLossPct": -3.13,
+      "tp1": 0.08430475110067441,
+      "tp2": 0.08024,
+      "tp3": 0.07708821461229962,
+      "tp1Pct": 3.86,
+      "tp2Pct": 8.5,
+      "tp3Pct": 12.09,
+      "takeProfits": [
+        {
+          "level": 1,
+          "price": 0.08430475110067441,
+          "zoneLow": 0.08430475110067441,
+          "zoneHigh": 0.08430475110067441,
+          "source": "MAJOR_PIVOT",
+          "timeframes": [
+            "15m",
+            "4h"
+          ],
+          "touches": 2,
+          "pct": 3.86,
+          "rrNet": 1.11
+        },
+        {
+          "level": 2,
+          "price": 0.08024,
+          "zoneLow": 0.08024,
+          "zoneHigh": 0.08024,
+          "source": "MAJOR_PIVOT",
+          "timeframes": [
+            "4h"
+          ],
+          "touches": 2,
+          "pct": 8.5,
+          "rrNet": 2.52
+        },
+        {
+          "level": 3,
+          "price": 0.07708821461229962,
+          "zoneLow": 0.07708821461229962,
+          "zoneHigh": 0.07708821461229962,
+          "source": "STRUCTURAL_R",
+          "timeframes": [
+            "4h"
+          ],
+          "touches": 1,
+          "pct": 12.09,
+          "rrNet": 3.6
+        }
+      ],
+      "targetCount": 3,
+      "riskRewardToTp1": 1.11,
+      "riskRewardToTp2": 2.52,
+      "rr": 2.52,
+      "rsi15": 51,
+      "rsi4h": 46.1,
+      "adx4h": 29.6,
+      "volumeRatio15m": 2.61,
+      "fundingRate": -0.0000696,
+      "isSqueezeFuel": false,
+      "change24h": -7.32,
+      "quoteVolume24h": 3153400,
+      "triggerCandleTime": "2026-11-28T06:15:00.000Z",
+      "analyzedAt": "2026-11-28T06:24:06.396Z",
+      "validUntil": "2026-11-28T08:00:00.000Z",
+      "riskNote": null,
+      "reasons": [
+        "شکار استاپ در سطح ماژور",
+        "جمع‌آوری نقدینگی (Stop Hunt) + شدو برگشتی نزولی",
+        "شتاب حجم 2.6x"
+      ],
+      "historyBehavior": {
+        "resiliencePct": 38,
+        "beta": 1.19,
+        "alpha4h": 1.52,
+        "whenBtcBullish": "اهرم 1.19x نسبت به صعود BTC",
+        "whenBtcBearish": "مقاومت 38% در برابر ریزش‌های گذشته BTC",
+        "whenBtcNeutral": "آلفای ۴ ساعته: 1.52% نسبت به BTC"
+      },
+      "btcIntel": {
+        "regime": "BEARISH",
+        "regimeFa": "نزولی (Bearish)",
+        "rsi4h": 45.7,
+        "rsi15m": 41.2,
+        "adx4h": 16.4,
+        "nextMoveForecast": "⚖️ روند کلی نزولی است اما شتاب ریزش کم شده و فاز رِنج محتمل است."
+      },
+      "score": 81,
+      "rankScore": 81,
+      "scoreBreakdown": {
+        "trend": 17,
+        "setup": 28,
+        "trigger": 20,
+        "candleVolume": 12,
+        "liveFlow": 0,
+        "firstTargetRR": 4,
+        "squeezeBonus": 0,
+        "alphaBonus": 0
+      },
+      "costAssumptions": {
+        "feeRatePerSide": 0.0006,
+        "slippageRatePerSide": 0.0003,
+        "fundingIncludedInRR": false
+      },
+      "grade": "A",
+      "recent3m": {
+        "available": true,
+        "sampleComplete": true,
+        "sampleTruncated": false,
+        "tradesObserved": 0,
+        "buyNotional": 0,
+        "sellNotional": 0,
+        "buySharePct": null,
+        "sellSharePct": null,
+        "netDelta": 0,
+        "windowEnd": "2026-11-28T06:24:00.000Z"
+      },
+      "volume": {
+        "recent3m": {
+          "available": true,
+          "sampleComplete": true,
+          "sampleTruncated": false,
+          "tradesObserved": 0,
+          "buyNotional": 0,
+          "sellNotional": 0,
+          "buySharePct": null,
+          "sellSharePct": null,
+          "netDelta": 0,
+          "windowEnd": "2026-11-28T06:24:00.000Z"
+        }
+      },
+      "dataQuality": {
+        "recent3mComplete": true
+      },
+      "tradesObserved": 0,
+      "liveInsight": {
+        "confidencePct": 76,
+        "manipulationStatus": "✅ کلک بازارگردان (Stop Hunt) انجام شده؛ حد ضرر پشت ساختار امن قرار گرفت.",
+        "movePhase": "⚡ [شکار در کندل جاری] 🚀 آماده حرکت اصلی به سمت اهداف",
+        "entryInstruction": "🎯 دستور ورود: در ناحیه ورود وارد شوید؛ در ۶۵٪ مسیر تا TP1 معامله خودکار ریسک‌فری می‌شود.",
+        "targetProjection": "📊 هدف اول (TP1) برای قفل سود سریع بهینه‌سازی شده است؛ پس از TP1 حد ضرر روی نقطه ورود قفل می‌شود."
+      },
+      "lastCheckedPrice": 0.08769,
+      "priceCheckedAt": "2026-11-28T06:24:20.622Z",
+      "rank": 1
+    }
+  ],
   "nearMisses": [],
   "filterStats": {
     "LONG": {
-      "BTC_15M_DUMPING_NOW": 56
+      "COIN_4H_TREND": 35,
+      "BTC_OPPOSITE_NO_ALPHA": 21
     },
     "SHORT": {
-      "NO_VALID_SETUP": 3,
+      "NO_VALID_SETUP": 4,
       "COIN_4H_TREND": 29,
       "RSI_OVERSOLD": 21,
-      "STRONG_VS_BTC": 2,
-      "PRICE_MOVED_AWAY": 1
+      "STRONG_VS_BTC": 2
     },
     "GLOBAL": {
       "INSUFFICIENT_CANDLES": 1
