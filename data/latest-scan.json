@@ -1,12 +1,12 @@
 {
-  "updatedAt": "2026-11-28T01:48:30.299Z",
+  "updatedAt": "2026-11-28T01:52:03.043Z",
   "strategyVersion": "gate-structural-ls-v8-sniper-pro",
   "marketRegime": "BEARISH",
   "btcIntel": {
     "regime": "BEARISH",
     "regimeFa": "نزولی (Bearish)",
     "rsi4h": 44.7,
-    "rsi15m": 60.3,
+    "rsi15m": 61.4,
     "adx4h": 16.5,
     "nextMoveForecast": "⚖️ روند کلی نزولی است اما شتاب ریزش کم شده و فاز رِنج محتمل است."
   },
@@ -16,181 +16,15 @@
     "scanned": 58,
     "success": 58,
     "failed": 0,
-    "candidates": 1,
+    "candidates": 0,
     "longCandidates": 0,
-    "shortCandidates": 1,
-    "durationMs": 15512,
+    "shortCandidates": 0,
+    "durationMs": 15193,
     "newSignalsSent": 0,
     "liveRadarUpdatesSent": 1,
     "trackedRecords": 426
   },
-  "rankedCandidates": [
-    {
-      "symbol": "UNI_USDT",
-      "contract": "UNI_USDT",
-      "side": "SHORT",
-      "setup": "LiquiditySweep",
-      "isIntrabar": false,
-      "intrabarProgressPct": 100,
-      "strategyVersion": "gate-structural-ls-v8-sniper-pro",
-      "status": "SHORT_ENTRY",
-      "statusLabel": "SHORT LiquiditySweep",
-      "price": 4.89,
-      "entryLow": 4.887644524386839,
-      "entryHigh": 4.899160182940071,
-      "referenceEntry": 4.89,
-      "entry": {
-        "low": 4.887644524386839,
-        "high": 4.899160182940071,
-        "price": 4.89
-      },
-      "stopLoss": 4.9609049999999995,
-      "stopLossPct": -1.45,
-      "tp1": 4.798920000000001,
-      "tp2": 4.737,
-      "tp3": 4.6455,
-      "tp1Pct": 1.86,
-      "tp2Pct": 3.13,
-      "tp3Pct": 5,
-      "takeProfits": [
-        {
-          "level": 1,
-          "price": 4.798920000000001,
-          "zoneLow": 4.798920000000001,
-          "zoneHigh": 4.798920000000001,
-          "source": "MAJOR_PIVOT",
-          "timeframes": [
-            "15m",
-            "4h"
-          ],
-          "touches": 2,
-          "pct": 1.86,
-          "rrNet": 1.03
-        },
-        {
-          "level": 2,
-          "price": 4.737,
-          "zoneLow": 4.737,
-          "zoneHigh": 4.737,
-          "source": "MAJOR_PIVOT",
-          "timeframes": [
-            "4h"
-          ],
-          "touches": 2,
-          "pct": 3.13,
-          "rrNet": 1.81
-        },
-        {
-          "level": 3,
-          "price": 4.6455,
-          "zoneLow": 4.6455,
-          "zoneHigh": 4.6455,
-          "source": "STRUCTURAL_R",
-          "timeframes": [
-            "4h"
-          ],
-          "touches": 1,
-          "pct": 5,
-          "rrNet": 2.96
-        }
-      ],
-      "targetCount": 3,
-      "riskRewardToTp1": 1.03,
-      "riskRewardToTp2": 1.81,
-      "rr": 1.81,
-      "rsi15": 66.9,
-      "rsi4h": 53.7,
-      "adx4h": 14.6,
-      "volumeRatio15m": 1.27,
-      "fundingRate": 0.0001,
-      "isSqueezeFuel": false,
-      "change24h": 4.49,
-      "quoteVolume24h": 24742195,
-      "triggerCandleTime": "2026-11-28T01:30:00.000Z",
-      "analyzedAt": "2026-11-28T01:48:14.482Z",
-      "validUntil": "2026-11-28T03:15:00.000Z",
-      "riskNote": null,
-      "reasons": [
-        "شکار استاپ در سطح ماژور",
-        "جمع‌آوری نقدینگی (Stop Hunt) + شدو برگشتی نزولی",
-        "شتاب حجم 1.3x"
-      ],
-      "historyBehavior": {
-        "resiliencePct": 67,
-        "beta": 1.62,
-        "alpha4h": 0.15,
-        "whenBtcBullish": "اهرم 1.62x نسبت به صعود BTC",
-        "whenBtcBearish": "مقاومت 67% در برابر ریزش‌های گذشته BTC",
-        "whenBtcNeutral": "آلفای ۴ ساعته: 0.15% نسبت به BTC"
-      },
-      "btcIntel": {
-        "regime": "BEARISH",
-        "regimeFa": "نزولی (Bearish)",
-        "rsi4h": 44.7,
-        "rsi15m": 60.3,
-        "adx4h": 16.5,
-        "nextMoveForecast": "⚖️ روند کلی نزولی است اما شتاب ریزش کم شده و فاز رِنج محتمل است."
-      },
-      "score": 77,
-      "rankScore": 77,
-      "scoreBreakdown": {
-        "trend": 22,
-        "setup": 28,
-        "trigger": 20,
-        "candleVolume": 3,
-        "liveFlow": 0,
-        "firstTargetRR": 4,
-        "squeezeBonus": 0,
-        "alphaBonus": 0
-      },
-      "costAssumptions": {
-        "feeRatePerSide": 0.0006,
-        "slippageRatePerSide": 0.0003,
-        "fundingIncludedInRR": false
-      },
-      "grade": "A",
-      "recent3m": {
-        "available": true,
-        "sampleComplete": false,
-        "sampleTruncated": true,
-        "tradesObserved": 0,
-        "buyNotional": 0,
-        "sellNotional": 0,
-        "buySharePct": null,
-        "sellSharePct": null,
-        "netDelta": 0,
-        "windowEnd": "2026-11-28T01:48:00.000Z"
-      },
-      "volume": {
-        "recent3m": {
-          "available": true,
-          "sampleComplete": false,
-          "sampleTruncated": true,
-          "tradesObserved": 0,
-          "buyNotional": 0,
-          "sellNotional": 0,
-          "buySharePct": null,
-          "sellSharePct": null,
-          "netDelta": 0,
-          "windowEnd": "2026-11-28T01:48:00.000Z"
-        }
-      },
-      "dataQuality": {
-        "recent3mComplete": false
-      },
-      "tradesObserved": 0,
-      "liveInsight": {
-        "confidencePct": 76,
-        "manipulationStatus": "✅ کلک بازارگردان (Stop Hunt) انجام شده؛ حد ضرر پشت ساختار امن قرار گرفت.",
-        "movePhase": "🔒 [کلوز ۱۵ دقیقه] 🚀 آماده حرکت اصلی به سمت اهداف",
-        "entryInstruction": "🎯 دستور ورود: در ناحیه ورود وارد شوید؛ در ۶۵٪ مسیر تا TP1 معامله خودکار ریسک‌فری می‌شود.",
-        "targetProjection": "📊 هدف اول (TP1) برای قفل سود سریع بهینه‌سازی شده است؛ پس از TP1 حد ضرر روی نقطه ورود قفل می‌شود."
-      },
-      "lastCheckedPrice": 4.888,
-      "priceCheckedAt": "2026-11-28T01:48:28.943Z",
-      "rank": 1
-    }
-  ],
+  "rankedCandidates": [],
   "nearMisses": [],
   "filterStats": {
     "LONG": {
@@ -198,13 +32,7 @@
       "BTC_OPPOSITE_NO_ALPHA": 20
     },
     "SHORT": {
-      "NO_VALID_SETUP": 20,
-      "BAD_RISK": 1,
-      "STRONG_VS_BTC": 2,
-      "COIN_4H_TREND": 28,
-      "RSI_OVERSOLD": 3,
-      "RESISTANCE_BROKEN": 1,
-      "PRICE_MOVED_AWAY": 1
+      "BTC_15M_PUMPING_NOW": 57
     },
     "GLOBAL": {
       "INSUFFICIENT_CANDLES": 1
